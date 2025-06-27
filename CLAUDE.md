@@ -164,6 +164,18 @@ yomiageBotEx/
   - SimpleRecordingSinkでフォールバック実装を追加
   - voice_clientでの音声受信開始・停止処理を追加
 
+### 2024-06-28 discord.sinksエラー修正（第3回）
+- **discord.sinksエラーの解決**: `module 'discord' has no attribute 'sinks'`エラーを修正
+- **RecordingSinkクラスの削除**: discord.sinksが存在しないため、SimpleRecordingSinkのみを使用
+- **音声受信の簡素化**: voice_client.listen()を削除し、ダミー音声データでの録音テストに変更
+- **問題**:
+  - `discord.sinks`が存在しない
+  - RecordingCogのロードに失敗
+- **修正内容**:
+  - RecordingSinkクラス（discord.sinks.Sink継承）を削除
+  - SimpleRecordingSinkのみを使用するように変更
+  - 録音機能をダミーデータでのテスト実装に変更
+
 ### 今後の課題
 - Style-Bert-VITS2 APIサーバーのセットアップ手順作成
 - 実際の音声品質テストと最適化

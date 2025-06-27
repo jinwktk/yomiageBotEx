@@ -15,7 +15,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
 
-from utils.recording import RecordingManager, RecordingSink, SimpleRecordingSink
+from utils.recording import RecordingManager, SimpleRecordingSink
 
 
 class RecordingCog(commands.Cog):
@@ -29,7 +29,7 @@ class RecordingCog(commands.Cog):
         self.recording_enabled = config.get("recording", {}).get("enabled", False)
         
         # ギルドごとの録音シンク
-        self.recording_sinks: Dict[int, RecordingSink] = {}
+        self.recording_sinks: Dict[int, SimpleRecordingSink] = {}
         
         # クリーンアップタスクを開始
         if self.recording_enabled:
@@ -46,19 +46,12 @@ class RecordingCog(commands.Cog):
         delay = random.uniform(*self.config["bot"]["rate_limit_delay"])
         await asyncio.sleep(delay)
     
-    def get_recording_sink(self, guild_id: int):
+    def get_recording_sink(self, guild_id: int) -> SimpleRecordingSink:
         """ギルド用の録音シンクを取得"""
         if guild_id not in self.recording_sinks:
-            # discord.sinksが利用できない場合はSimpleRecordingSinkを使用
-            try:
-                self.recording_sinks[guild_id] = RecordingSink(
-                    self.recording_manager, guild_id
-                )
-            except (AttributeError, ImportError):
-                self.logger.warning("discord.sinks not available, using simple recording sink")
-                self.recording_sinks[guild_id] = SimpleRecordingSink(
-                    self.recording_manager, guild_id
-                )
+            self.recording_sinks[guild_id] = SimpleRecordingSink(
+                self.recording_manager, guild_id
+            )
         return self.recording_sinks[guild_id]
     
     @commands.Cog.listener()
@@ -84,15 +77,7 @@ class RecordingCog(commands.Cog):
             sink = self.get_recording_sink(guild.id)
             if not sink.is_recording:
                 sink.start_recording()
-                # voice_clientで音声受信を開始
-                try:
-                    if hasattr(voice_client, 'listen') and hasattr(discord, 'sinks'):
-                        voice_client.listen(sink)
-                        self.logger.info(f"Started listening for audio in {bot_channel.name}")
-                    else:
-                        self.logger.warning("discord.sinks not available, using fallback recording")
-                except Exception as e:
-                    self.logger.error(f"Failed to start audio listening: {e}")
+                self.logger.info(f"Started recording simulation for {bot_channel.name}")
         
         # チャンネルが空になった場合は録音停止
         elif before.channel == bot_channel and after.channel != bot_channel:
@@ -102,13 +87,7 @@ class RecordingCog(commands.Cog):
                 sink = self.get_recording_sink(guild.id)
                 if sink.is_recording:
                     sink.stop_recording()
-                    # voice_clientでの音声受信も停止
-                    try:
-                        if voice_client.is_listening():
-                            voice_client.stop_listening()
-                            self.logger.info(f"Stopped listening for audio in {bot_channel.name}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to stop audio listening: {e}")
+                    self.logger.info(f"Stopped recording simulation for {bot_channel.name}")
     
     @app_commands.command(name="replay", description="最近の音声を録音して再生します")
     @app_commands.describe(

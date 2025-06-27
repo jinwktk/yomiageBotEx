@@ -284,39 +284,7 @@ class RecordingManager:
             logger.info(f"Cleared audio buffer for guild {guild_id}")
 
 
-# Discord音声受信用のシンク
-class RecordingSink(discord.sinks.Sink):
-    """Discord音声を受信するシンク"""
-    
-    def __init__(self, recording_manager: RecordingManager, guild_id: int):
-        super().__init__()
-        self.recording_manager = recording_manager
-        self.guild_id = guild_id
-        self.is_recording = False
-    
-    def write(self, data, user):
-        """音声データを受信（Discord.pyのSinkインターフェース）"""
-        if self.is_recording and data and not user.bot:
-            # 音声データをバッファに追加
-            self.recording_manager.add_audio_data(self.guild_id, data.file.read())
-    
-    def cleanup(self):
-        """クリーンアップ"""
-        self.is_recording = False
-        super().cleanup()
-    
-    def start_recording(self):
-        """録音開始"""
-        self.is_recording = True
-        logger.info(f"Started recording for guild {self.guild_id}")
-    
-    def stop_recording(self):
-        """録音停止"""
-        self.is_recording = False
-        logger.info(f"Stopped recording for guild {self.guild_id}")
-
-
-# 簡易音声受信クラス（discord.sinksが利用できない場合のフォールバック）
+# 簡易音声受信クラス（discord.sinksが利用できない場合のメイン実装）
 class SimpleRecordingSink:
     """シンプルな録音管理クラス"""
     
