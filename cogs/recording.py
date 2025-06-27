@@ -110,6 +110,23 @@ class RecordingCog(commands.Cog):
                 else:
                     self.logger.info(f"Recording: Not recording for {bot_channel.name}")
     
+    async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
+        """ボットがVCに参加した際、既にいるユーザーがいる場合の録音開始処理"""
+        try:
+            voice_client = guild.voice_client
+            if voice_client and voice_client.is_connected():
+                self.logger.info(f"Recording: Bot joined, starting recording for user {member.display_name}")
+                sink = self.get_recording_sink(guild.id)
+                if not sink.is_recording:
+                    sink.start_recording()
+                    self.logger.info(f"Recording: Started recording for {voice_client.channel.name}")
+                else:
+                    self.logger.info(f"Recording: Already recording for {voice_client.channel.name}")
+            else:
+                self.logger.warning(f"Recording: No voice client when trying to start recording for {member.display_name}")
+        except Exception as e:
+            self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
+    
     @app_commands.command(name="replay", description="最近の音声を録音して再生します")
     @app_commands.describe(
         duration="録音する時間（秒）。最大300秒まで",

@@ -188,6 +188,19 @@ yomiageBotEx/
   - on_voice_state_updateでの詳細な状態ログ
   - チャンネル変更の詳細な追跡ログ
 
+### 2024-06-28 タイミング問題修正（第5回）
+- **自動参加のタイミング問題を解決**: ユーザー参加→ボット接続の順序でTTS・録音が動作しない問題を修正
+- **ボット接続完了後の処理追加**: ボットがVCに接続した時点で既にいるユーザーに対する処理を実装
+- **Cog間連携の実装**: VoiceCogから他のCogに接続完了を通知する仕組みを追加
+- **問題**:
+  - ユーザーがVCに参加した時点ではボットが未接続（`Voice client connected: False`）
+  - ボット接続完了時に既存ユーザーに対する挨拶・録音が開始されない
+- **修正内容**:
+  - VoiceCog.notify_bot_joined_channel()メソッドを追加
+  - TTSCog.handle_bot_joined_with_user()メソッドを追加
+  - RecordingCog.handle_bot_joined_with_user()メソッドを追加
+  - セッション復元時にも同様の処理を実行
+
 ### 今後の課題
 - Style-Bert-VITS2 APIサーバーのセットアップ手順作成
 - 実際の音声品質テストと最適化

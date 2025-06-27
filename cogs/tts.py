@@ -134,6 +134,18 @@ class TTSCog(commands.Cog):
             self.logger.info(f"TTS: User {member.display_name} left bot channel {bot_channel.name}")
             await self.speak_greeting(voice_client, member.display_name, "leave")
     
+    async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
+        """ボットがVCに参加した際、既にいるユーザーに対する処理"""
+        try:
+            voice_client = guild.voice_client
+            if voice_client and voice_client.is_connected():
+                self.logger.info(f"TTS: Bot joined, greeting user {member.display_name}")
+                await self.speak_greeting(voice_client, member.display_name, "join")
+            else:
+                self.logger.warning(f"TTS: No voice client when trying to greet {member.display_name}")
+        except Exception as e:
+            self.logger.error(f"TTS: Failed to handle bot joined with user: {e}")
+    
     async def generate_and_play_tts(self, voice_client: discord.VoiceClient, text: str, **kwargs):
         """TTSを生成して再生（汎用メソッド）"""
         try:

@@ -97,6 +97,9 @@ class VoiceCog(commands.Cog):
                 await channel.connect(timeout=10.0, reconnect=True)
                 self.logger.info(f"Restored session: {channel.name} in {guild.name}")
                 
+                # セッション復元後に他のCogに通知
+                await self.notify_bot_joined_channel(guild, channel)
+                
             except Exception as e:
                 self.logger.error(f"Failed to restore session for guild {guild_id}: {e}")
         
@@ -138,6 +141,8 @@ class VoiceCog(commands.Cog):
                 await guild.voice_client.move_to(channel)
                 self.logger.info(f"Moved to voice channel: {channel.name} in {guild.name}")
                 self.save_sessions()
+                # 移動後に他のCogに通知
+                await self.notify_bot_joined_channel(guild, channel)
             except Exception as e:
                 self.logger.error(f"Failed to move to voice channel: {e}")
         else:
@@ -146,8 +151,35 @@ class VoiceCog(commands.Cog):
                 await channel.connect(timeout=10.0, reconnect=True)
                 self.logger.info(f"Auto-joined voice channel: {channel.name} in {guild.name}")
                 self.save_sessions()
+                # 接続後に他のCogに通知
+                await self.notify_bot_joined_channel(guild, channel)
             except Exception as e:
                 self.logger.error(f"Failed to auto-join voice channel: {e}")
+    
+    async def notify_bot_joined_channel(self, guild: discord.Guild, channel: discord.VoiceChannel):
+        """ボットがチャンネルに接続した際の他Cogへの通知"""
+        try:
+            # 少し待ってから処理（接続の安定化）
+            await asyncio.sleep(1)
+            
+            # チャンネルにいる全メンバーを取得（ボット以外）
+            members = [m for m in channel.members if not m.bot]
+            self.logger.info(f"Bot joined channel with {len(members)} members: {[m.display_name for m in members]}")
+            
+            # 各メンバーに対してTTSと録音の処理を開始
+            for member in members:
+                # TTSCogに挨拶を依頼
+                tts_cog = self.bot.get_cog("TTSCog")
+                if tts_cog:
+                    await tts_cog.handle_bot_joined_with_user(guild, member)
+                
+                # RecordingCogに録音開始を依頼
+                recording_cog = self.bot.get_cog("RecordingCog")
+                if recording_cog:
+                    await recording_cog.handle_bot_joined_with_user(guild, member)
+                    
+        except Exception as e:
+            self.logger.error(f"Failed to notify other cogs: {e}")
     
     async def handle_user_leave(self, guild: discord.Guild, channel: discord.VoiceChannel):
         """ユーザー退出時の処理"""
