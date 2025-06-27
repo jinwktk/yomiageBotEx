@@ -15,9 +15,9 @@ import numpy as np
 try:
     import opuslib
     OPUS_AVAILABLE = True
-except ImportError:
+except (ImportError, Exception) as e:
     OPUS_AVAILABLE = False
-    logging.warning("opuslib not available. Using fallback audio decoding.")
+    logging.warning(f"opuslib not available: {e}. Using fallback audio decoding.")
 
 logger = logging.getLogger(__name__)
 

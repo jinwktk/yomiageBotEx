@@ -171,6 +171,20 @@ uv run pytest
 - `.env`ファイルのトークンを確認してください
 - トークンの前後に余分なスペースがないか確認してください
 
+### Opus library エラー（Windows）
+録音機能でOpusエラーが出る場合：
+```
+Could not find Opus library. Make sure it is installed.
+```
+
+**解決方法**：
+1. Windowsの場合、Opusライブラリは自動的にフォールバックモードで動作します
+2. 完全な音声受信機能が必要な場合は、以下をインストール：
+   - [Opus公式サイト](https://opus-codec.org/downloads/)からWindows用DLLをダウンロード
+   - システムのPATHに追加するか、ボットのディレクトリに配置
+
+**注意**: Opusライブラリがなくても基本的な録音機能は動作しますが、音質が低下する可能性があります。
+
 ## 📄 ライセンス
 
 MIT License
