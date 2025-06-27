@@ -185,7 +185,7 @@ class TTSManager:
     async def generate_speech(
         self, 
         text: str, 
-        model_id: str = "default",
+        model_id: int = 0,
         speaker_id: int = 0,
         style: str = "Neutral"
     ) -> Optional[bytes]:
