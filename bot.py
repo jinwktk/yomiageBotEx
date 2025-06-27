@@ -17,12 +17,18 @@ from dotenv import load_dotenv
 
 from utils.logger import setup_logging, start_log_cleanup_task
 
-# 音声受信クライアントのインポート（フォールバック付き）
+# 音声受信クライアントのインポート（py-cord優先、フォールバック付き）
 try:
-    from utils.voice_receiver import EnhancedVoiceClient
+    from utils.real_audio_recorder import RealEnhancedVoiceClient as EnhancedVoiceClient
+    print("Using py-cord real audio recording")
 except Exception as e:
-    print(f"Warning: Could not import EnhancedVoiceClient: {e}, using simple recorder")
-    from utils.simple_recorder import SimpleEnhancedVoiceClient as EnhancedVoiceClient
+    print(f"Warning: Could not import RealEnhancedVoiceClient: {e}, trying fallback")
+    try:
+        from utils.voice_receiver import EnhancedVoiceClient
+        print("Using discord.py fallback audio simulation")
+    except Exception as e2:
+        print(f"Warning: Could not import EnhancedVoiceClient: {e2}, using simple recorder")
+        from utils.simple_recorder import SimpleEnhancedVoiceClient as EnhancedVoiceClient
 
 # 環境変数の読み込み
 load_dotenv()
