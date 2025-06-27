@@ -1,39 +1,39 @@
 @echo off
-rem yomiageBotEx 起動スクリプト (Windows)
+rem yomiageBotEx startup script (Windows)
 
-echo yomiageBotEx 起動中...
+echo yomiageBotEx starting...
 
-rem 最新コードを取得
-echo 最新コードを取得中...
+rem Get latest code
+echo Getting latest code...
 git pull
 if %errorlevel% neq 0 (
-    echo Git pullに失敗しました。手動で確認してください。
+    echo Git pull failed. Please check manually.
     pause
 )
 
-rem uvがインストールされているかチェック
+rem Check if uv is installed
 where uv >nul 2>nul
 if %errorlevel% neq 0 (
-    echo uvがインストールされていません。
-    echo インストール方法: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    echo uv is not installed.
+    echo Install command: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     pause
     exit /b 1
 )
 
-rem .envファイルの存在チェック
+rem Check .env file exists
 if not exist ".env" (
-    echo .envファイルが見つかりません。
-    echo DISCORD_TOKEN=your_token_here を記述した .env ファイルを作成してください。
+    echo .env file not found.
+    echo Please create .env file with DISCORD_TOKEN=your_token_here
     pause
     exit /b 1
 )
 
-rem 依存関係のインストール
-echo 依存関係をインストール中...
+rem Install dependencies
+echo Installing dependencies...
 uv sync --no-install-project
 
-rem ボットの起動
-echo ボットを起動します...
+rem Start bot
+echo Starting bot...
 uv run --no-project python bot.py
 
 pause
