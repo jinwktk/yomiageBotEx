@@ -56,9 +56,11 @@ def load_config():
 
 config = load_config()
 
-# Bot設定
+# Bot設定（開発用：特定ギルドで即座に同期）
 intents = discord.Intents.all()
-bot = discord.Bot(intents=intents, auto_sync_commands=True)
+# テスト用にギルドIDを指定（即座に同期される）
+DEBUG_GUILD_ID = 813783748566581249  # にめいやサーバー
+bot = discord.Bot(intents=intents, debug_guilds=[DEBUG_GUILD_ID])
 
 # グローバル変数
 connections: Dict[int, discord.VoiceClient] = {}
@@ -72,10 +74,14 @@ async def on_ready():
     logger.info(f"Connected to {len(bot.guilds)} guild(s)")
     logger.info("Using py-cord with discord.sinks.WaveSink")
     
-    # py-cordは自動でスラッシュコマンドを同期するため、手動同期は不要
-    slash_commands = [cmd for cmd in bot.commands if hasattr(cmd, 'name')]
-    logger.info(f"Registered commands: {[cmd.name for cmd in slash_commands]}")
-    logger.info("py-cord will auto-sync slash commands - no manual sync needed")
+    # py-cordのスラッシュコマンド確認（詳細ログ）
+    logger.info(f"Bot commands: {len(bot.commands)}")
+    for cmd in bot.commands:
+        logger.info(f"  Command: {cmd.name} (type: {type(cmd).__name__})")
+    
+    # debug_guildsを使用した場合、スラッシュコマンドは自動的に同期される
+    logger.info(f"Using debug_guilds: {bot.debug_guilds}")
+    logger.info("Slash commands should be immediately available in debug guilds")
     
     # ステータス設定
     await bot.change_presence(

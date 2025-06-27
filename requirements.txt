@@ -1,5 +1,5 @@
-# Discord
-discord.py>=2.3.0
+# Discord (py-cord for voice recording)
+py-cord[voice]>=2.4.0
 
 # TTS (Phase 3で使用)
 # style-bert-vits2

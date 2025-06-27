@@ -274,17 +274,21 @@ yomiageBotEx/
 
 ### 2024-06-27 py-cord スラッシュコマンド修正実施
 - **bot_simple.pyの修正完了**:
-  - `discord.Bot(intents=intents, auto_sync_commands=True)`でBot初期化
-  - on_readyでの手動`sync_commands()`呼び出しを削除
-  - py-cordの自動同期機能を利用するように変更
+  - `discord.Bot(intents=intents, debug_guilds=[DEBUG_GUILD_ID])`でBot初期化
+  - debug_guildsを使用して即座にスラッシュコマンド同期
+  - requirements.txtをdiscord.py → py-cord[voice]に修正
   - 音声接続に`timeout=15.0, reconnect=True`を追加
-- **修正理由**:
-  - py-cordでは手動同期が自動同期と競合する可能性
-  - "Synced 0 slash commands"の問題を解決
-  - 音声接続時の"list index out of range"エラー対策
+- **根本原因の発見**:
+  - pip listでpy-cordがインストールされていないことを確認
+  - pyproject.tomlとrequirements.txtの不一致
+  - py-cordが未インストールのためスラッシュコマンドが登録されない
+- **修正内容**:
+  - `pip install py-cord[voice]==2.6.1`でインストール必要
+  - debug_guilds設定で即座にコマンド同期（開発用）
+  - requirements.txt修正でライブラリ統一
 - **期待される改善**:
-  - スラッシュコマンド（/join, /leave, /replay）の正常同期
-  - Discord上での「不明な連携」エラー解消
+  - py-cordインストール後、スラッシュコマンドが即座に利用可能
+  - ギルド固有コマンドで同期遅延なし
   - 音声接続の安定性向上
 
 ### 今後の改善案
