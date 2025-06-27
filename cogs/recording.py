@@ -13,7 +13,6 @@ from typing import Dict, Any, Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord import FFmpegPCMAudio, PCMVolumeTransformer
 
 from utils.recording import RecordingManager, SimpleRecordingSink
 from utils.audio_sink import RealTimeAudioRecorder
@@ -152,16 +151,14 @@ class RecordingCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
     
-    @app_commands.command(name="replay", description="最近の音声を録音して再生します")
+    @app_commands.command(name="replay", description="最近の音声を録音してチャットに投稿します")
     @app_commands.describe(
-        duration="録音する時間（秒）。最大300秒まで",
-        volume="再生音量（0.1-2.0）"
+        duration="録音する時間（秒）。最大300秒まで"
     )
     async def replay_command(
         self, 
         interaction: discord.Interaction, 
-        duration: int = 30,
-        volume: float = 1.0
+        duration: int = 30
     ):
         """最近の音声を録音・再生するコマンド"""
         await self.rate_limit_delay()
@@ -187,13 +184,6 @@ class RecordingCog(commands.Cog):
         if duration > max_duration or duration < 1:
             await interaction.response.send_message(
                 f"❌ 録音時間は1〜{max_duration}秒で指定してください。",
-                ephemeral=True
-            )
-            return
-        
-        if volume < 0.1 or volume > 2.0:
-            await interaction.response.send_message(
-                "❌ 音量は0.1〜2.0で指定してください。",
                 ephemeral=True
             )
             return
@@ -225,24 +215,17 @@ class RecordingCog(commands.Cog):
                 )
                 return
             
-            # 音声を再生
-            voice_client = interaction.guild.voice_client
-            if voice_client.is_playing():
-                voice_client.stop()
-            
-            # FFmpegで音声ファイルを読み込み
-            audio_source = FFmpegPCMAudio(str(recording_path))
-            
-            # 音量調整
-            if volume != 1.0:
-                audio_source = PCMVolumeTransformer(audio_source, volume=volume)
-            
-            voice_client.play(audio_source)
-            
-            await interaction.followup.send(
-                f"🎵 録音を再生中... ({duration}秒, 音量: {volume:.1f})",
-                ephemeral=True
-            )
+            # 録音ファイルをチャットに投稿
+            with open(recording_path, "rb") as audio_file:
+                file = discord.File(
+                    audio_file,
+                    filename=f"recording_{recording_id[:8]}.wav"
+                )
+                
+                await interaction.followup.send(
+                    f"🎵 過去{duration}秒間の録音です",
+                    file=file
+                )
             
             self.logger.info(f"Replaying {duration}s audio for {interaction.user} in {interaction.guild.name}")
             
