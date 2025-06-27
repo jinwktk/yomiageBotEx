@@ -87,6 +87,7 @@ class YomiageBot(commands.Bot):
         """Cogを読み込む"""
         cogs = [
             "cogs.voice",
+            "cogs.tts",
         ]
         
         for cog in cogs:

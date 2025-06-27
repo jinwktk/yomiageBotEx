@@ -39,3 +39,6 @@ Thumbs.db
 # セッションファイル
 sessions.json
 recordings_buffer.pkl
+
+# TTSキャッシュ
+cache/

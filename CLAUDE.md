@@ -16,16 +16,20 @@ yomiageBotEx/
 ├── CLAUDE.md          # このファイル
 ├── cogs/              # Cogモジュール
 │   ├── __init__.py    # Cogパッケージ初期化
-│   └── voice.py       # ボイスチャンネル管理Cog
+│   ├── voice.py       # ボイスチャンネル管理Cog
+│   └── tts.py         # TTS機能Cog
 ├── utils/             # ユーティリティモジュール
 │   ├── __init__.py    # ユーティリティパッケージ初期化
-│   └── logger.py      # ロギング設定ユーティリティ
+│   ├── logger.py      # ロギング設定ユーティリティ
+│   └── tts.py         # TTS機能ユーティリティ
 ├── scripts/           # 起動スクリプト
 │   ├── start.sh       # Linux/macOS用起動スクリプト
 │   └── start.bat      # Windows用起動スクリプト
 ├── pyproject.toml     # uv用プロジェクト設定
 ├── .python-version    # Python バージョン指定
 ├── uv.lock           # uv依存関係ロックファイル
+├── cache/             # TTSキャッシュディレクトリ（自動生成）
+│   └── tts/          # TTS音声キャッシュ
 └── logs/              # ログディレクトリ（自動生成）
     └── yomiage.log    # ボットのログ
 ```
@@ -46,10 +50,12 @@ yomiageBotEx/
 - [x] セッション永続化（再起動時の復元）
 - [x] ログクリーンアップ機能
 
-### Phase 3: TTS統合（予定）
-- [ ] Style-Bert-VITS2統合
-- [ ] 挨拶機能（参加/退出）
-- [ ] 音声キャッシュ
+### Phase 3: TTS統合（実装済み）
+- [x] Style-Bert-VITS2統合
+- [x] 挨拶機能（参加/退出）
+- [x] 音声キャッシュシステム
+- [x] 軽量化設計（フォールバック機能付き）
+- [x] TTSAPIサーバー接続管理
 
 ### Phase 4: 録音機能（予定）
 - [ ] 録音・リプレイ機能
@@ -62,6 +68,8 @@ yomiageBotEx/
 - python-dotenv（環境変数管理）
 - pyyaml（設定ファイル）
 - aiofiles（非同期ファイル操作）
+- aiohttp（HTTPクライアント）
+- numpy（音声処理）
 - ffmpeg-python（音声処理用、Phase 3以降）
 
 ### パッケージ管理
@@ -107,10 +115,18 @@ yomiageBotEx/
 - README.mdでuv環境でのセットアップ手順を更新
 - 開発用依存関係（pytest、black、flake8）を追加
 
+### 2024-06-27 Phase 3実装（TTS統合）
+- utils/tts.pyでTTS機能とキャッシュシステムを実装
+- cogs/tts.pyで挨拶機能を実装
+- Style-Bert-VITS2 API統合とフォールバック機能
+- 軽量化設計（キャッシュ、タイムアウト、文字数制限）
+- 音声キャッシュの自動クリーンアップ
+- 設定ファイルで挨拶機能の有効/無効切り替え可能
+
 ### 今後の課題
-- Style-Bert-VITS2の統合方法を調査する必要あり
-- TTS機能の設計（軽量化重視）
-- 録音・リプレイ機能の実装方針決定
+- Style-Bert-VITS2 APIサーバーのセットアップ手順作成
+- 録音・リプレイ機能の実装（Phase 4）
+- 実際の音声品質テストと最適化
 
 ## トラブルシューティング
 
