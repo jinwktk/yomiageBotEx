@@ -24,9 +24,12 @@ load_dotenv()
 def load_config():
     """設定ファイルを読み込む"""
     config_path = Path("config.yaml")
+    print(f"DEBUG: Loading config from: {config_path.absolute()}")
     if config_path.exists():
         with open(config_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
+            config = yaml.safe_load(f)
+            print(f"DEBUG: TTS API URL: {config.get('tts', {}).get('api_url', 'NOT_FOUND')}")
+            return config
     else:
         # デフォルト設定
         return {
