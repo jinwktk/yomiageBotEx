@@ -16,7 +16,13 @@ import yaml
 from dotenv import load_dotenv
 
 from utils.logger import setup_logging, start_log_cleanup_task
-from utils.voice_receiver import EnhancedVoiceClient
+
+# 音声受信クライアントのインポート（フォールバック付き）
+try:
+    from utils.voice_receiver import EnhancedVoiceClient
+except Exception as e:
+    print(f"Warning: Could not import EnhancedVoiceClient: {e}, using simple recorder")
+    from utils.simple_recorder import SimpleEnhancedVoiceClient as EnhancedVoiceClient
 
 # 環境変数の読み込み
 load_dotenv()
