@@ -22,10 +22,10 @@ if not exist ".env" (
 
 rem 依存関係のインストール
 echo 📦 依存関係をインストール中...
-uv sync
+uv sync --no-install-project
 
 rem ボットの起動
 echo 🚀 ボットを起動します...
-uv run python bot.py
+uv run --no-project python bot.py
 
 pause

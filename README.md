@@ -28,7 +28,7 @@ git clone https://github.com/jinwktk/yomiageBotEx.git
 cd yomiageBotEx
 
 # 依存関係のインストール
-uv sync
+uv sync --no-install-project
 ```
 
 ### 4. 設定
@@ -44,7 +44,7 @@ DISCORD_TOKEN=your_discord_bot_token_here
 
 #### 手動起動
 ```bash
-uv run python bot.py
+uv run --no-project python bot.py
 ```
 
 #### スクリプトを使用（推奨）
@@ -84,7 +84,7 @@ scripts\start.bat
 ### 開発環境のセットアップ
 ```bash
 # 開発用依存関係のインストール
-uv sync --dev
+uv sync --dev --no-install-project
 
 # コードフォーマット
 uv run black .
