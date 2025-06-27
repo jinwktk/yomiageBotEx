@@ -72,6 +72,10 @@ async def on_ready():
     logger.info(f"Connected to {len(bot.guilds)} guild(s)")
     logger.info("Using py-cord with discord.sinks.WaveSink")
     
+    # スラッシュコマンドの確認
+    commands = await bot.sync_commands()
+    logger.info(f"Synced {len(commands)} slash commands: {[cmd.name for cmd in commands]}")
+    
     # ステータス設定
     await bot.change_presence(
         activity=discord.Activity(
@@ -87,32 +91,45 @@ async def on_voice_state_update(member, before, after):
         return
     
     guild = member.guild
+    logger.info(f"Voice state update: {member.display_name} in {guild.name}")
+    logger.info(f"Before: {before.channel.name if before.channel else None}")
+    logger.info(f"After: {after.channel.name if after.channel else None}")
     
     # ユーザーがVCに参加した場合（自動参加）
     if (before.channel is None and after.channel is not None and 
         config["bot"]["auto_join"]):
         
+        logger.info(f"Auto-join triggered for {member.display_name} -> {after.channel.name}")
+        
         if guild.id not in connections or not guild.voice_client:
             try:
+                logger.info(f"Attempting to connect to {after.channel.name}")
                 vc = await after.channel.connect()
                 await start_recording(vc, guild.id)
                 logger.info(f"Auto-joined: {after.channel.name} in {guild.name}")
             except Exception as e:
-                logger.error(f"Auto-join failed: {e}")
+                logger.error(f"Auto-join failed: {e}", exc_info=True)
+        else:
+            logger.info("Bot already connected, skipping auto-join")
     
     # ユーザーがVCから退出した場合（自動退出）
     if (before.channel is not None and after.channel is None and 
         config["bot"]["auto_leave"]):
         
+        logger.info(f"Auto-leave triggered for {member.display_name} <- {before.channel.name}")
+        
         if guild.voice_client and before.channel == guild.voice_client.channel:
             # チャンネルが空になったかチェック
-            if len(before.channel.members) <= 1:  # ボット自身のみ
+            remaining_members = len(before.channel.members)
+            logger.info(f"Remaining members in {before.channel.name}: {remaining_members}")
+            
+            if remaining_members <= 1:  # ボット自身のみ
                 try:
                     await stop_recording(guild.id)
                     await guild.voice_client.disconnect()
                     logger.info(f"Auto-left: {before.channel.name} in {guild.name}")
                 except Exception as e:
-                    logger.error(f"Auto-leave failed: {e}")
+                    logger.error(f"Auto-leave failed: {e}", exc_info=True)
 
 async def start_recording(vc: discord.VoiceClient, guild_id: int):
     """録音開始"""
