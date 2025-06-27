@@ -92,12 +92,8 @@ class YomiageBot(commands.Bot):
         # ログクリーンアップタスクの開始
         asyncio.create_task(start_log_cleanup_task(self.config))
         
-        # スラッシュコマンドの同期
-        try:
-            synced = await self.tree.sync()
-            logger.info(f"Synced {len(synced)} command(s)")
-        except Exception as e:
-            logger.error(f"Failed to sync commands: {e}")
+        # py-cordではスラッシュコマンドは自動同期されるため、手動同期は不要
+        logger.info("Bot setup completed (py-cord auto-syncs slash commands)")
     
     async def load_cogs(self):
         """Cogを読み込む"""

@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 import discord
-from discord import app_commands
 from discord.ext import commands, tasks
 
 
@@ -228,26 +227,26 @@ class VoiceCog(commands.Cog):
         """定期チェック開始前の待機"""
         await self.bot.wait_until_ready()
     
-    @app_commands.command(name="join", description="ボイスチャンネルに参加します")
-    async def join_command(self, interaction: discord.Interaction):
+    @discord.slash_command(name="join", description="ボイスチャンネルに参加します")
+    async def join_command(self, ctx: discord.ApplicationContext):
         """VCに参加するコマンド"""
         await self.rate_limit_delay()
         
         # ユーザーがVCに接続しているか確認
-        if not interaction.user.voice:
-            await interaction.response.send_message(
+        if not ctx.author.voice:
+            await ctx.respond(
                 "❌ ボイスチャンネルに接続してから実行してください。",
                 ephemeral=True
             )
-            self.logger.warning(f"Join failed: {interaction.user} is not in a voice channel")
+            self.logger.warning(f"Join failed: {ctx.author} is not in a voice channel")
             return
         
-        channel = interaction.user.voice.channel
+        channel = ctx.author.voice.channel
         
         # 既に接続している場合
-        if interaction.guild.voice_client:
-            if interaction.guild.voice_client.channel == channel:
-                await interaction.response.send_message(
+        if ctx.guild.voice_client:
+            if ctx.guild.voice_client.channel == channel:
+                await ctx.respond(
                     f"✅ 既に {channel.name} に接続しています。",
                     ephemeral=True
                 )
@@ -255,20 +254,20 @@ class VoiceCog(commands.Cog):
             else:
                 # 別のチャンネルに移動
                 try:
-                    await interaction.guild.voice_client.move_to(channel)
-                    await interaction.response.send_message(
+                    await ctx.guild.voice_client.move_to(channel)
+                    await ctx.respond(
                         f"🔄 {channel.name} に移動しました。",
                         ephemeral=True
                     )
-                    self.logger.info(f"Moved to voice channel: {channel.name} in {interaction.guild.name}")
+                    self.logger.info(f"Moved to voice channel: {channel.name} in {ctx.guild.name}")
                     self.save_sessions()
                     
                     # 移動後に他のCogに通知
-                    await self.notify_bot_joined_channel(interaction.guild, channel)
+                    await self.notify_bot_joined_channel(ctx.guild, channel)
                     return
                 except Exception as e:
                     self.logger.error(f"Failed to move to voice channel: {e}")
-                    await interaction.response.send_message(
+                    await ctx.respond(
                         "❌ チャンネルの移動に失敗しました。",
                         ephemeral=True
                     )
@@ -277,52 +276,52 @@ class VoiceCog(commands.Cog):
         # 新規接続
         try:
             await self.bot.connect_to_voice(channel)
-            await interaction.response.send_message(
+            await ctx.respond(
                 f"✅ {channel.name} に接続しました！",
                 ephemeral=True
             )
-            self.logger.info(f"Connected to voice channel: {channel.name} in {interaction.guild.name}")
+            self.logger.info(f"Connected to voice channel: {channel.name} in {ctx.guild.name}")
             self.save_sessions()
             
             # 接続後に他のCogに通知
-            await self.notify_bot_joined_channel(interaction.guild, channel)
+            await self.notify_bot_joined_channel(ctx.guild, channel)
         except asyncio.TimeoutError:
-            await interaction.response.send_message(
+            await ctx.respond(
                 "❌ 接続がタイムアウトしました。",
                 ephemeral=True
             )
             self.logger.error("Voice connection timeout")
         except Exception as e:
-            await interaction.response.send_message(
+            await ctx.respond(
                 "❌ 接続に失敗しました。",
                 ephemeral=True
             )
             self.logger.error(f"Failed to connect to voice channel: {e}")
     
-    @app_commands.command(name="leave", description="ボイスチャンネルから退出します")
-    async def leave_command(self, interaction: discord.Interaction):
+    @discord.slash_command(name="leave", description="ボイスチャンネルから退出します")
+    async def leave_command(self, ctx: discord.ApplicationContext):
         """VCから退出するコマンド"""
         await self.rate_limit_delay()
         
         # ボットが接続しているか確認
-        if not interaction.guild.voice_client:
-            await interaction.response.send_message(
+        if not ctx.guild.voice_client:
+            await ctx.respond(
                 "❌ ボイスチャンネルに接続していません。",
                 ephemeral=True
             )
             return
         
         try:
-            channel_name = interaction.guild.voice_client.channel.name
-            await interaction.guild.voice_client.disconnect()
-            await interaction.response.send_message(
+            channel_name = ctx.guild.voice_client.channel.name
+            await ctx.guild.voice_client.disconnect()
+            await ctx.respond(
                 f"👋 {channel_name} から退出しました。",
                 ephemeral=True
             )
-            self.logger.info(f"Disconnected from voice channel: {channel_name} in {interaction.guild.name}")
+            self.logger.info(f"Disconnected from voice channel: {channel_name} in {ctx.guild.name}")
             self.save_sessions()
         except Exception as e:
-            await interaction.response.send_message(
+            await ctx.respond(
                 "❌ 退出に失敗しました。",
                 ephemeral=True
             )
