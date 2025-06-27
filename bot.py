@@ -88,6 +88,7 @@ class YomiageBot(commands.Bot):
         cogs = [
             "cogs.voice",
             "cogs.tts",
+            "cogs.recording",
         ]
         
         for cog in cogs:

@@ -26,9 +26,11 @@ audio:
   normalize: true     # 音量正規化
 
 recording:
-  enabled: false      # Phase 4まで無効
+  enabled: true       # 録音機能の有効/無効
   max_duration: 300   # 最大録音時間（秒）
   cleanup_hours: 1    # 録音ファイルの自動削除時間
+  default_duration: 30 # デフォルト録音時間（秒）
+  max_file_size_mb: 50 # 最大ファイルサイズ（MB）
 
 logging:
   level: "INFO"

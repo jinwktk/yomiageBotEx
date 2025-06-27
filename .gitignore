@@ -42,3 +42,6 @@ recordings_buffer.pkl
 
 # TTSキャッシュ
 cache/
+
+# 録音ファイル
+recordings/
