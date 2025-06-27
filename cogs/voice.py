@@ -230,6 +230,7 @@ class VoiceCog(commands.Cog):
     @discord.slash_command(name="join", description="ボイスチャンネルに参加します")
     async def join_command(self, ctx: discord.ApplicationContext):
         """VCに参加するコマンド"""
+        self.logger.info(f"/join command called by {ctx.author} in {ctx.guild.name}")
         await self.rate_limit_delay()
         
         # ユーザーがVCに接続しているか確認
@@ -242,6 +243,7 @@ class VoiceCog(commands.Cog):
             return
         
         channel = ctx.author.voice.channel
+        self.logger.info(f"User {ctx.author} is in channel: {channel.name}")
         
         # 既に接続している場合
         if ctx.guild.voice_client:
@@ -275,7 +277,10 @@ class VoiceCog(commands.Cog):
         
         # 新規接続
         try:
+            self.logger.info(f"Attempting to connect to voice channel: {channel.name}")
             await self.bot.connect_to_voice(channel)
+            self.logger.info(f"Successfully connected to voice channel: {channel.name}")
+            
             await ctx.respond(
                 f"✅ {channel.name} に接続しました！",
                 ephemeral=True
@@ -296,7 +301,7 @@ class VoiceCog(commands.Cog):
                 "❌ 接続に失敗しました。",
                 ephemeral=True
             )
-            self.logger.error(f"Failed to connect to voice channel: {e}")
+            self.logger.error(f"Failed to connect to voice channel: {e}", exc_info=True)
     
     @discord.slash_command(name="leave", description="ボイスチャンネルから退出します")
     async def leave_command(self, ctx: discord.ApplicationContext):

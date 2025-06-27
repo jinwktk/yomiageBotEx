@@ -20,15 +20,18 @@ from utils.logger import setup_logging, start_log_cleanup_task
 # 音声受信クライアントのインポート（py-cord優先、フォールバック付き）
 try:
     from utils.real_audio_recorder import RealEnhancedVoiceClient as EnhancedVoiceClient
-    print("Using py-cord real audio recording")
+    print("✅ Using py-cord real audio recording")
+    VOICE_CLIENT_TYPE = "py-cord"
 except Exception as e:
-    print(f"Warning: Could not import RealEnhancedVoiceClient: {e}, trying fallback")
+    print(f"⚠️ Could not import RealEnhancedVoiceClient: {e}, trying fallback")
     try:
         from utils.voice_receiver import EnhancedVoiceClient
-        print("Using discord.py fallback audio simulation")
+        print("✅ Using discord.py fallback audio simulation")
+        VOICE_CLIENT_TYPE = "discord.py"
     except Exception as e2:
-        print(f"Warning: Could not import EnhancedVoiceClient: {e2}, using simple recorder")
+        print(f"⚠️ Could not import EnhancedVoiceClient: {e2}, using simple recorder")
         from utils.simple_recorder import SimpleEnhancedVoiceClient as EnhancedVoiceClient
+        VOICE_CLIENT_TYPE = "simple"
 
 # 環境変数の読み込み
 load_dotenv()
@@ -117,6 +120,7 @@ class YomiageBot(commands.Bot):
         """Bot準備完了時のイベント"""
         logger.info(f"Bot is ready! Logged in as {self.user} (ID: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guild(s)")
+        logger.info(f"Voice client type: {VOICE_CLIENT_TYPE}")
         
         # ステータスの設定
         await self.change_presence(
