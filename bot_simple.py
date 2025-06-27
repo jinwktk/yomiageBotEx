@@ -72,9 +72,23 @@ async def on_ready():
     logger.info(f"Connected to {len(bot.guilds)} guild(s)")
     logger.info("Using py-cord with discord.sinks.WaveSink")
     
-    # スラッシュコマンドの確認
-    commands = await bot.sync_commands()
-    logger.info(f"Synced {len(commands)} slash commands: {[cmd.name for cmd in commands]}")
+    # スラッシュコマンドの確認と同期
+    try:
+        # py-cordでは自動同期されるが、明示的に同期を確認
+        pending_commands = [cmd for cmd in bot.commands if hasattr(cmd, 'name')]
+        logger.info(f"Registered commands: {[cmd.name for cmd in pending_commands]}")
+        
+        # 手動同期を試行
+        synced = await bot.sync_commands()
+        logger.info(f"Synced {len(synced) if synced else 0} slash commands")
+        
+        if synced:
+            logger.info(f"Command names: {[cmd.name for cmd in synced]}")
+        else:
+            logger.warning("No commands were synced - this might be normal for py-cord")
+            
+    except Exception as e:
+        logger.error(f"Command sync failed: {e}", exc_info=True)
     
     # ステータス設定
     await bot.change_presence(
@@ -83,6 +97,12 @@ async def on_ready():
             name="実際の音声録音対応 | /join"
         )
     )
+
+@bot.event
+async def on_application_command_error(ctx, error):
+    """スラッシュコマンドエラー"""
+    logger.error(f"Slash command error in {ctx.command}: {error}", exc_info=True)
+    await ctx.respond(f"❌ エラーが発生しました: {str(error)}", ephemeral=True)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -189,7 +209,7 @@ async def clean_old_buffers():
 @bot.slash_command(name="join", description="ボイスチャンネルに参加します")
 async def join_command(ctx: discord.ApplicationContext):
     """VCに参加"""
-    logger.info(f"/join command called by {ctx.author} in {ctx.guild.name}")
+    logger.info(f"🎯 /join command called by {ctx.author} in {ctx.guild.name}")
     
     if not ctx.author.voice:
         await ctx.respond("❌ ボイスチャンネルに接続してください。", ephemeral=True)
