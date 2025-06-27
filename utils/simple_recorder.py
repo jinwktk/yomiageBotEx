@@ -62,30 +62,53 @@ class SimpleVoiceRecorder:
                 # より現実的な音声パターンを生成
                 # 会話のシミュレーション（音声がある時とない時を交互に）
                 if int(elapsed) % 10 < 7:  # 10秒中7秒は音声あり
-                    # 音声ありの場合：ノイズ＋トーン
-                    frequency = 200 + (int(elapsed * 10) % 100)  # 周波数を変化
+                    # 音声ありの場合：複数の周波数を組み合わせ
                     t = np.linspace(0, frame_duration, samples)
                     
-                    # 基本波形
-                    wave = np.sin(2 * np.pi * frequency * t) * 0.1
+                    # 基本周波数（人の声の範囲）
+                    f1 = 150 + 50 * np.sin(elapsed * 0.5)  # 100-200Hz
+                    f2 = 300 + 100 * np.sin(elapsed * 0.3)  # 200-400Hz
+                    f3 = 600 + 200 * np.sin(elapsed * 0.2)  # 400-800Hz
                     
-                    # ノイズを追加（より自然に）
-                    noise = np.random.normal(0, 0.05, samples)
-                    audio = wave + noise
+                    # 複数の正弦波を組み合わせ
+                    wave1 = np.sin(2 * np.pi * f1 * t) * 0.3
+                    wave2 = np.sin(2 * np.pi * f2 * t) * 0.2
+                    wave3 = np.sin(2 * np.pi * f3 * t) * 0.1
                     
-                    # ステレオ化（少し位相をずらす）
-                    left_channel = audio
-                    right_channel = np.roll(audio, 50)  # 少し遅延
+                    # 合成
+                    audio = wave1 + wave2 + wave3
+                    
+                    # ランダムな音量変化
+                    envelope = 0.5 + 0.3 * np.sin(elapsed * 2)
+                    audio = audio * envelope
+                    
+                    # ノイズを追加
+                    noise = np.random.normal(0, 0.02, samples)
+                    audio = audio + noise
+                    
+                    # ステレオ化（左右で少し差をつける）
+                    left_channel = audio * 0.9
+                    right_channel = audio * 1.1
                     
                     stereo_audio = np.column_stack((left_channel, right_channel))
                 else:
                     # 無音区間（環境ノイズのみ）
-                    noise = np.random.normal(0, 0.01, (samples, channels))
+                    noise = np.random.normal(0, 0.005, (samples, channels))
                     stereo_audio = noise
+                
+                # クリッピング防止
+                stereo_audio = np.clip(stereo_audio, -0.9, 0.9)
                 
                 # 16bit整数に変換
                 audio_int16 = (stereo_audio * 32767).astype(np.int16)
-                pcm_data = audio_int16.tobytes()
+                
+                # エンディアン変換（リトルエンディアン）
+                pcm_data = audio_int16.tobytes('C')
+                
+                # デバッグ: 音声データの詳細をログ出力
+                if elapsed % 5 < 0.1:  # 5秒ごとに詳細ログ
+                    max_val = np.max(np.abs(audio_int16))
+                    logger.debug(f"Generated audio: {len(pcm_data)} bytes, max amplitude: {max_val}, first 8 bytes: {pcm_data[:8].hex()}")
                 
                 # コールバックを呼び出し
                 self.callback(pcm_data)

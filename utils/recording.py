@@ -136,8 +136,17 @@ class RecordingManager:
         buffer = self.get_buffer(guild_id)
         
         # チャンクの推定時間（簡易計算）
-        chunk_duration = len(audio_data) / (self.sample_rate * 2)  # 16bit = 2bytes
+        # ステレオ16bitなので、1サンプル = 4バイト
+        chunk_duration = len(audio_data) / (self.sample_rate * 2 * 2)  # 16bit stereo = 4bytes/sample
         buffer.add_audio_chunk(audio_data, chunk_duration)
+        
+        # デバッグ: 音声データの詳細をログ出力
+        if len(buffer.buffer) % 50 == 0:  # 50チャンクごと（約1秒）
+            # 音声データの中身をチェック
+            import numpy as np
+            audio_array = np.frombuffer(audio_data, dtype=np.int16)
+            max_amplitude = np.max(np.abs(audio_array)) if len(audio_array) > 0 else 0
+            logger.debug(f"Recording buffer (guild {guild_id}): {len(buffer.buffer)} chunks, {buffer.total_duration:.1f}s, latest chunk: {len(audio_data)} bytes, max_amp: {max_amplitude}, first 8 bytes: {audio_data[:8].hex()}")
     
     async def save_recent_audio(
         self, 
@@ -184,6 +193,12 @@ class RecordingManager:
     async def save_as_wav(self, file_path: Path, audio_data: bytes):
         """音声データをWAVファイルとして保存"""
         try:
+            # デバッグ: 保存する音声データの詳細をログ出力
+            import numpy as np
+            audio_array = np.frombuffer(audio_data, dtype=np.int16)
+            max_amplitude = np.max(np.abs(audio_array)) if len(audio_array) > 0 else 0
+            logger.info(f"Saving WAV file: {len(audio_data)} bytes, max amplitude: {max_amplitude}, first 16 bytes: {audio_data[:16].hex()}")
+            
             async with aiofiles.open(file_path, "wb") as f:
                 # WAVヘッダーを作成
                 wav_buffer = io.BytesIO()
@@ -194,7 +209,11 @@ class RecordingManager:
                     wav_file.writeframes(audio_data)
                 
                 wav_buffer.seek(0)
-                await f.write(wav_buffer.read())
+                wav_data = wav_buffer.read()
+                await f.write(wav_data)
+                
+                # デバッグ: 作成されたWAVファイルのサイズ
+                logger.info(f"Created WAV file: {len(wav_data)} bytes total")
                 
         except Exception as e:
             logger.error(f"Failed to write WAV file: {e}")
