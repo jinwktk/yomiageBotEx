@@ -202,23 +202,11 @@ class VoiceReceiver:
         # 音声パターンを生成
         audio_data = []
         
-        # 10秒音声、10秒無音のパターン
-        is_sound_period = int(elapsed) % 20 < 10
-        
+        # 完全無音（実際の音声受信をシミュレート）
+        # 実際の環境では、ユーザーが話している時だけ音声データが入る
         for i in range(samples):
-            if is_sound_period:
-                # 単純な正弦波（440Hz）
-                t = i / sample_rate
-                value = math.sin(2 * math.pi * 440 * t) * 0.2  # 音量0.2
-                
-                # 16bit整数に変換（-32768 to 32767）
-                sample = int(value * 32767)
-                
-                # ステレオ（左右同じ）
-                audio_data.extend([sample, sample])
-            else:
-                # 無音
-                audio_data.extend([0, 0])
+            # 完全無音
+            audio_data.extend([0, 0])
         
         # バイト列に変換
         pcm_bytes = b''
@@ -229,7 +217,7 @@ class VoiceReceiver:
         # デバッグ: 生成したデータのチェック
         if int(elapsed) % 5 < 0.1:
             max_val = max(abs(s) for s in audio_data)
-            logger.debug(f"VoiceReceiver: Generated {len(pcm_bytes)} bytes, max sample: {max_val}, sound_period: {is_sound_period}")
+            logger.debug(f"VoiceReceiver: Generated {len(pcm_bytes)} bytes (silent audio simulation), max sample: {max_val}")
         
         return pcm_bytes
         
