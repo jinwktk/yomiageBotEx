@@ -1,31 +1,31 @@
 @echo off
-rem yomiageBotEx èµ·å‹•ã‚¹ã‚¯ãƒªãƒ—ãƒˆ (Windows)
+rem yomiageBotEx ‹N“®ƒXƒNƒŠƒvƒg (Windows)
 
-echo ğŸ¤– yomiageBotEx èµ·å‹•ä¸­...
+echo yomiageBotEx ‹N“®’†...
 
-rem uvãŒã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã•ã‚Œã¦ã„ã‚‹ã‹ãƒã‚§ãƒƒã‚¯
+rem uv‚ªƒCƒ“ƒXƒg[ƒ‹‚³‚ê‚Ä‚¢‚é‚©ƒ`ƒFƒbƒN
 where uv >nul 2>nul
 if %errorlevel% neq 0 (
-    echo âŒ uvãŒã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã•ã‚Œã¦ã„ã¾ã›ã‚“ã€‚
-    echo ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«æ–¹æ³•: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    echo uv‚ªƒCƒ“ƒXƒg[ƒ‹‚³‚ê‚Ä‚¢‚Ü‚¹‚ñB
+    echo ƒCƒ“ƒXƒg[ƒ‹•û–@: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     pause
     exit /b 1
 )
 
-rem .envãƒ•ã‚¡ã‚¤ãƒ«ã®å­˜åœ¨ãƒã‚§ãƒƒã‚¯
+rem .envƒtƒ@ƒCƒ‹‚Ì‘¶İƒ`ƒFƒbƒN
 if not exist ".env" (
-    echo âŒ .envãƒ•ã‚¡ã‚¤ãƒ«ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã€‚
-    echo DISCORD_TOKEN=your_token_here ã‚’è¨˜è¿°ã—ãŸ .env ãƒ•ã‚¡ã‚¤ãƒ«ã‚’ä½œæˆã—ã¦ãã ã•ã„ã€‚
+    echo .envƒtƒ@ƒCƒ‹‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñB
+    echo DISCORD_TOKEN=your_token_here ‚ğ‹Lq‚µ‚½ .env ƒtƒ@ƒCƒ‹‚ğì¬‚µ‚Ä‚­‚¾‚³‚¢B
     pause
     exit /b 1
 )
 
-rem ä¾å­˜é–¢ä¿‚ã®ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«
-echo ğŸ“¦ ä¾å­˜é–¢ä¿‚ã‚’ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ä¸­...
+rem ˆË‘¶ŠÖŒW‚ÌƒCƒ“ƒXƒg[ƒ‹
+echo ˆË‘¶ŠÖŒW‚ğƒCƒ“ƒXƒg[ƒ‹’†...
 uv sync --no-install-project
 
-rem ãƒœãƒƒãƒˆã®èµ·å‹•
-echo ğŸš€ ãƒœãƒƒãƒˆã‚’èµ·å‹•ã—ã¾ã™...
+rem ƒ{ƒbƒg‚Ì‹N“®
+echo ƒ{ƒbƒg‚ğ‹N“®‚µ‚Ü‚·...
 uv run --no-project python bot.py
 
 pause
