@@ -20,6 +20,12 @@ yomiageBotEx/
 ├── utils/             # ユーティリティモジュール
 │   ├── __init__.py    # ユーティリティパッケージ初期化
 │   └── logger.py      # ロギング設定ユーティリティ
+├── scripts/           # 起動スクリプト
+│   ├── start.sh       # Linux/macOS用起動スクリプト
+│   └── start.bat      # Windows用起動スクリプト
+├── pyproject.toml     # uv用プロジェクト設定
+├── .python-version    # Python バージョン指定
+├── uv.lock           # uv依存関係ロックファイル
 └── logs/              # ログディレクトリ（自動生成）
     └── yomiage.log    # ボットのログ
 ```
@@ -55,7 +61,13 @@ yomiageBotEx/
 - discord.py 2.3.0以上（py-cordは使用しない）
 - python-dotenv（環境変数管理）
 - pyyaml（設定ファイル）
+- aiofiles（非同期ファイル操作）
 - ffmpeg-python（音声処理用、Phase 3以降）
+
+### パッケージ管理
+- **uv**: 高速なPythonパッケージマネージャー
+- **pyproject.toml**: プロジェクト設定と依存関係管理
+- **uv.lock**: 依存関係のロックファイル
 
 ### 設定管理
 - `.env`: DISCORD_TOKENのみ保存
@@ -87,6 +99,13 @@ yomiageBotEx/
 - セッション永続化システム（sessions.json）
 - 5分ごとの定期チェックタスク
 - 1日ごとの古いログファイル自動削除
+
+### 2024-06-27 uv環境構築
+- pyproject.tomlでuv対応のプロジェクト設定
+- .python-versionでPython 3.11を指定
+- scripts/ディレクトリに起動スクリプト追加
+- README.mdでuv環境でのセットアップ手順を更新
+- 開発用依存関係（pytest、black、flake8）を追加
 
 ### 今後の課題
 - Style-Bert-VITS2の統合方法を調査する必要あり

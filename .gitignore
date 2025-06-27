@@ -11,6 +11,10 @@ env/
 venv/
 ENV/
 
+# uv
+.venv/
+.uv-cache/
+
 # ログファイル
 logs/
 *.log
