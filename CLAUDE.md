@@ -272,8 +272,23 @@ yomiageBotEx/
 - **VoiceClient互換性**: ✅ 基本的なVoice関連APIは互換性あり
 - **テスト結果**: 基本的なBot初期化は成功、スラッシュコマンド関連のみ修正が必要
 
+### 2024-06-27 py-cord スラッシュコマンド修正実施
+- **bot_simple.pyの修正完了**:
+  - `discord.Bot(intents=intents, auto_sync_commands=True)`でBot初期化
+  - on_readyでの手動`sync_commands()`呼び出しを削除
+  - py-cordの自動同期機能を利用するように変更
+  - 音声接続に`timeout=15.0, reconnect=True`を追加
+- **修正理由**:
+  - py-cordでは手動同期が自動同期と競合する可能性
+  - "Synced 0 slash commands"の問題を解決
+  - 音声接続時の"list index out of range"エラー対策
+- **期待される改善**:
+  - スラッシュコマンド（/join, /leave, /replay）の正常同期
+  - Discord上での「不明な連携」エラー解消
+  - 音声接続の安定性向上
+
 ### 今後の改善案
-- **緊急**: py-cord完全対応への修正実装（上記API差分対応）
+- **次回テスト**: 修正後のbot_simple.pyでスラッシュコマンド動作確認
 - 音声品質の最適化とパフォーマンス向上
 - ユーザーごとの読み上げ設定（声質、速度等）
 - 音声フィルタリング機能（ノイズ除去等）

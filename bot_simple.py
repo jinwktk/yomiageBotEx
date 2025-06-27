@@ -58,7 +58,7 @@ config = load_config()
 
 # Bot設定
 intents = discord.Intents.all()
-bot = discord.Bot(intents=intents)
+bot = discord.Bot(intents=intents, auto_sync_commands=True)
 
 # グローバル変数
 connections: Dict[int, discord.VoiceClient] = {}
@@ -72,23 +72,10 @@ async def on_ready():
     logger.info(f"Connected to {len(bot.guilds)} guild(s)")
     logger.info("Using py-cord with discord.sinks.WaveSink")
     
-    # スラッシュコマンドの確認と同期
-    try:
-        # py-cordでは自動同期されるが、明示的に同期を確認
-        pending_commands = [cmd for cmd in bot.commands if hasattr(cmd, 'name')]
-        logger.info(f"Registered commands: {[cmd.name for cmd in pending_commands]}")
-        
-        # 手動同期を試行
-        synced = await bot.sync_commands()
-        logger.info(f"Synced {len(synced) if synced else 0} slash commands")
-        
-        if synced:
-            logger.info(f"Command names: {[cmd.name for cmd in synced]}")
-        else:
-            logger.warning("No commands were synced - this might be normal for py-cord")
-            
-    except Exception as e:
-        logger.error(f"Command sync failed: {e}", exc_info=True)
+    # py-cordは自動でスラッシュコマンドを同期するため、手動同期は不要
+    slash_commands = [cmd for cmd in bot.commands if hasattr(cmd, 'name')]
+    logger.info(f"Registered commands: {[cmd.name for cmd in slash_commands]}")
+    logger.info("py-cord will auto-sync slash commands - no manual sync needed")
     
     # ステータス設定
     await bot.change_presence(
@@ -124,7 +111,7 @@ async def on_voice_state_update(member, before, after):
         if guild.id not in connections or not guild.voice_client:
             try:
                 logger.info(f"Attempting to connect to {after.channel.name}")
-                vc = await after.channel.connect()
+                vc = await after.channel.connect(timeout=15.0, reconnect=True)
                 await start_recording(vc, guild.id)
                 logger.info(f"Auto-joined: {after.channel.name} in {guild.name}")
             except Exception as e:
@@ -231,7 +218,7 @@ async def join_command(ctx: discord.ApplicationContext):
             await ctx.guild.voice_client.disconnect()
         
         # 新規接続
-        vc = await channel.connect()
+        vc = await channel.connect(timeout=15.0, reconnect=True)
         await start_recording(vc, ctx.guild.id)
         
         await ctx.respond(f"✅ {channel.name} に接続し、録音を開始しました！")
