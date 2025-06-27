@@ -93,8 +93,8 @@ class VoiceCog(commands.Cog):
                 if guild.voice_client:
                     continue
                 
-                # 接続を試行
-                await channel.connect(timeout=10.0, reconnect=True)
+                # カスタムVoiceClientで接続
+                await self.bot.connect_to_voice(channel)
                 self.logger.info(f"Restored session: {channel.name} in {guild.name}")
                 
                 # セッション復元後に他のCogに通知
@@ -148,7 +148,7 @@ class VoiceCog(commands.Cog):
         else:
             # 新規接続
             try:
-                await channel.connect(timeout=10.0, reconnect=True)
+                await self.bot.connect_to_voice(channel)
                 self.logger.info(f"Auto-joined voice channel: {channel.name} in {guild.name}")
                 self.save_sessions()
                 # 接続後に他のCogに通知
@@ -273,7 +273,7 @@ class VoiceCog(commands.Cog):
         
         # 新規接続
         try:
-            await channel.connect(timeout=10.0, reconnect=True)
+            await self.bot.connect_to_voice(channel)
             await interaction.response.send_message(
                 f"✅ {channel.name} に接続しました！",
                 ephemeral=True

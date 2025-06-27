@@ -16,6 +16,7 @@ import yaml
 from dotenv import load_dotenv
 
 from utils.logger import setup_logging, start_log_cleanup_task
+from utils.voice_receiver import EnhancedVoiceClient
 
 # 環境変数の読み込み
 load_dotenv()
@@ -120,6 +121,15 @@ class YomiageBot(commands.Bot):
     async def on_error(self, event_method: str, *args, **kwargs):
         """エラーハンドリング"""
         logger.error(f"Error in {event_method}", exc_info=True)
+    
+    async def connect_to_voice(self, channel: discord.VoiceChannel) -> discord.VoiceClient:
+        """カスタムVoiceClientで接続"""
+        # 既存の接続をチェック
+        if channel.guild.voice_client:
+            await channel.guild.voice_client.disconnect()
+        
+        # EnhancedVoiceClientを使用して接続
+        return await channel.connect(cls=EnhancedVoiceClient)
     
 # Botインスタンスの作成
 bot = YomiageBot()

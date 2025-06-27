@@ -236,6 +236,17 @@ yomiageBotEx/
 - **録音機能の仕様変更**: /replayコマンドでボット再生→チャットにファイル投稿に変更
 - **パラメータ整理**: 不要になったvolumeパラメータを削除
 
+### 2024-06-28 録音機能の本格実装
+- **カスタムVoiceClient実装**: EnhancedVoiceClientでdiscord.pyの音声受信制限を回避
+- **音声パケット処理**: RTPヘッダー解析とOpusデコード処理を実装
+- **VoiceReceiverクラス**: 非同期での音声データ受信・処理システム
+- **依存関係追加**: opuslib>=3.0.0（Opusデコード用）
+- **実装内容**:
+  - `utils/voice_receiver.py`: カスタム音声受信クラス
+  - `bot.py`: connect_to_voiceメソッドでEnhancedVoiceClientを使用
+  - `cogs/voice.py`: すべての接続処理をカスタムクライアントに変更
+  - フォールバック機能: opuslibがない場合はダミーPCMデータ生成
+
 ### 今後の改善案
 - 音声品質の最適化とパフォーマンス向上
 - ユーザーごとの読み上げ設定（声質、速度等）

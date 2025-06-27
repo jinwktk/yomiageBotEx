@@ -64,6 +64,7 @@ class RealTimeAudioRecorder:
         self.sample_rate = 48000  # Discordの標準サンプルレート
         self.channels = 2  # ステレオ
         self.sample_width = 2  # 16-bit
+        self.use_enhanced_client = True  # 拡張VoiceClientを使用
         
     def get_audio_sink(self, guild_id: int) -> AudioSink:
         """ギルド用の音声シンクを取得"""
@@ -78,16 +79,19 @@ class RealTimeAudioRecorder:
     def start_recording(self, guild_id: int, voice_client: discord.VoiceClient):
         """録音開始"""
         try:
-            sink = self.get_audio_sink(guild_id)
-            sink.is_recording = True
-            
-            # voice_clientに音声受信を開始
-            # 注意: discord.pyのバージョンによって方法が異なる場合がある
-            if hasattr(voice_client, 'start_recording'):
-                voice_client.start_recording(sink)
-                logger.info(f"RealTimeRecorder: Started real-time recording for guild {guild_id}")
+            # 拡張VoiceClientを使用している場合
+            if hasattr(voice_client, 'start_recording') and callable(voice_client.start_recording):
+                # 音声受信コールバック
+                def audio_callback(user_id: int, pcm_data: bytes):
+                    self.recording_manager.add_audio_data(guild_id, pcm_data)
+                    
+                voice_client.start_recording(audio_callback)
+                logger.info(f"RealTimeRecorder: Started enhanced recording for guild {guild_id}")
             else:
-                logger.warning(f"RealTimeRecorder: voice_client.start_recording not available")
+                # 通常のVoiceClientの場合
+                sink = self.get_audio_sink(guild_id)
+                sink.is_recording = True
+                logger.warning(f"RealTimeRecorder: Using fallback recording for guild {guild_id}")
                 # フォールバック: ダミーデータでの録音シミュレーション
                 asyncio.create_task(self._simulate_recording(guild_id))
                 
