@@ -257,7 +257,23 @@ yomiageBotEx/
   - 音声パターン生成: 会話のような音声パターンをシミュレート
   - エラーハンドリング: インポートエラー時の自動切り替え
 
+### 2024-06-28 discord.py vs py-cord API差分調査完了
+- **ライブラリ状況確認**: pyproject.tomlでpy-cord 2.6.1がインストール済み、requirements.txtとの矛盾を確認
+- **主要なAPI差分特定**:
+  - py-cordでは`app_commands`モジュールが存在しない
+  - `commands.Bot`に`tree`属性がないため、`tree.sync()`が使用不可
+  - スラッシュコマンドは`@discord.slash_command`を使用
+  - パラメータは`interaction`ではなく`ctx`、レスポンスは`ctx.respond()`
+- **修正が必要な箇所**:
+  - `bot.py`: line 97の`tree.sync()`削除
+  - `cogs/voice.py`: app_commands → discord.slash_command (lines 15, 231, 302)
+  - `cogs/recording.py`: 同様のスラッシュコマンド修正 (lines 14, 154, 239, 293)
+  - `cogs/message_reader.py`: 同様の修正が必要
+- **VoiceClient互換性**: ✅ 基本的なVoice関連APIは互換性あり
+- **テスト結果**: 基本的なBot初期化は成功、スラッシュコマンド関連のみ修正が必要
+
 ### 今後の改善案
+- **緊急**: py-cord完全対応への修正実装（上記API差分対応）
 - 音声品質の最適化とパフォーマンス向上
 - ユーザーごとの読み上げ設定（声質、速度等）
 - 音声フィルタリング機能（ノイズ除去等）
