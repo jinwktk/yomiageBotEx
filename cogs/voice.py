@@ -262,6 +262,9 @@ class VoiceCog(commands.Cog):
                     )
                     self.logger.info(f"Moved to voice channel: {channel.name} in {interaction.guild.name}")
                     self.save_sessions()
+                    
+                    # 移動後に他のCogに通知
+                    await self.notify_bot_joined_channel(interaction.guild, channel)
                     return
                 except Exception as e:
                     self.logger.error(f"Failed to move to voice channel: {e}")
@@ -280,6 +283,9 @@ class VoiceCog(commands.Cog):
             )
             self.logger.info(f"Connected to voice channel: {channel.name} in {interaction.guild.name}")
             self.save_sessions()
+            
+            # 接続後に他のCogに通知
+            await self.notify_bot_joined_channel(interaction.guild, channel)
         except asyncio.TimeoutError:
             await interaction.response.send_message(
                 "❌ 接続がタイムアウトしました。",
