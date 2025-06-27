@@ -201,11 +201,36 @@ yomiageBotEx/
   - RecordingCog.handle_bot_joined_with_user()メソッドを追加
   - セッション復元時にも同様の処理を実行
 
-### 今後の課題
-- Style-Bert-VITS2 APIサーバーのセットアップ手順作成
-- 実際の音声品質テストと最適化
-- パフォーマンス監視とメモリ使用量の最適化
-- Discord音声受信の詳細実装（現在は簡易版）
+### 2024-06-28 機能拡張完了（第6回）
+- **Option 1: Style-Bert-VITS2セットアップ手順**: README.mdにAPIサーバーのセットアップ手順を追加
+- **Option 2: チャット読み上げ機能**: 新しいMessageReaderCogを実装
+- **Option 3: 実際の音声録音機能**: リアルタイム音声受信システムを実装
+- **実装内容**:
+  - `cogs/message_reader.py`: チャットメッセージの読み上げ機能
+  - `utils/audio_sink.py`: Discord音声受信用のAudioSinkクラス
+  - `/reading`コマンド: 読み上げON/OFF切り替え
+  - メッセージ前処理: URL除去、メンション変換、絵文字処理
+  - リアルタイム音声録音: 実際のPCM音声データ受信
+  - フォールバック機能: API未使用時の代替処理
+- **設定追加**:
+  - config.yamlにmessage_reading設定セクションを追加
+  - 読み上げ文字数制限、無視プレフィックス等の設定
+
+### 実装完了機能
+- ✅ Phase 1: 基本機能（VC参加・退出）
+- ✅ Phase 2: 自動参加・退出機能  
+- ✅ Phase 3: TTS統合（Style-Bert-VITS2）
+- ✅ Phase 4: 録音・リプレイ機能
+- ✅ Option 1: Style-Bert-VITS2セットアップ手順
+- ✅ Option 2: チャット読み上げ機能
+- ✅ Option 3: 実際の音声録音機能
+
+### 今後の改善案
+- 音声品質の最適化とパフォーマンス向上
+- ユーザーごとの読み上げ設定（声質、速度等）
+- 音声フィルタリング機能（ノイズ除去等）
+- 複数言語サポート
+- Web管理画面の追加
 
 ## トラブルシューティング
 

@@ -16,6 +16,7 @@ from discord.ext import commands
 from discord import FFmpegPCMAudio, PCMVolumeTransformer
 
 from utils.recording import RecordingManager, SimpleRecordingSink
+from utils.audio_sink import RealTimeAudioRecorder
 
 
 class RecordingCog(commands.Cog):
@@ -32,8 +33,11 @@ class RecordingCog(commands.Cog):
         self.logger.info(f"Recording: Initializing with recording_enabled: {self.recording_enabled}")
         self.logger.info(f"Recording: Config recording section: {config.get('recording', {})}")
         
-        # ギルドごとの録音シンク
+        # ギルドごとの録音シンク（シミュレーション用）
         self.recording_sinks: Dict[int, SimpleRecordingSink] = {}
+        
+        # リアルタイム音声録音管理
+        self.real_time_recorder = RealTimeAudioRecorder(self.recording_manager)
         
         # クリーンアップタスクを開始
         if self.recording_enabled:
@@ -44,6 +48,9 @@ class RecordingCog(commands.Cog):
         for sink in self.recording_sinks.values():
             sink.cleanup()
         self.recording_sinks.clear()
+        
+        # リアルタイム録音のクリーンアップ
+        self.real_time_recorder.cleanup()
     
     async def rate_limit_delay(self):
         """レート制限対策の遅延"""
@@ -89,12 +96,18 @@ class RecordingCog(commands.Cog):
         # ユーザーがボットのいるチャンネルに参加した場合は録音開始
         if before.channel != bot_channel and after.channel == bot_channel:
             self.logger.info(f"Recording: User {member.display_name} joined bot channel {bot_channel.name}")
-            sink = self.get_recording_sink(guild.id)
-            if not sink.is_recording:
-                sink.start_recording()
-                self.logger.info(f"Started recording simulation for {bot_channel.name}")
-            else:
-                self.logger.info(f"Recording: Already recording for {bot_channel.name}")
+            
+            # リアルタイム録音を開始
+            try:
+                self.real_time_recorder.start_recording(guild.id, voice_client)
+                self.logger.info(f"Recording: Started real-time recording for {bot_channel.name}")
+            except Exception as e:
+                self.logger.error(f"Recording: Failed to start real-time recording: {e}")
+                # フォールバック: シミュレーション録音
+                sink = self.get_recording_sink(guild.id)
+                if not sink.is_recording:
+                    sink.start_recording()
+                    self.logger.info(f"Recording: Started fallback simulation recording for {bot_channel.name}")
         
         # チャンネルが空になった場合は録音停止
         elif before.channel == bot_channel and after.channel != bot_channel:
@@ -103,12 +116,18 @@ class RecordingCog(commands.Cog):
             members_count = len([m for m in bot_channel.members if not m.bot])
             self.logger.info(f"Recording: Members remaining: {members_count}")
             if members_count == 0:
+                # リアルタイム録音を停止
+                try:
+                    self.real_time_recorder.stop_recording(guild.id, voice_client)
+                    self.logger.info(f"Recording: Stopped real-time recording for {bot_channel.name}")
+                except Exception as e:
+                    self.logger.error(f"Recording: Failed to stop real-time recording: {e}")
+                
+                # シミュレーション録音も停止
                 sink = self.get_recording_sink(guild.id)
                 if sink.is_recording:
                     sink.stop_recording()
-                    self.logger.info(f"Stopped recording simulation for {bot_channel.name}")
-                else:
-                    self.logger.info(f"Recording: Not recording for {bot_channel.name}")
+                    self.logger.info(f"Recording: Stopped simulation recording for {bot_channel.name}")
     
     async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
         """ボットがVCに参加した際、既にいるユーザーがいる場合の録音開始処理"""
@@ -116,12 +135,18 @@ class RecordingCog(commands.Cog):
             voice_client = guild.voice_client
             if voice_client and voice_client.is_connected():
                 self.logger.info(f"Recording: Bot joined, starting recording for user {member.display_name}")
-                sink = self.get_recording_sink(guild.id)
-                if not sink.is_recording:
-                    sink.start_recording()
-                    self.logger.info(f"Recording: Started recording for {voice_client.channel.name}")
-                else:
-                    self.logger.info(f"Recording: Already recording for {voice_client.channel.name}")
+                
+                # リアルタイム録音を開始
+                try:
+                    self.real_time_recorder.start_recording(guild.id, voice_client)
+                    self.logger.info(f"Recording: Started real-time recording for {voice_client.channel.name}")
+                except Exception as e:
+                    self.logger.error(f"Recording: Failed to start real-time recording: {e}")
+                    # フォールバック: シミュレーション録音
+                    sink = self.get_recording_sink(guild.id)
+                    if not sink.is_recording:
+                        sink.start_recording()
+                        self.logger.info(f"Recording: Started fallback simulation recording for {voice_client.channel.name}")
             else:
                 self.logger.warning(f"Recording: No voice client when trying to start recording for {member.display_name}")
         except Exception as e:

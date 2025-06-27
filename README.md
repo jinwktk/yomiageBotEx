@@ -65,6 +65,7 @@ scripts\start.bat
 | `/replay` | 最近の音声を録音・再生（1-300秒） |
 | `/recordings` | 最近の録音リストを表示 |
 | `/clear_buffer` | 音声バッファをクリア（管理者のみ） |
+| `/reading` | チャット読み上げのON/OFFを切り替え |
 
 ## 🔧 設定ファイル
 
@@ -88,15 +89,60 @@ scripts\start.bat
 - Discord ボイスチャンネルへの自動参加・退出
 - ユーザーの参加・退出時の挨拶音声再生
 
+### チャット読み上げ機能
+- リアルタイムでチャットメッセージを音声で読み上げ
+- URL、メンション、絵文字の自動変換
+- 読み上げON/OFF切り替え（`/reading`コマンド）
+- プレフィックス（!、/、.、?）で始まるメッセージは除外
+
 ### 録音・リプレイ機能
 - 最大10分間の音声バッファリング
 - `/replay`コマンドで過去の音声を再生
 - 録音ファイルの自動管理（1時間後削除）
+- リアルタイム音声受信（フォールバック機能付き）
 
 ### TTS機能（オプション）
 - Style-Bert-VITS2との連携
 - 音声キャッシュによる高速化
-- フォールバック機能
+- フォールバック機能（ビープ音での代替再生）
+
+## 🎵 Style-Bert-VITS2 TTS APIサーバーのセットアップ（オプション）
+
+実際の音声合成を使用する場合は、Style-Bert-VITS2 APIサーバーが必要です。
+
+### 1. Style-Bert-VITS2のインストール
+
+```bash
+# Style-Bert-VITS2をクローン
+git clone https://github.com/litagin02/Style-Bert-VITS2.git
+cd Style-Bert-VITS2
+
+# 依存関係のインストール
+pip install -r requirements.txt
+```
+
+### 2. 事前学習モデルのダウンロード
+
+```bash
+# 日本語モデルをダウンロード（約2GB）
+python -m style_bert_vits2.nlp.bert_models
+```
+
+### 3. APIサーバーの起動
+
+```bash
+# APIサーバーを起動（127.0.0.1:5000で起動）
+python server_fastapi.py --host 127.0.0.1 --port 5000
+```
+
+### 4. 動作確認
+
+```bash
+# APIサーバーが起動しているか確認
+curl http://127.0.0.1:5000/health
+```
+
+成功すると、実際の音声合成での挨拶が再生されます。APIサーバーが動作していない場合は、自動的にフォールバック音声（ビープ音）が再生されます。
 
 ## 🛠️ 開発者向け
 
