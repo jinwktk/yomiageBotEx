@@ -241,18 +241,27 @@ class VoiceReceiver:
     async def _fallback_receive(self):
         """フォールバック音声受信（シミュレーション）"""
         logger.warning("VoiceReceiver: Using fallback audio simulation")
+        packet_count = 0
         while self.is_receiving:
             try:
                 # 20ms分の音声データを生成
                 pcm_data = self._generate_dummy_pcm()
                 # ダミーユーザーIDで音声データを送信
                 self.callback(0, pcm_data)
+                packet_count += 1
+                
+                # 5秒ごとに統計をログ出力
+                if packet_count % 250 == 0:  # 250 packets = 5秒
+                    logger.info(f"VoiceReceiver: Sent {packet_count} packets ({packet_count * 0.02:.1f} seconds)")
+                
                 await asyncio.sleep(0.02)  # 20ms
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"VoiceReceiver: Fallback error: {e}")
                 await asyncio.sleep(0.1)
+        
+        logger.info(f"VoiceReceiver: Fallback finished. Total packets sent: {packet_count} ({packet_count * 0.02:.1f} seconds)")
 
 
 class EnhancedVoiceClient(discord.VoiceClient):
