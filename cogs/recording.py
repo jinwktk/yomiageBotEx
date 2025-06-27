@@ -28,6 +28,10 @@ class RecordingCog(commands.Cog):
         self.recording_manager = RecordingManager(config)
         self.recording_enabled = config.get("recording", {}).get("enabled", False)
         
+        # 初期化時の設定値をログ出力
+        self.logger.info(f"Recording: Initializing with recording_enabled: {self.recording_enabled}")
+        self.logger.info(f"Recording: Config recording section: {config.get('recording', {})}")
+        
         # ギルドごとの録音シンク
         self.recording_sinks: Dict[int, SimpleRecordingSink] = {}
         
@@ -57,7 +61,11 @@ class RecordingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         """ボイス状態変更時の録音管理"""
+        self.logger.info(f"Recording: Voice state update for {member.display_name}")
+        self.logger.info(f"Recording: Recording enabled: {self.recording_enabled}")
+        
         if not self.recording_enabled:
+            self.logger.warning("Recording: Recording disabled in config")
             return
         
         if member.bot:  # ボット自身の変更は無視
@@ -66,28 +74,41 @@ class RecordingCog(commands.Cog):
         guild = member.guild
         voice_client = guild.voice_client
         
+        self.logger.info(f"Recording: Voice client connected: {voice_client is not None and voice_client.is_connected()}")
+        
         if not voice_client or not voice_client.is_connected():
+            self.logger.warning(f"Recording: No voice client or not connected for {guild.name}")
             return
         
         # ボットと同じチャンネルでの変更のみ処理
         bot_channel = voice_client.channel
+        self.logger.info(f"Recording: Bot channel: {bot_channel.name if bot_channel else 'None'}")
+        self.logger.info(f"Recording: Before channel: {before.channel.name if before.channel else 'None'}")
+        self.logger.info(f"Recording: After channel: {after.channel.name if after.channel else 'None'}")
         
         # ユーザーがボットのいるチャンネルに参加した場合は録音開始
         if before.channel != bot_channel and after.channel == bot_channel:
+            self.logger.info(f"Recording: User {member.display_name} joined bot channel {bot_channel.name}")
             sink = self.get_recording_sink(guild.id)
             if not sink.is_recording:
                 sink.start_recording()
                 self.logger.info(f"Started recording simulation for {bot_channel.name}")
+            else:
+                self.logger.info(f"Recording: Already recording for {bot_channel.name}")
         
         # チャンネルが空になった場合は録音停止
         elif before.channel == bot_channel and after.channel != bot_channel:
+            self.logger.info(f"Recording: User {member.display_name} left bot channel {bot_channel.name}")
             # ボット以外のメンバー数をチェック
             members_count = len([m for m in bot_channel.members if not m.bot])
+            self.logger.info(f"Recording: Members remaining: {members_count}")
             if members_count == 0:
                 sink = self.get_recording_sink(guild.id)
                 if sink.is_recording:
                     sink.stop_recording()
                     self.logger.info(f"Stopped recording simulation for {bot_channel.name}")
+                else:
+                    self.logger.info(f"Recording: Not recording for {bot_channel.name}")
     
     @app_commands.command(name="replay", description="最近の音声を録音して再生します")
     @app_commands.describe(

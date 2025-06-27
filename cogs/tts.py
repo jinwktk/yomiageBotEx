@@ -26,6 +26,10 @@ class TTSCog(commands.Cog):
         self.logger = logging.getLogger(__name__)
         self.tts_manager = TTSManager(config)
         self.greeting_enabled = config.get("tts", {}).get("greeting", {}).get("enabled", False)
+        
+        # 初期化時の設定値をログ出力
+        self.logger.info(f"TTS: Initializing with greeting_enabled: {self.greeting_enabled}")
+        self.logger.info(f"TTS: Config tts section: {config.get('tts', {})}")
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
@@ -105,19 +109,29 @@ class TTSCog(commands.Cog):
         guild = member.guild
         voice_client = guild.voice_client
         
+        self.logger.info(f"TTS: Voice state update for {member.display_name} in {guild.name}")
+        self.logger.info(f"TTS: Voice client connected: {voice_client is not None and voice_client.is_connected()}")
+        self.logger.info(f"TTS: Greeting enabled: {self.greeting_enabled}")
+        
         if not voice_client or not voice_client.is_connected():
+            self.logger.warning(f"TTS: No voice client or not connected for {guild.name}")
             return
         
         # ボットと同じチャンネルでの変更のみ処理
         bot_channel = voice_client.channel
+        self.logger.info(f"TTS: Bot channel: {bot_channel.name if bot_channel else 'None'}")
+        self.logger.info(f"TTS: Before channel: {before.channel.name if before.channel else 'None'}")
+        self.logger.info(f"TTS: After channel: {after.channel.name if after.channel else 'None'}")
         
         # ユーザーがボットのいるチャンネルに参加した場合
         if before.channel != bot_channel and after.channel == bot_channel:
+            self.logger.info(f"TTS: User {member.display_name} joined bot channel {bot_channel.name}")
             await asyncio.sleep(1)  # 接続安定化のため少し待機
             await self.speak_greeting(voice_client, member.display_name, "join")
         
         # ユーザーがボットのいるチャンネルから退出した場合
         elif before.channel == bot_channel and after.channel != bot_channel:
+            self.logger.info(f"TTS: User {member.display_name} left bot channel {bot_channel.name}")
             await self.speak_greeting(voice_client, member.display_name, "leave")
     
     async def generate_and_play_tts(self, voice_client: discord.VoiceClient, text: str, **kwargs):
