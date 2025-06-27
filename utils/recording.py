@@ -90,7 +90,7 @@ class RecordingManager:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.recording_dir = Path("recordings")
-        self.recording_dir.mkdir(exist_ok=True)
+        self.recording_dir.mkdir(parents=True, exist_ok=True)
         self.cleanup_hours = config.get("recording", {}).get("cleanup_hours", 1)
         self.max_duration = config.get("recording", {}).get("max_duration", 300)  # 5分
         self.sample_rate = 48000  # Discordの標準サンプルレート

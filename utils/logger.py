@@ -12,7 +12,7 @@ from typing import Dict, Any
 def setup_logging(config: Dict[str, Any]) -> logging.Logger:
     """ロギングの初期設定"""
     log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
     
     log_level = getattr(logging, config["logging"]["level"], logging.INFO)
     log_file = config["logging"]["file"]

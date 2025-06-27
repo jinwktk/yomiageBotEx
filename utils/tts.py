@@ -24,7 +24,7 @@ class TTSCache:
         self.cache_dir = cache_dir
         self.max_size = max_size
         self.cache_hours = cache_hours
-        self.cache_dir.mkdir(exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_info_file = self.cache_dir / "cache_info.json"
         self.cache_info = self.load_cache_info()
     

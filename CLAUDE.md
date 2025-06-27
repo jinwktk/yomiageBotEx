@@ -140,6 +140,16 @@ yomiageBotEx/
 - 管理者限定のバッファクリア機能
 - 音量調整機能付きリプレイ
 
+### 2024-06-28 エラー修正
+- **PyNaCl依存関係の追加**: discord.py[voice]、PyNaCl、ffmpeg-pythonをpyproject.tomlに追加
+- **ディレクトリ作成エラーの修正**: utils/tts.py、utils/recording.py、utils/logger.pyでmkdir()にparents=True引数を追加
+- **問題**: 
+  - `PyNaCl library needed in order to use voice`エラー
+  - `[WinError 3] 指定されたパスが見つかりません。: 'cache\\tts'`エラー
+- **修正内容**:
+  - pyproject.tomlに音声関連ライブラリを追加
+  - 全てのディレクトリ作成処理でparents=Trueを指定し、親ディレクトリも同時作成
+
 ### 今後の課題
 - Style-Bert-VITS2 APIサーバーのセットアップ手順作成
 - 実際の音声品質テストと最適化
