@@ -1,0 +1,29 @@
+# yomiageBotEx 設定ファイル
+
+bot:
+  command_prefix: "/"
+  auto_join: true
+  auto_leave: true
+  rate_limit_delay: [0.5, 1.0]  # API呼び出し時のランダム遅延（秒）
+
+tts:
+  model_path: "./models/rvc/"
+  sample_rate: 22050  # 軽量化のため低めに設定
+  cache_size: 5       # キャッシュする音声の数
+  timeout: 10         # TTS生成のタイムアウト（秒）
+
+audio:
+  buffer_minutes: 10  # 音声バッファの保持時間（分）
+  format: "mp3"       # 音声フォーマット
+  normalize: true     # 音量正規化
+
+recording:
+  enabled: false      # Phase 4まで無効
+  max_duration: 300   # 最大録音時間（秒）
+  cleanup_hours: 1    # 録音ファイルの自動削除時間
+
+logging:
+  level: "INFO"
+  file: "logs/yomiage.log"
+  cleanup_days: 1     # ログファイルの自動削除日数
+  max_size_mb: 10     # ログファイルの最大サイズ

@@ -1,0 +1,37 @@
+# 環境変数
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# ログファイル
+logs/
+*.log
+
+# 録音ファイル
+recordings/
+
+# 一時ファイル
+temp/
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# セッションファイル
+sessions.json
+recordings_buffer.pkl

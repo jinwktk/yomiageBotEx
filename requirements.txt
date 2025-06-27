@@ -1,0 +1,18 @@
+# Discord
+discord.py>=2.3.0
+
+# TTS (Phase 3で使用)
+# style-bert-vits2
+
+# オーディオ処理
+ffmpeg-python>=0.2.0
+
+# 設定管理
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# 非同期ファイル操作
+aiofiles>=23.0.0
+
+# ロギング拡張（オプション）
+# colorlog>=6.7.0
