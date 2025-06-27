@@ -221,8 +221,8 @@ class TTSManager:
                 "language": "JP"
             }
             
-            # Style-Bert-VITS2はクエリパラメータでリクエスト
-            async with self.session.post(
+            # Style-Bert-VITS2はGETメソッドでクエリパラメータを送信
+            async with self.session.get(
                 f"{self.api_url}/voice",
                 params=params
             ) as response:
