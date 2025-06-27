@@ -221,11 +221,14 @@ class TTSManager:
                 "language": "JP"
             }
             
+            logger.info(f"TTS API request: {self.api_url}/voice with params: {params}")
+            
             # Style-Bert-VITS2はGETメソッドでクエリパラメータを送信
             async with self.session.get(
                 f"{self.api_url}/voice",
                 params=params
             ) as response:
+                logger.info(f"TTS API response status: {response.status}")
                 if response.status == 200:
                     audio_data = await response.read()
                     
@@ -235,7 +238,8 @@ class TTSManager:
                     logger.info(f"Generated speech: {text[:30]}...")
                     return audio_data
                 else:
-                    logger.error(f"TTS API error: {response.status}")
+                    error_text = await response.text()
+                    logger.error(f"TTS API error: {response.status} - {error_text}")
                     return await self.generate_fallback_speech(text)
                     
         except Exception as e:
