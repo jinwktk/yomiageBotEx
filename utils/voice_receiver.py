@@ -184,8 +184,8 @@ class VoiceReceiver:
             
     def _generate_dummy_pcm(self) -> bytes:
         """ダミーPCMデータ生成（フォールバック）"""
-        # simple_recorder.pyと同様の音声生成ロジックを使用
         import time
+        import math
         
         # 現在時刻からパターンを生成
         elapsed = time.time() % 100  # 100秒でリセット
@@ -193,34 +193,45 @@ class VoiceReceiver:
         # 20ms分のサンプル（48kHz, 16bit, ステレオ）
         sample_rate = 48000
         frame_duration = 0.02
-        samples = int(sample_rate * frame_duration)
+        samples = int(sample_rate * frame_duration)  # 960サンプル
         
-        # シンプルで確実な音声パターンを生成
-        if int(elapsed) % 20 < 10:  # 20秒中10秒は音声あり
-            # シンプルな正弦波を生成（440Hz A音程）
-            t = np.arange(samples) / sample_rate
-            frequency = 440  # A音程
-            
-            # 基本的な正弦波
-            audio = np.sin(2 * np.pi * frequency * t) * 0.1  # 音量を小さく
-            
-            # ゆっくりとした音量変化
-            envelope = 0.5 + 0.3 * np.sin(elapsed * 0.3)
-            audio = audio * envelope
-            
-            # ステレオにコピー
-            stereo_audio = np.column_stack((audio, audio))
-        else:
-            # 完全無音区間
-            stereo_audio = np.zeros((samples, 2), dtype=np.float64)
+        # デバッグ: 5秒ごとに詳細ログ
+        if int(elapsed) % 5 < 0.1:
+            logger.debug(f"VoiceReceiver: Generating {samples} samples for {frame_duration}s, elapsed: {elapsed:.1f}s")
         
-        # クリッピング防止
-        stereo_audio = np.clip(stereo_audio, -0.9, 0.9)
+        # 音声パターンを生成
+        audio_data = []
         
-        # 16bit整数に変換
-        audio_int16 = (stereo_audio * 32767).astype(np.int16)
+        # 10秒音声、10秒無音のパターン
+        is_sound_period = int(elapsed) % 20 < 10
         
-        return audio_int16.tobytes('C')
+        for i in range(samples):
+            if is_sound_period:
+                # 単純な正弦波（440Hz）
+                t = i / sample_rate
+                value = math.sin(2 * math.pi * 440 * t) * 0.2  # 音量0.2
+                
+                # 16bit整数に変換（-32768 to 32767）
+                sample = int(value * 32767)
+                
+                # ステレオ（左右同じ）
+                audio_data.extend([sample, sample])
+            else:
+                # 無音
+                audio_data.extend([0, 0])
+        
+        # バイト列に変換
+        pcm_bytes = b''
+        for sample in audio_data:
+            # Little endianで16bit整数をバイト列に変換
+            pcm_bytes += sample.to_bytes(2, byteorder='little', signed=True)
+        
+        # デバッグ: 生成したデータのチェック
+        if int(elapsed) % 5 < 0.1:
+            max_val = max(abs(s) for s in audio_data)
+            logger.debug(f"VoiceReceiver: Generated {len(pcm_bytes)} bytes, max sample: {max_val}, sound_period: {is_sound_period}")
+        
+        return pcm_bytes
         
     def register_user(self, ssrc: int, user_id: int):
         """SSRCとユーザーIDのマッピングを登録"""
