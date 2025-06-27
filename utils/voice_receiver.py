@@ -196,38 +196,40 @@ class VoiceReceiver:
         samples = int(sample_rate * frame_duration)
         
         # より現実的な音声パターンを生成
-        if int(elapsed) % 10 < 7:  # 10秒中7秒は音声あり
+        if int(elapsed) % 15 < 8:  # 15秒中8秒は音声あり
             t = np.linspace(0, frame_duration, samples)
             
-            # 基本周波数（人の声の範囲）
-            f1 = 150 + 50 * np.sin(elapsed * 0.5)  # 100-200Hz
-            f2 = 300 + 100 * np.sin(elapsed * 0.3)  # 200-400Hz
-            f3 = 600 + 200 * np.sin(elapsed * 0.2)  # 400-800Hz
+            # より自然な音声周波数（人の声に近い）
+            # 基本周波数を安定化
+            base_freq = 200 + 50 * np.sin(elapsed * 0.1)  # ゆっくり変化する基本周波数
+            f1 = base_freq  # 基本周波数
+            f2 = base_freq * 2  # 2倍音
+            f3 = base_freq * 3  # 3倍音
             
-            # 複数の正弦波を組み合わせ
-            wave1 = np.sin(2 * np.pi * f1 * t) * 0.3
-            wave2 = np.sin(2 * np.pi * f2 * t) * 0.2
-            wave3 = np.sin(2 * np.pi * f3 * t) * 0.1
+            # より自然な正弦波を組み合わせ（音量を下げる）
+            wave1 = np.sin(2 * np.pi * f1 * t) * 0.15
+            wave2 = np.sin(2 * np.pi * f2 * t) * 0.08
+            wave3 = np.sin(2 * np.pi * f3 * t) * 0.04
             
             # 合成
             audio = wave1 + wave2 + wave3
             
-            # ランダムな音量変化
-            envelope = 0.5 + 0.3 * np.sin(elapsed * 2)
+            # より自然な音量変化（急激な変化を避ける）
+            envelope = 0.3 + 0.2 * np.sin(elapsed * 0.5)
             audio = audio * envelope
             
-            # ノイズを追加
-            noise = np.random.normal(0, 0.02, samples)
+            # 軽いノイズを追加（音量を下げる）
+            noise = np.random.normal(0, 0.005, samples)
             audio = audio + noise
             
-            # ステレオ化（左右で少し差をつける）
-            left_channel = audio * 0.9
-            right_channel = audio * 1.1
+            # ステレオ化（モノラル的に）
+            left_channel = audio * 0.95
+            right_channel = audio * 1.05
             
             stereo_audio = np.column_stack((left_channel, right_channel))
         else:
-            # 無音区間（環境ノイズのみ）
-            noise = np.random.normal(0, 0.005, (samples, 2))
+            # 無音区間（軽い環境ノイズのみ）
+            noise = np.random.normal(0, 0.001, (samples, 2))
             stereo_audio = noise
         
         # クリッピング防止
