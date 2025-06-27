@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-yomiageBotEx - Discord読み上げボット (Phase 1: 基本機能)
+yomiageBotEx - Discord読み上げボット (Phase 2: Cog構造 + 自動参加/退出)
 """
 
 import os
 import sys
 import asyncio
-import random
 import logging
 from pathlib import Path
 from typing import Optional
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 import yaml
 from dotenv import load_dotenv
+
+from utils.logger import setup_logging, start_log_cleanup_task
 
 # 環境変数の読み込み
 load_dotenv()
@@ -45,39 +45,8 @@ def load_config():
 # 設定の読み込み
 config = load_config()
 
-# ロギングの設定
-def setup_logging():
-    """ロギングの初期設定"""
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    
-    log_level = getattr(logging, config["logging"]["level"], logging.INFO)
-    log_file = config["logging"]["file"]
-    
-    # フォーマッターの設定
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # ファイルハンドラー
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setFormatter(formatter)
-    
-    # コンソールハンドラー
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    
-    # ロガーの設定
-    logger = logging.getLogger()
-    logger.setLevel(log_level)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
-
 # ロギングの初期化
-logger = setup_logging()
+logger = setup_logging(config)
 
 class YomiageBot(commands.Bot):
     """読み上げボットのメインクラス"""
@@ -101,12 +70,33 @@ class YomiageBot(commands.Bot):
         """起動時の初期設定"""
         logger.info("Bot setup started...")
         
+        # Cogの読み込み
+        await self.load_cogs()
+        
+        # ログクリーンアップタスクの開始
+        asyncio.create_task(start_log_cleanup_task(self.config))
+        
         # スラッシュコマンドの同期
         try:
             synced = await self.tree.sync()
             logger.info(f"Synced {len(synced)} command(s)")
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
+    
+    async def load_cogs(self):
+        """Cogを読み込む"""
+        cogs = [
+            "cogs.voice",
+        ]
+        
+        for cog in cogs:
+            try:
+                # Cogモジュールを動的にインポート
+                module = __import__(cog, fromlist=["setup"])
+                await module.setup(self, self.config)
+                logger.info(f"Loaded cog: {cog}")
+            except Exception as e:
+                logger.error(f"Failed to load cog {cog}: {e}")
     
     async def on_ready(self):
         """Bot準備完了時のイベント"""
@@ -117,7 +107,7 @@ class YomiageBot(commands.Bot):
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.listening,
-                name="/join でVCに参加"
+                name="自動参加・退出対応 | /join"
             )
         )
     
@@ -125,104 +115,8 @@ class YomiageBot(commands.Bot):
         """エラーハンドリング"""
         logger.error(f"Error in {event_method}", exc_info=True)
     
-    async def rate_limit_delay(self):
-        """レート制限対策の遅延"""
-        delay = random.uniform(*self.config["bot"]["rate_limit_delay"])
-        await asyncio.sleep(delay)
-
 # Botインスタンスの作成
 bot = YomiageBot()
-
-@bot.tree.command(name="join", description="ボイスチャンネルに参加します")
-async def join_command(interaction: discord.Interaction):
-    """VCに参加するコマンド"""
-    await bot.rate_limit_delay()
-    
-    # ユーザーがVCに接続しているか確認
-    if not interaction.user.voice:
-        await interaction.response.send_message(
-            "❌ ボイスチャンネルに接続してから実行してください。",
-            ephemeral=True
-        )
-        logger.warning(f"Join failed: {interaction.user} is not in a voice channel")
-        return
-    
-    channel = interaction.user.voice.channel
-    
-    # 既に接続している場合
-    if interaction.guild.voice_client:
-        if interaction.guild.voice_client.channel == channel:
-            await interaction.response.send_message(
-                f"✅ 既に {channel.name} に接続しています。",
-                ephemeral=True
-            )
-            return
-        else:
-            # 別のチャンネルに移動
-            try:
-                await interaction.guild.voice_client.move_to(channel)
-                await interaction.response.send_message(
-                    f"🔄 {channel.name} に移動しました。",
-                    ephemeral=True
-                )
-                logger.info(f"Moved to voice channel: {channel.name} in {interaction.guild.name}")
-                return
-            except Exception as e:
-                logger.error(f"Failed to move to voice channel: {e}")
-                await interaction.response.send_message(
-                    "❌ チャンネルの移動に失敗しました。",
-                    ephemeral=True
-                )
-                return
-    
-    # 新規接続
-    try:
-        await channel.connect(timeout=10.0, reconnect=True)
-        await interaction.response.send_message(
-            f"✅ {channel.name} に接続しました！",
-            ephemeral=True
-        )
-        logger.info(f"Connected to voice channel: {channel.name} in {interaction.guild.name}")
-    except asyncio.TimeoutError:
-        await interaction.response.send_message(
-            "❌ 接続がタイムアウトしました。",
-            ephemeral=True
-        )
-        logger.error("Voice connection timeout")
-    except Exception as e:
-        await interaction.response.send_message(
-            "❌ 接続に失敗しました。",
-            ephemeral=True
-        )
-        logger.error(f"Failed to connect to voice channel: {e}")
-
-@bot.tree.command(name="leave", description="ボイスチャンネルから退出します")
-async def leave_command(interaction: discord.Interaction):
-    """VCから退出するコマンド"""
-    await bot.rate_limit_delay()
-    
-    # ボットが接続しているか確認
-    if not interaction.guild.voice_client:
-        await interaction.response.send_message(
-            "❌ ボイスチャンネルに接続していません。",
-            ephemeral=True
-        )
-        return
-    
-    try:
-        channel_name = interaction.guild.voice_client.channel.name
-        await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message(
-            f"👋 {channel_name} から退出しました。",
-            ephemeral=True
-        )
-        logger.info(f"Disconnected from voice channel: {channel_name} in {interaction.guild.name}")
-    except Exception as e:
-        await interaction.response.send_message(
-            "❌ 退出に失敗しました。",
-            ephemeral=True
-        )
-        logger.error(f"Failed to disconnect from voice channel: {e}")
 
 def main():
     """メイン実行関数"""
