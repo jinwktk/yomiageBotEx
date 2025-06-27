@@ -140,7 +140,7 @@ yomiageBotEx/
 - 管理者限定のバッファクリア機能
 - 音量調整機能付きリプレイ
 
-### 2024-06-28 エラー修正
+### 2024-06-28 エラー修正（第1回）
 - **PyNaCl依存関係の追加**: discord.py[voice]、PyNaCl、ffmpeg-pythonをpyproject.tomlに追加
 - **ディレクトリ作成エラーの修正**: utils/tts.py、utils/recording.py、utils/logger.pyでmkdir()にparents=True引数を追加
 - **問題**: 
@@ -149,6 +149,20 @@ yomiageBotEx/
 - **修正内容**:
   - pyproject.tomlに音声関連ライブラリを追加
   - 全てのディレクトリ作成処理でparents=Trueを指定し、親ディレクトリも同時作成
+
+### 2024-06-28 機能修正（第2回）
+- **TTS音声再生の修正**: cogs/tts.pyでio.BytesIOからの直接再生を一時ファイル方式に変更
+- **録音機能の改善**: utils/recording.pyでDiscord音声受信の実装を改善
+- **音声受信の実装**: cogs/recording.pyにvoice_client.listen()を使用した音声受信を追加
+- **問題**:
+  - TTS音声が再生されない（FFmpegPCMAudioのpipe=True問題）
+  - 録音機能で音声データが受信されない
+  - `No audio data to save`エラー
+- **修正内容**:
+  - TTS再生で一時ファイルを使用するように変更
+  - RecordingSinkクラスをdiscord.sinks.Sinkベースに変更
+  - SimpleRecordingSinkでフォールバック実装を追加
+  - voice_clientでの音声受信開始・停止処理を追加
 
 ### 今後の課題
 - Style-Bert-VITS2 APIサーバーのセットアップ手順作成

@@ -34,25 +34,32 @@ class TTSCog(commands.Cog):
     async def play_audio_from_bytes(self, voice_client: discord.VoiceClient, audio_data: bytes):
         """バイト配列から音声を再生"""
         try:
-            # 一時ファイルを使わずにメモリから直接再生
-            audio_io = io.BytesIO(audio_data)
+            import tempfile
+            import os
             
-            # FFmpegを使用して音声を再生
-            source = FFmpegPCMAudio(
-                audio_io,
-                pipe=True,
-                before_options='-f wav',
-                options='-vn'
-            )
+            # 一時ファイルに音声データを保存
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                temp_file.write(audio_data)
+                temp_path = temp_file.name
             
-            if not voice_client.is_playing():
-                voice_client.play(source)
+            try:
+                # FFmpegを使用して音声を再生
+                source = FFmpegPCMAudio(temp_path)
                 
-                # 再生完了まで待機（最大10秒）
-                timeout = 10
-                while voice_client.is_playing() and timeout > 0:
-                    await asyncio.sleep(0.1)
-                    timeout -= 0.1
+                if not voice_client.is_playing():
+                    voice_client.play(source)
+                    
+                    # 再生完了まで待機（最大10秒）
+                    timeout = 10
+                    while voice_client.is_playing() and timeout > 0:
+                        await asyncio.sleep(0.1)
+                        timeout -= 0.1
+            finally:
+                # 一時ファイルを削除
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
                     
         except Exception as e:
             self.logger.error(f"Failed to play audio: {e}")

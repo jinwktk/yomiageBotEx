@@ -17,6 +17,7 @@ from typing import Dict, Any, Optional, List, Deque
 from collections import deque
 import json
 import threading
+import discord
 
 logger = logging.getLogger(__name__)
 
@@ -283,19 +284,26 @@ class RecordingManager:
             logger.info(f"Cleared audio buffer for guild {guild_id}")
 
 
-# Discord音声受信用のシンク（簡易実装）
-class RecordingSink:
+# Discord音声受信用のシンク
+class RecordingSink(discord.sinks.Sink):
     """Discord音声を受信するシンク"""
     
     def __init__(self, recording_manager: RecordingManager, guild_id: int):
+        super().__init__()
         self.recording_manager = recording_manager
         self.guild_id = guild_id
         self.is_recording = False
     
-    def write(self, data):
-        """音声データを受信"""
-        if self.is_recording and data:
-            self.recording_manager.add_audio_data(self.guild_id, data)
+    def write(self, data, user):
+        """音声データを受信（Discord.pyのSinkインターフェース）"""
+        if self.is_recording and data and not user.bot:
+            # 音声データをバッファに追加
+            self.recording_manager.add_audio_data(self.guild_id, data.file.read())
+    
+    def cleanup(self):
+        """クリーンアップ"""
+        self.is_recording = False
+        super().cleanup()
     
     def start_recording(self):
         """録音開始"""
@@ -306,6 +314,50 @@ class RecordingSink:
         """録音停止"""
         self.is_recording = False
         logger.info(f"Stopped recording for guild {self.guild_id}")
+
+
+# 簡易音声受信クラス（discord.sinksが利用できない場合のフォールバック）
+class SimpleRecordingSink:
+    """シンプルな録音管理クラス"""
+    
+    def __init__(self, recording_manager: RecordingManager, guild_id: int):
+        self.recording_manager = recording_manager
+        self.guild_id = guild_id
+        self.is_recording = False
+        self._recording_task = None
+    
+    def start_recording(self):
+        """録音開始（ダミーデータでテスト）"""
+        self.is_recording = True
+        logger.info(f"Started recording for guild {self.guild_id}")
+        
+        # テスト用のダミー音声データを定期的に追加
+        if not self._recording_task:
+            self._recording_task = asyncio.create_task(self._simulate_audio())
+    
+    def stop_recording(self):
+        """録音停止"""
+        self.is_recording = False
+        if self._recording_task:
+            self._recording_task.cancel()
+            self._recording_task = None
+        logger.info(f"Stopped recording for guild {self.guild_id}")
+    
+    async def _simulate_audio(self):
+        """音声データのシミュレート（テスト用）"""
+        try:
+            while self.is_recording:
+                # ダミーの音声データを生成（無音）
+                import numpy as np
+                sample_rate = 48000
+                duration = 0.1  # 100ms
+                samples = int(sample_rate * duration)
+                audio_data = np.zeros(samples, dtype=np.int16).tobytes()
+                
+                self.recording_manager.add_audio_data(self.guild_id, audio_data)
+                await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            pass
     
     def cleanup(self):
         """クリーンアップ"""
