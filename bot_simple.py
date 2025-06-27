@@ -305,7 +305,53 @@ async def replay_command(
             )
             
         else:
-            await ctx.respond("⚠️ ユーザーを指定してください。全体録音は未実装です。", ephemeral=True)
+            # 全員の音声をマージ
+            if not user_audio_buffers:
+                await ctx.respond("⚠️ 録音データがありません。", ephemeral=True)
+                return
+            
+            # 全ユーザーの音声データを収集・マージ
+            all_audio_data = []
+            user_count = 0
+            
+            for user_id, buffers in user_audio_buffers.items():
+                if not buffers:
+                    continue
+                    
+                # 最新5個のバッファを取得
+                sorted_buffers = sorted(buffers, key=lambda x: x[1])[-5:]
+                user_count += 1
+                
+                # ユーザーごとの音声データを結合
+                user_audio = io.BytesIO()
+                for buffer, timestamp in sorted_buffers:
+                    buffer.seek(0)
+                    user_audio.write(buffer.read())
+                
+                if user_audio.tell() > 0:  # データがある場合のみ追加
+                    user_audio.seek(0)
+                    all_audio_data.append(user_audio)
+            
+            if not all_audio_data:
+                await ctx.respond("⚠️ 有効な録音データがありません。", ephemeral=True)
+                return
+            
+            # 全員の音声を1つのファイルに結合
+            merged_audio = io.BytesIO()
+            for audio in all_audio_data:
+                audio.seek(0)
+                merged_audio.write(audio.read())
+            
+            merged_audio.seek(0)
+            
+            # WAVファイルとして保存
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"recording_all_{user_count}users_{timestamp}.wav"
+            
+            await ctx.respond(
+                f"🎵 全員の録音です（{user_count}人分、{duration}秒分）",
+                file=discord.File(merged_audio, filename=filename)
+            )
         
         # 録音再開
         await start_recording(vc, ctx.guild.id)
