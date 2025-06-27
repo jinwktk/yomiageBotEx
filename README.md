@@ -131,15 +131,15 @@ python -m style_bert_vits2.nlp.bert_models
 ### 3. APIサーバーの起動
 
 ```bash
-# APIサーバーを起動（127.0.0.1:5000で起動）
-python server_fastapi.py --host 127.0.0.1 --port 5000
+# APIサーバーを起動（デフォルトの127.0.0.1:8000で起動）
+python server_fastapi.py
 ```
 
 ### 4. 動作確認
 
 ```bash
 # APIサーバーが起動しているか確認
-curl http://127.0.0.1:5000/health
+curl http://127.0.0.1:8000/status
 ```
 
 成功すると、実際の音声合成での挨拶が再生されます。APIサーバーが動作していない場合は、自動的にフォールバック音声（ビープ音）が再生されます。

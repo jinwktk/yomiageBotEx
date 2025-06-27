@@ -175,7 +175,8 @@ class TTSManager:
         """TTSAPIサーバーが利用可能かチェック"""
         try:
             await self.init_session()
-            async with self.session.get(f"{self.api_url}/health") as response:
+            # Style-Bert-VITS2は/statusエンドポイントを使用
+            async with self.session.get(f"{self.api_url}/status") as response:
                 return response.status == 200
         except Exception as e:
             logger.warning(f"TTS API not available: {e}")
@@ -217,12 +218,13 @@ class TTSManager:
                 "model_id": model_id,
                 "speaker_id": speaker_id,
                 "style": style,
-                "format": "wav"
+                "language": "JP"
             }
             
+            # Style-Bert-VITS2はクエリパラメータでリクエスト
             async with self.session.post(
                 f"{self.api_url}/voice",
-                json=params
+                params=params
             ) as response:
                 if response.status == 200:
                     audio_data = await response.read()

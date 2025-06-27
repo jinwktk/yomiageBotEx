@@ -7,7 +7,7 @@ bot:
   rate_limit_delay: [0.5, 1.0]  # API呼び出し時のランダム遅延（秒）
 
 tts:
-  api_url: "http://127.0.0.1:5000"  # Style-Bert-VITS2 APIサーバーのURL
+  api_url: "http://127.0.0.1:8000"  # Style-Bert-VITS2 APIサーバーのURL
   timeout: 10                       # TTS生成のタイムアウト（秒）
   cache_size: 5                     # キャッシュする音声の数
   cache_hours: 24                   # キャッシュの有効期限（時間）
