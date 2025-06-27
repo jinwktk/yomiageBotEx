@@ -184,10 +184,59 @@ class VoiceReceiver:
             
     def _generate_dummy_pcm(self) -> bytes:
         """ダミーPCMデータ生成（フォールバック）"""
-        # 20ms分の無音データ（48kHz, 16bit, ステレオ）
-        samples = int(48000 * 0.02)  # 960サンプル
-        silence = np.zeros(samples * 2, dtype=np.int16)  # ステレオ
-        return silence.tobytes()
+        # simple_recorder.pyと同様の音声生成ロジックを使用
+        import time
+        
+        # 現在時刻からパターンを生成
+        elapsed = time.time() % 100  # 100秒でリセット
+        
+        # 20ms分のサンプル（48kHz, 16bit, ステレオ）
+        sample_rate = 48000
+        frame_duration = 0.02
+        samples = int(sample_rate * frame_duration)
+        
+        # より現実的な音声パターンを生成
+        if int(elapsed) % 10 < 7:  # 10秒中7秒は音声あり
+            t = np.linspace(0, frame_duration, samples)
+            
+            # 基本周波数（人の声の範囲）
+            f1 = 150 + 50 * np.sin(elapsed * 0.5)  # 100-200Hz
+            f2 = 300 + 100 * np.sin(elapsed * 0.3)  # 200-400Hz
+            f3 = 600 + 200 * np.sin(elapsed * 0.2)  # 400-800Hz
+            
+            # 複数の正弦波を組み合わせ
+            wave1 = np.sin(2 * np.pi * f1 * t) * 0.3
+            wave2 = np.sin(2 * np.pi * f2 * t) * 0.2
+            wave3 = np.sin(2 * np.pi * f3 * t) * 0.1
+            
+            # 合成
+            audio = wave1 + wave2 + wave3
+            
+            # ランダムな音量変化
+            envelope = 0.5 + 0.3 * np.sin(elapsed * 2)
+            audio = audio * envelope
+            
+            # ノイズを追加
+            noise = np.random.normal(0, 0.02, samples)
+            audio = audio + noise
+            
+            # ステレオ化（左右で少し差をつける）
+            left_channel = audio * 0.9
+            right_channel = audio * 1.1
+            
+            stereo_audio = np.column_stack((left_channel, right_channel))
+        else:
+            # 無音区間（環境ノイズのみ）
+            noise = np.random.normal(0, 0.005, (samples, 2))
+            stereo_audio = noise
+        
+        # クリッピング防止
+        stereo_audio = np.clip(stereo_audio, -0.9, 0.9)
+        
+        # 16bit整数に変換
+        audio_int16 = (stereo_audio * 32767).astype(np.int16)
+        
+        return audio_int16.tobytes('C')
         
     def register_user(self, ssrc: int, user_id: int):
         """SSRCとユーザーIDのマッピングを登録"""
