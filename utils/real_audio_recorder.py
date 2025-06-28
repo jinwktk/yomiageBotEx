@@ -7,6 +7,9 @@ import asyncio
 import logging
 import time
 import io
+import json
+import base64
+from pathlib import Path
 from typing import Dict, Callable, Optional, Any
 
 try:
@@ -31,6 +34,13 @@ class RealTimeAudioRecorder:
         self.active_recordings: Dict[int, asyncio.Task] = {}
         self.BUFFER_EXPIRATION = 900  # 15分
         self.is_available = PYCORD_AVAILABLE
+        
+        # 永続化設定
+        self.buffer_file = Path("data/audio_buffers.json")
+        self.buffer_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 起動時にバッファを復元
+        self.load_buffers()
         
     async def start_recording(self, guild_id: int, voice_client: discord.VoiceClient):
         """録音開始"""
@@ -113,6 +123,10 @@ class RealTimeAudioRecorder:
                     logger.warning(f"RealTimeRecorder: No audio.file for user {user_id}")
             
             logger.info(f"RealTimeRecorder: Processed {audio_count} audio files in callback")
+            
+            # バッファを永続化
+            if audio_count > 0:
+                self.save_buffers()
                         
         except Exception as e:
             logger.error(f"RealTimeRecorder: Error in finished_callback: {e}", exc_info=True)
@@ -150,6 +164,9 @@ class RealTimeAudioRecorder:
                 
                 if not self.guild_user_buffers[gid]:
                     del self.guild_user_buffers[gid]
+        
+        # バッファが変更された場合は保存
+        self.save_buffers()
     
     def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
         """ユーザーの音声バッファを取得（Guild別対応）"""
@@ -187,8 +204,112 @@ class RealTimeAudioRecorder:
         except Exception as e:
             logger.error(f"RealTimeRecorder Debug: Error getting status: {e}")
     
+    def save_buffers(self):
+        """音声バッファを永続化（最新20件のみ）"""
+        try:
+            # バッファサイズを制限
+            simplified_buffers = {}
+            
+            for guild_id, users in self.guild_user_buffers.items():
+                simplified_buffers[str(guild_id)] = {}
+                
+                for user_id, buffers in users.items():
+                    # 最新5件のみ保存
+                    recent_buffers = sorted(buffers, key=lambda x: x[1])[-5:]
+                    encoded_buffers = []
+                    
+                    for buffer, timestamp in recent_buffers:
+                        try:
+                            buffer.seek(0)
+                            audio_data = buffer.read()
+                            # Base64エンコードで文字列化
+                            encoded_data = base64.b64encode(audio_data).decode('utf-8')
+                            encoded_buffers.append({
+                                'data': encoded_data,
+                                'timestamp': timestamp,
+                                'size': len(audio_data)
+                            })
+                        except Exception as e:
+                            logger.warning(f"Failed to encode buffer for user {user_id}: {e}")
+                            continue
+                    
+                    if encoded_buffers:
+                        simplified_buffers[str(guild_id)][str(user_id)] = encoded_buffers
+            
+            # JSONファイルに保存
+            with open(self.buffer_file, 'w', encoding='utf-8') as f:
+                json.dump(simplified_buffers, f, indent=2)
+            
+            total_buffers = sum(len(users) for users in simplified_buffers.values())
+            logger.info(f"RealTimeRecorder: Saved {total_buffers} user buffers to {self.buffer_file}")
+            
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Failed to save buffers: {e}")
+    
+    def load_buffers(self):
+        """永続化された音声バッファを復元"""
+        try:
+            if not self.buffer_file.exists():
+                logger.info("RealTimeRecorder: No saved buffers found")
+                return
+            
+            with open(self.buffer_file, 'r', encoding='utf-8') as f:
+                saved_buffers = json.load(f)
+            
+            current_time = time.time()
+            restored_count = 0
+            
+            for guild_id_str, users in saved_buffers.items():
+                guild_id = int(guild_id_str)
+                self.guild_user_buffers[guild_id] = {}
+                
+                for user_id_str, buffers in users.items():
+                    user_id = int(user_id_str)
+                    user_buffers = []
+                    
+                    for buffer_data in buffers:
+                        timestamp = buffer_data['timestamp']
+                        
+                        # 期限切れバッファをスキップ
+                        if current_time - timestamp > self.BUFFER_EXPIRATION:
+                            continue
+                        
+                        try:
+                            # Base64デコードしてBytesIOに復元
+                            audio_data = base64.b64decode(buffer_data['data'])
+                            audio_buffer = io.BytesIO(audio_data)
+                            user_buffers.append((audio_buffer, timestamp))
+                            restored_count += 1
+                            
+                        except Exception as e:
+                            logger.warning(f"Failed to decode buffer for user {user_id}: {e}")
+                            continue
+                    
+                    if user_buffers:
+                        self.guild_user_buffers[guild_id][user_id] = user_buffers
+                
+                # 空のギルドを削除
+                if not self.guild_user_buffers[guild_id]:
+                    del self.guild_user_buffers[guild_id]
+            
+            logger.info(f"RealTimeRecorder: Restored {restored_count} audio buffers from disk")
+            
+            # 復元後にファイルサイズチェック
+            if self.buffer_file.exists():
+                file_size = self.buffer_file.stat().st_size / 1024  # KB
+                logger.info(f"RealTimeRecorder: Buffer file size: {file_size:.1f} KB")
+            
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Failed to load buffers: {e}")
+
     def cleanup(self):
         """クリーンアップ"""
+        try:
+            # バッファを保存してからクリア
+            self.save_buffers()
+        except:
+            pass
+        
         # 全ての録音タスクを停止
         for task in self.active_recordings.values():
             task.cancel()
