@@ -45,3 +45,6 @@ cache/
 
 # 録音ファイル
 recordings/
+
+# データファイル
+data/*
