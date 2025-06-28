@@ -160,6 +160,29 @@ class TTSManager:
         self.available_models: Optional[Dict[str, Any]] = None
         self.models_cache_time: Optional[datetime] = None
     
+    def reload_config(self):
+        """設定を再読み込み"""
+        try:
+            import yaml
+            from pathlib import Path
+            
+            config_file = Path("config.yaml")
+            if config_file.exists():
+                with open(config_file, "r", encoding="utf-8") as f:
+                    new_config = yaml.safe_load(f)
+                
+                # 設定を更新
+                self.config.update(new_config)
+                self.api_url = self.config.get("tts", {}).get("api_url", "http://127.0.0.1:5000")
+                self.timeout = self.config.get("tts", {}).get("timeout", 60)
+                
+                logger.info("TTSManager: Configuration reloaded")
+            else:
+                logger.warning("TTSManager: config.yaml not found for reload")
+                
+        except Exception as e:
+            logger.error(f"TTSManager: Failed to reload config: {e}")
+    
     async def __aenter__(self):
         """非同期コンテキストマネージャーの開始"""
         await self.init_session()
