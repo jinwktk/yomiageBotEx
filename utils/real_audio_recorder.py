@@ -32,6 +32,8 @@ class RealTimeAudioRecorder:
         # Guild別のユーザー音声バッファ: {guild_id: {user_id: [(buffer, timestamp), ...]}}
         self.guild_user_buffers: Dict[int, Dict[int, list]] = {}
         self.active_recordings: Dict[int, asyncio.Task] = {}
+        # 録音状態管理（Guild別）
+        self.recording_status: Dict[int, bool] = {}
         self.BUFFER_EXPIRATION = 900  # 15分
         self.is_available = PYCORD_AVAILABLE
         
@@ -49,10 +51,26 @@ class RealTimeAudioRecorder:
             return
             
         try:
-            # 既に録音中の場合はスキップ（重複エラーを防ぐ）
-            if hasattr(voice_client, 'recording') and voice_client.recording:
-                logger.debug(f"RealTimeRecorder: Already recording for guild {guild_id}, skipping")
+            # 内部状態チェック：既に録音を開始している場合はスキップ
+            if self.recording_status.get(guild_id, False):
+                logger.debug(f"RealTimeRecorder: Recording already active for guild {guild_id} (internal state), skipping")
                 return
+            
+            # 既に録音中の場合は停止してから開始
+            if hasattr(voice_client, 'recording') and voice_client.recording:
+                logger.info(f"RealTimeRecorder: Already recording for guild {guild_id}, stopping first")
+                voice_client.stop_recording()
+                # 停止の完了を確実に待つ
+                for i in range(10):  # 最大1秒待機
+                    await asyncio.sleep(0.1)
+                    if not (hasattr(voice_client, 'recording') and voice_client.recording):
+                        break
+                    logger.debug(f"RealTimeRecorder: Waiting for recording to stop... ({i+1}/10)")
+                
+                # それでも録音中の場合はスキップ
+                if hasattr(voice_client, 'recording') and voice_client.recording:
+                    logger.warning(f"RealTimeRecorder: Could not stop existing recording for guild {guild_id}, skipping")
+                    return
             
             # 既存の録音タスクがあれば停止
             if guild_id in self.active_recordings:
@@ -68,6 +86,8 @@ class RealTimeAudioRecorder:
                 await self._finished_callback(sink_obj, guild_id)
             
             voice_client.start_recording(sink, callback)
+            # 録音状態を設定
+            self.recording_status[guild_id] = True
             logger.info(f"RealTimeRecorder: Started recording for guild {guild_id} with channel {voice_client.channel.name}")
             logger.info(f"RealTimeRecorder: Voice client recording status: {voice_client.recording}")
             
@@ -85,6 +105,8 @@ class RealTimeAudioRecorder:
                 
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to start recording: {e}", exc_info=True)
+            # エラー時も状態をクリア
+            self.recording_status[guild_id] = False
     
     async def stop_recording(self, guild_id: int, voice_client: Optional[discord.VoiceClient] = None):
         """録音停止"""
@@ -94,6 +116,8 @@ class RealTimeAudioRecorder:
                 if hasattr(vc, 'recording') and vc.recording:
                     vc.stop_recording()
                 del self.connections[guild_id]
+                # 録音状態をクリア
+                self.recording_status[guild_id] = False
                 logger.info(f"RealTimeRecorder: Stopped recording for guild {guild_id}")
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to stop recording: {e}")
@@ -146,9 +170,14 @@ class RealTimeAudioRecorder:
             if audio_count > 0:
                 # save_buffers()は内部で非同期タスクを作成するので、awaitは不要
                 self.save_buffers()
+            
+            # 録音状態をクリア
+            self.recording_status[guild_id] = False
                         
         except Exception as e:
             logger.error(f"RealTimeRecorder: Error in finished_callback: {e}", exc_info=True)
+            # エラー時も状態をクリア
+            self.recording_status[guild_id] = False
 
 
     async def clean_old_buffers(self, guild_id: Optional[int] = None):
