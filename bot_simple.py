@@ -18,6 +18,14 @@ from discord.sinks import WaveSink
 import yaml
 from dotenv import load_dotenv
 
+# 音声接続の問題を解決するため、標準のVoiceClientではなく
+# より互換性の高い接続方法を使用
+try:
+    from discord import VoiceClient
+    VOICE_CLIENT_AVAILABLE = True
+except ImportError:
+    VOICE_CLIENT_AVAILABLE = False
+
 # 環境変数の読み込み
 load_dotenv()
 
@@ -60,7 +68,27 @@ config = load_config()
 intents = discord.Intents.all()
 # テスト用にギルドIDを指定（即座に同期される）
 DEBUG_GUILD_ID = 813783748566581249  # にめいやサーバー
-bot = discord.Bot(intents=intents, debug_guilds=[DEBUG_GUILD_ID])
+
+# 音声接続の安定性を向上させるためのオプション
+class CustomBot(discord.Bot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    async def connect_voice_safely(self, channel):
+        """安全な音声接続"""
+        try:
+            # self_deafとself_muteを設定して接続の安定性を向上
+            return await channel.connect(
+                timeout=30.0,
+                reconnect=True,
+                self_deaf=True,
+                self_mute=False
+            )
+        except Exception as e:
+            logger.error(f"Failed to connect safely: {e}")
+            raise
+
+bot = CustomBot(intents=intents, debug_guilds=[DEBUG_GUILD_ID])
 
 # グローバル変数
 connections: Dict[int, discord.VoiceClient] = {}
@@ -117,7 +145,8 @@ async def on_voice_state_update(member, before, after):
         if guild.id not in connections or not guild.voice_client:
             try:
                 logger.info(f"Attempting to connect to {after.channel.name}")
-                vc = await after.channel.connect(timeout=15.0, reconnect=True)
+                # カスタム安全接続メソッドを使用
+                vc = await bot.connect_voice_safely(after.channel)
                 await start_recording(vc, guild.id)
                 logger.info(f"Auto-joined: {after.channel.name} in {guild.name}")
             except Exception as e:
@@ -223,8 +252,8 @@ async def join_command(ctx: discord.ApplicationContext):
             await stop_recording(ctx.guild.id)
             await ctx.guild.voice_client.disconnect()
         
-        # 新規接続
-        vc = await channel.connect(timeout=15.0, reconnect=True)
+        # カスタム安全接続メソッドを使用
+        vc = await bot.connect_voice_safely(channel)
         await start_recording(vc, ctx.guild.id)
         
         await ctx.respond(f"✅ {channel.name} に接続し、録音を開始しました！")

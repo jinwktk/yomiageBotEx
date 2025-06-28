@@ -306,6 +306,20 @@ yomiageBotEx/
   - ✅ /replayコマンド：個別ユーザー録音再生
   - ✅ /replayコマンド：全員音声マージ再生
 
+### 2024-06-28 音声接続エラー修正（第7回）
+- **IndexError: list index out of range修正**: py-cordの音声接続で発生する暗号化モード選択エラーを解決
+- **CustomBotクラス追加**: 安全な音声接続のためのconnect_voice_safely()メソッドを実装
+- **接続パラメータ最適化**: self_deaf=True、timeout=30.0、reconnect=Trueで接続安定性向上
+- **問題**:
+  - `mode = modes[0]` で `IndexError: list index out of range`
+  - Discord音声サーバーとの暗号化モード互換性問題
+  - 標準のchannel.connect()が失敗
+- **修正内容**:
+  - CustomBotクラスでconnect_voice_safely()メソッド実装
+  - self_deafパラメータ追加で音声受信のオーバーヘッド削減
+  - タイムアウト値を15秒→30秒に延長
+  - 自動参加と手動/joinコマンド両方で同じ安全接続メソッド使用
+
 ### 今後の改善案
 - 音声品質の最適化とパフォーマンス向上
 - ユーザーごとの読み上げ設定（声質、速度等）
