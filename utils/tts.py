@@ -207,7 +207,7 @@ class TTSManager:
         try:
             # 高速なヘルスチェック用の短いタイムアウト
             connector = aiohttp.TCPConnector(limit=1)
-            timeout = aiohttp.ClientTimeout(total=3, connect=2)  # 短縮
+            timeout = aiohttp.ClientTimeout(total=10, connect=5)  # ヘルスチェック用
             
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.get(f"{self.api_url}/status") as response:

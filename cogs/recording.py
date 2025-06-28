@@ -168,9 +168,9 @@ class RecordingCog(commands.Cog):
                     await self.real_time_recorder.start_recording(guild.id, voice_client)
                     self.logger.info(f"Recording: Started real-time recording for {voice_client.channel.name}")
                     
-                    # 録音状況デバッグ
+                    # 録音状況デバッグ（一時的に無効化 - パフォーマンス問題回避）
                     await asyncio.sleep(1)  # 録音開始を待つ
-                    self.real_time_recorder.debug_recording_status(guild.id)
+                    # self.real_time_recorder.debug_recording_status(guild.id)
                 except Exception as e:
                     self.logger.error(f"Recording: Failed to start real-time recording: {e}")
                     # フォールバック: シミュレーション録音
