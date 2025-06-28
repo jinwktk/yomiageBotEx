@@ -70,7 +70,7 @@ class RealTimeAudioRecorder:
         """ギルド用の音声シンクを取得"""
         if guild_id not in self.guild_sinks:
             def audio_callback(user_id: int, audio_data: bytes):
-                self.recording_manager.add_audio_data(guild_id, audio_data)
+                self.recording_manager.add_audio_data(guild_id, audio_data, user_id)
                 
             self.guild_sinks[guild_id] = AudioSink(audio_callback)
         
@@ -83,7 +83,7 @@ class RealTimeAudioRecorder:
             if hasattr(voice_client, 'start_recording') and callable(voice_client.start_recording):
                 # 音声受信コールバック
                 def audio_callback(user_id: int, pcm_data: bytes):
-                    self.recording_manager.add_audio_data(guild_id, pcm_data)
+                    self.recording_manager.add_audio_data(guild_id, pcm_data, user_id)
                     
                 voice_client.start_recording(audio_callback)
                 logger.info(f"RealTimeRecorder: Started enhanced recording for guild {guild_id}")

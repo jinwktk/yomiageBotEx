@@ -321,6 +321,22 @@ yomiageBotEx/
   - フォールバック機能：エラー時は基本的なconnect()を試行
   - タイムアウト値を15秒→30秒に延長
 
+### 2024-06-28 bot.pyへのユーザー別録音機能実装（第8回）
+- **bot_simple.pyの機能をbot.pyに統合**: /replayコマンドにユーザー指定機能を追加
+- **RecordingManagerの拡張**:
+  - `user_buffers`辞書を追加（ギルドID → ユーザーID → AudioBuffer）
+  - `add_audio_data`メソッドにuser_idパラメータ追加
+  - `save_recent_audio`メソッドにtarget_user_idパラメータ追加
+  - `_merge_user_audio`メソッドで全ユーザー音声をマージ
+- **RealTimeAudioRecorderの修正**:
+  - audio_callbackでユーザーIDを渡すように変更
+  - ユーザー別の音声データを個別に保存
+- **/replayコマンドの機能拡張**:
+  - userパラメータ追加（Optional[discord.Member]）
+  - 特定ユーザー指定時：そのユーザーの音声のみ
+  - ユーザー未指定時：全ユーザーの音声をマージ
+  - ファイル名にユーザー情報を含める（_user{id}、_all_{count}users）
+
 ### 今後の改善案
 - 音声品質の最適化とパフォーマンス向上
 - ユーザーごとの読み上げ設定（声質、速度等）

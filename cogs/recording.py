@@ -153,12 +153,14 @@ class RecordingCog(commands.Cog):
     
     @app_commands.command(name="replay", description="最近の音声を録音してチャットに投稿します")
     @app_commands.describe(
-        duration="録音する時間（秒）。最大300秒まで"
+        duration="録音する時間（秒）。最大300秒まで",
+        user="対象ユーザー（省略時は全員の音声をマージ）"
     )
     async def replay_command(
         self, 
         interaction: discord.Interaction, 
-        duration: int = 30
+        duration: int = 30,
+        user: Optional[discord.Member] = None
     ):
         """最近の音声を録音・再生するコマンド"""
         await self.rate_limit_delay()
@@ -196,14 +198,21 @@ class RecordingCog(commands.Cog):
             recording_id = await self.recording_manager.save_recent_audio(
                 guild_id=interaction.guild.id,
                 duration_seconds=float(duration),
-                requester_id=interaction.user.id
+                requester_id=interaction.user.id,
+                target_user_id=user.id if user else None
             )
             
             if not recording_id:
-                await interaction.followup.send(
-                    "❌ 録音データが見つかりません。しばらく音声がない可能性があります。",
-                    ephemeral=True
-                )
+                if user:
+                    await interaction.followup.send(
+                        f"❌ {user.mention} の録音データが見つかりません。",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "❌ 録音データが見つかりません。しばらく音声がない可能性があります。",
+                        ephemeral=True
+                    )
                 return
             
             # 録音ファイルのパスを取得
@@ -222,12 +231,18 @@ class RecordingCog(commands.Cog):
                     filename=f"recording_{recording_id[:8]}.wav"
                 )
                 
-                await interaction.followup.send(
-                    f"🎵 過去{duration}秒間の録音です",
-                    file=file
-                )
+                if user:
+                    await interaction.followup.send(
+                        f"🎵 {user.mention} の過去{duration}秒間の録音です",
+                        file=file
+                    )
+                else:
+                    await interaction.followup.send(
+                        f"🎵 全員の過去{duration}秒間の録音です",
+                        file=file
+                    )
             
-            self.logger.info(f"Replaying {duration}s audio for {interaction.user} in {interaction.guild.name}")
+            self.logger.info(f"Replaying {duration}s audio (user: {user}) for {interaction.user} in {interaction.guild.name}")
             
         except Exception as e:
             self.logger.error(f"Failed to replay audio: {e}")

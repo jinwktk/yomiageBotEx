@@ -99,6 +99,9 @@ class RecordingManager:
         # ギルドごとの音声バッファ
         self.buffers: Dict[int, AudioBuffer] = {}
         
+        # ユーザーごとの音声バッファ（ギルドID -> ユーザーID -> AudioBuffer）
+        self.user_buffers: Dict[int, Dict[int, AudioBuffer]] = {}
+        
         # 録音ファイル情報
         self.recordings_info_file = self.recording_dir / "recordings_info.json"
         self.recordings_info = self.load_recordings_info()
@@ -131,8 +134,9 @@ class RecordingManager:
             )
         return self.buffers[guild_id]
     
-    def add_audio_data(self, guild_id: int, audio_data: bytes):
+    def add_audio_data(self, guild_id: int, audio_data: bytes, user_id: Optional[int] = None):
         """音声データをバッファに追加"""
+        # 全体バッファに追加
         buffer = self.get_buffer(guild_id)
         
         # チャンクの推定時間（簡易計算）
@@ -140,23 +144,55 @@ class RecordingManager:
         chunk_duration = len(audio_data) / (self.sample_rate * 2 * 2)  # 16bit stereo = 4bytes/sample
         buffer.add_audio_chunk(audio_data, chunk_duration)
         
+        # ユーザー別バッファに追加
+        if user_id is not None:
+            if guild_id not in self.user_buffers:
+                self.user_buffers[guild_id] = {}
+            if user_id not in self.user_buffers[guild_id]:
+                buffer_minutes = self.config.get("audio", {}).get("buffer_minutes", 10)
+                self.user_buffers[guild_id][user_id] = AudioBuffer(
+                    max_duration_minutes=buffer_minutes,
+                    sample_rate=self.sample_rate
+                )
+            user_buffer = self.user_buffers[guild_id][user_id]
+            user_buffer.add_audio_chunk(audio_data, chunk_duration)
+        
         # デバッグ: 音声データの詳細をログ出力
         if len(buffer.buffer) % 50 == 0:  # 50チャンクごと（約1秒）
             # 音声データの中身をチェック
             import numpy as np
             audio_array = np.frombuffer(audio_data, dtype=np.int16)
             max_amplitude = np.max(np.abs(audio_array)) if len(audio_array) > 0 else 0
-            logger.debug(f"Recording buffer (guild {guild_id}): {len(buffer.buffer)} chunks, {buffer.total_duration:.1f}s, latest chunk: {len(audio_data)} bytes, max_amp: {max_amplitude}, first 8 bytes: {audio_data[:8].hex()}")
+            logger.debug(f"Recording buffer (guild {guild_id}, user {user_id}): {len(buffer.buffer)} chunks, {buffer.total_duration:.1f}s, latest chunk: {len(audio_data)} bytes, max_amp: {max_amplitude}, first 8 bytes: {audio_data[:8].hex()}")
     
     async def save_recent_audio(
         self, 
         guild_id: int, 
         duration_seconds: float = 30.0,
-        requester_id: Optional[int] = None
+        requester_id: Optional[int] = None,
+        target_user_id: Optional[int] = None
     ) -> Optional[str]:
         """最近の音声を録音ファイルとして保存"""
-        buffer = self.get_buffer(guild_id)
-        audio_data = buffer.get_recent_audio(duration_seconds)
+        if target_user_id is not None:
+            # 特定ユーザーの音声
+            if guild_id not in self.user_buffers or target_user_id not in self.user_buffers[guild_id]:
+                logger.warning(f"No audio data for user {target_user_id}")
+                return None
+            buffer = self.user_buffers[guild_id][target_user_id]
+            audio_data = buffer.get_recent_audio(duration_seconds)
+            user_suffix = f"_user{target_user_id}"
+        else:
+            # 全体の音声（全ユーザーマージ）
+            if guild_id not in self.user_buffers or not self.user_buffers[guild_id]:
+                # ユーザー別バッファがない場合は全体バッファを使用
+                buffer = self.get_buffer(guild_id)
+                audio_data = buffer.get_recent_audio(duration_seconds)
+                user_suffix = "_all"
+            else:
+                # 全ユーザーの音声をマージ
+                audio_data = await self._merge_user_audio(guild_id, duration_seconds)
+                user_count = len(self.user_buffers[guild_id])
+                user_suffix = f"_all_{user_count}users"
         
         if not audio_data:
             logger.warning("No audio data to save")
@@ -164,7 +200,7 @@ class RecordingManager:
         
         # ファイル名生成
         timestamp = datetime.now()
-        filename = f"recording_{guild_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.wav"
+        filename = f"recording_{guild_id}{user_suffix}_{timestamp.strftime('%Y%m%d_%H%M%S')}.wav"
         file_path = self.recording_dir / filename
         
         try:
@@ -189,6 +225,23 @@ class RecordingManager:
         except Exception as e:
             logger.error(f"Failed to save recording: {e}")
             return None
+    
+    async def _merge_user_audio(self, guild_id: int, duration_seconds: float) -> Optional[bytes]:
+        """全ユーザーの音声をマージ"""
+        if guild_id not in self.user_buffers:
+            return None
+        
+        all_audio_data = []
+        for user_id, buffer in self.user_buffers[guild_id].items():
+            user_audio = buffer.get_recent_audio(duration_seconds)
+            if user_audio:
+                all_audio_data.append(user_audio)
+        
+        if not all_audio_data:
+            return None
+        
+        # 単純に連結（より高度なミキシングも可能）
+        return b''.join(all_audio_data)
     
     async def save_as_wav(self, file_path: Path, audio_data: bytes):
         """音声データをWAVファイルとして保存"""
