@@ -168,6 +168,7 @@ class UserSettingsCog(commands.Cog):
             
             if available_models:
                 description += f"\n\n📋 **利用可能モデル数:** {len(available_models)}種類"
+                description += f"\n🔽 **まずモデルを選択してください。選択後にスタイル選択が表示されます。**"
             else:
                 description += "\n\n⚠️ **モデル情報を取得できませんでした（フォールバック選択肢を使用）**"
             
@@ -259,11 +260,7 @@ class GlobalTTSSettingsView(discord.ui.View):
         if model_options:
             self.add_item(TTSModelSelect(placeholder="TTSモデルを選択", options=model_options))
         
-        # 現在選択されているモデルのスタイル選択肢を生成
-        style_options = self._create_style_options(self.current_model)
-        
-        if style_options:
-            self.add_item(TTSStyleSelect(placeholder="スタイルを選択", options=style_options))
+        # 初期状態ではスタイル選択は表示しない（モデル選択後に動的追加）
     
     def _create_model_options(self) -> List[discord.SelectOption]:
         """モデル選択肢を作成"""
@@ -331,6 +328,18 @@ class GlobalTTSSettingsView(discord.ui.View):
         
         return options[:25]  # 25個まで制限
     
+    def _update_style_select(self, selected_model_id: int):
+        """選択されたモデルに基づいてスタイル選択を更新"""
+        # 既存のスタイル選択を削除
+        self.children = [child for child in self.children if not isinstance(child, TTSStyleSelect)]
+        
+        # 新しいスタイル選択肢を生成
+        style_options = self._create_style_options(selected_model_id)
+        
+        if style_options:
+            # 新しいスタイル選択を追加
+            self.add_item(TTSStyleSelect(placeholder="スタイルを選択", options=style_options))
+    
     async def on_timeout(self):
         """タイムアウト時の処理"""
         # ビューを無効化
@@ -362,18 +371,40 @@ class TTSModelSelect(discord.ui.Select):
                 if message_reader_cog and hasattr(message_reader_cog, 'tts_manager'):
                     message_reader_cog.tts_manager.reload_config()
             
-            # モデル名を取得して表示
+            # モデル名を取得
             model_name = "不明"
             if view.available_models and str(new_model_id) in view.available_models:
                 model_info = view.available_models[str(new_model_id)]
                 speaker_names = list(model_info.get("id2spk", {}).values())
                 model_name = speaker_names[0] if speaker_names else f"モデル{new_model_id}"
             
-            await interaction.response.send_message(
-                f"✅ TTSモデルを '{model_name}' (ID: {new_model_id}) に変更しました。",
-                ephemeral=True
+            # スタイル選択を更新
+            view._update_style_select(new_model_id)
+            
+            # 新しいEmbedを作成
+            embed = discord.Embed(
+                title="⚙️ サーバー全体のTTS設定",
+                color=discord.Color.gold()
             )
-            view.cog.logger.info(f"Global TTS model updated to {new_model_id}")
+            
+            description = f"**現在の設定:**\n" \
+                         f"🎤 **TTS設定（全機能共通）**\n" \
+                         f"モデル: {model_name} (ID: {new_model_id}) | " \
+                         f"スタイル: {view.tts_config.get('style', 'Neutral')}"
+            
+            if view.available_models:
+                description += f"\n\n📋 **利用可能モデル数:** {len(view.available_models)}種類"
+                description += f"\n✅ **モデルを選択しました。下のスタイル選択で声の調子を選んでください。**"
+            else:
+                description += "\n\n⚠️ **モデル情報を取得できませんでした（フォールバック選択肢を使用）**"
+            
+            embed.description = description
+            embed.set_footer(text="下のプルダウンメニューから設定を変更してください（全ユーザーに即座に反映されます）")
+            
+            # メッセージを編集して新しいビューを表示
+            await interaction.response.edit_message(embed=embed, view=view)
+            
+            view.cog.logger.info(f"Global TTS model updated to {new_model_id} ({model_name})")
             
         except Exception as e:
             view.cog.logger.error(f"Failed to update TTS model: {e}")
@@ -407,10 +438,36 @@ class TTSStyleSelect(discord.ui.Select):
                 if message_reader_cog and hasattr(message_reader_cog, 'tts_manager'):
                     message_reader_cog.tts_manager.reload_config()
             
-            await interaction.response.send_message(
-                f"✅ TTSスタイルを '{new_style}' に変更しました。",
-                ephemeral=True
+            # モデル名を取得
+            model_name = "不明"
+            if view.available_models and str(view.current_model) in view.available_models:
+                model_info = view.available_models[str(view.current_model)]
+                speaker_names = list(model_info.get("id2spk", {}).values())
+                model_name = speaker_names[0] if speaker_names else f"モデル{view.current_model}"
+            
+            # 新しいEmbedを作成
+            embed = discord.Embed(
+                title="⚙️ サーバー全体のTTS設定",
+                color=discord.Color.green()  # 設定完了を表すため緑色に
             )
+            
+            description = f"**現在の設定:**\n" \
+                         f"🎤 **TTS設定（全機能共通）**\n" \
+                         f"モデル: {model_name} (ID: {view.current_model}) | " \
+                         f"スタイル: {new_style}"
+            
+            if view.available_models:
+                description += f"\n\n📋 **利用可能モデル数:** {len(view.available_models)}種類"
+                description += f"\n✅ **設定完了！メッセージ読み上げと挨拶に反映されます。**"
+            else:
+                description += "\n\n⚠️ **モデル情報を取得できませんでした（フォールバック選択肢を使用）**"
+            
+            embed.description = description
+            embed.set_footer(text="設定を変更したい場合は、再度 /set_global_tts コマンドを実行してください")
+            
+            # メッセージを編集
+            await interaction.response.edit_message(embed=embed, view=view)
+            
             view.cog.logger.info(f"Global TTS style updated to {new_style}")
             
         except Exception as e:
