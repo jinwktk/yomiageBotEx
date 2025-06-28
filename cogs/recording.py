@@ -108,7 +108,7 @@ class RecordingCog(commands.Cog):
             
             # リアルタイム録音を開始
             try:
-                self.real_time_recorder.start_recording(guild.id, voice_client)
+                await self.real_time_recorder.start_recording(guild.id, voice_client)
                 self.logger.info(f"Recording: Started real-time recording for {bot_channel.name}")
             except Exception as e:
                 self.logger.error(f"Recording: Failed to start real-time recording: {e}")
