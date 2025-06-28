@@ -357,8 +357,8 @@ class TTSManager:
         try:
             await self.init_session()
             
-            # Style-Bert-VITS2のモデル一覧API
-            async with self.session.get(f"{self.api_url}/models") as response:
+            # Style-Bert-VITS2のモデル一覧API（/models/refresh POST）
+            async with self.session.post(f"{self.api_url}/models/refresh") as response:
                 if response.status == 200:
                     models_data = await response.json()
                     self.available_models = models_data
@@ -366,7 +366,21 @@ class TTSManager:
                     logger.info(f"Retrieved {len(models_data)} available models")
                     return models_data
                 else:
-                    logger.error(f"Failed to get models: {response.status}")
+                    error_text = await response.text()
+                    logger.error(f"Failed to get models: {response.status} - {error_text}")
+                    
+                    # フォールバック: GETでも試行
+                    try:
+                        async with self.session.get(f"{self.api_url}/models") as fallback_response:
+                            if fallback_response.status == 200:
+                                models_data = await fallback_response.json()
+                                self.available_models = models_data
+                                self.models_cache_time = datetime.now()
+                                logger.info(f"Retrieved {len(models_data)} available models (fallback)")
+                                return models_data
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback GET /models also failed: {fallback_error}")
+                    
                     return None
                     
         except Exception as e:
