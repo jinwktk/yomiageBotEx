@@ -486,6 +486,9 @@ yomiageBotEx/
   - ✅ タイムアウト問題の解決
   - ✅ 全コマンドephemeral化
   - ✅ 起動時ログローテーション
+  - ✅ 非同期処理最適化
+  - ✅ グローバル例外ハンドラー
+  - ✅ 音声録音安定性向上
 
 ### 2024-06-28 バグ修正・改善（第10回）
 - **aiohttp セッション適切なクリーンアップ実装**: Bot終了時にTTSManagerのHTTPセッションが確実に閉じられるように修正
@@ -507,6 +510,23 @@ yomiageBotEx/
 - **目的**: 
   - ユーザーの応答を他のユーザーから隠す（プライバシー保護）
   - 再起動ごとに新しいログファイルで開始（管理性向上）
+
+### 2024-06-28 安定性改善（第12回）
+- **音声録音の例外修正**: `utils/real_audio_recorder.py`で`_finished_callback`をasync化してコルーチン要求エラーを解決
+- **replayコマンドの並列処理化**: 
+  - `cogs/recording.py`で重い処理を`_process_replay_async`として分離
+  - `asyncio.create_task`でバックグラウンド実行し、ボットのブロックを回避
+  - `ctx.defer(ephemeral=True)`で即座に応答、結果は`ctx.followup.send`で送信
+- **グローバル例外ハンドラー強化**: 
+  - `bot.py`に`on_application_command_error`と`on_command_error`を追加
+  - 全ての例外を`exc_info=True`付きでログ記録
+  - ユーザーへの適切なエラー通知
+- **非同期I/O最適化**: `save_buffers`をワーカータスクとして実行し、メインループのブロックを防止
+- **問題解決**:
+  - ❌ **TypeError: A coroutine object is required**: コールバック関数のasync化で解決
+  - ❌ **Voice heartbeat blocked**: replayコマンドの並列処理化で解決  
+  - ❌ **replayコマンドがephemeralでない**: defer(ephemeral=True)とfollowup.send(ephemeral=True)で解決
+  - ❌ **未捕捉の例外**: グローバルエラーハンドラーで全て捕捉・ログ記録
 
 ### 今後の改善案
 - Web管理画面の追加

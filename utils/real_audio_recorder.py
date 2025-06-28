@@ -63,9 +63,9 @@ class RealTimeAudioRecorder:
             sink = WaveSink()
             self.connections[guild_id] = voice_client
             
-            # コールバック関数をラムダで包む（guild_idを渡すため）
-            def callback(sink_obj):
-                self._finished_callback(sink_obj, guild_id)
+            # コールバック関数をラムダで包む（guild_idを渡すため、asyncで包む）
+            async def callback(sink_obj):
+                await self._finished_callback(sink_obj, guild_id)
             
             voice_client.start_recording(sink, callback)
             logger.info(f"RealTimeRecorder: Started recording for guild {guild_id} with channel {voice_client.channel.name}")
@@ -100,7 +100,7 @@ class RealTimeAudioRecorder:
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to stop recording: {e}")
     
-    def _finished_callback(self, sink: WaveSink, guild_id: int):
+    async def _finished_callback(self, sink: WaveSink, guild_id: int):
         """録音完了時のコールバック（bot_simple.pyから移植）"""
         try:
             logger.info(f"RealTimeRecorder: Finished callback called for guild {guild_id}")
@@ -192,8 +192,8 @@ class RealTimeAudioRecorder:
                 if not self.guild_user_buffers[gid]:
                     del self.guild_user_buffers[gid]
         
-        # バッファが変更された場合は保存
-        self.save_buffers()
+        # バッファが変更された場合は保存（非同期タスクとして実行）
+        asyncio.create_task(self._save_buffers_async())
     
     def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
         """ユーザーの音声バッファを取得（Guild別対応）"""
@@ -322,6 +322,13 @@ class RealTimeAudioRecorder:
             
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to save buffers: {e}")
+    
+    async def _save_buffers_async(self):
+        """非同期でバッファを保存（ワーカータスク）"""
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, self.save_buffers)
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Failed to save buffers async: {e}")
     
     def load_buffers(self):
         """永続化された音声バッファを復元"""

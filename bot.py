@@ -228,6 +228,23 @@ class YomiageBot(discord.Bot):
         """エラーハンドリング"""
         logger.error(f"Error in {event_method}", exc_info=True)
     
+    async def on_application_command_error(self, ctx, error):
+        """スラッシュコマンドのエラーハンドリング"""
+        logger.error(f"Application command error in {ctx.command.name}: {error}", exc_info=True)
+        
+        # ユーザーへのエラー通知
+        try:
+            if ctx.response.is_done():
+                await ctx.followup.send(f"❌ コマンドの実行中にエラーが発生しました: {str(error)}", ephemeral=True)
+            else:
+                await ctx.respond(f"❌ コマンドの実行中にエラーが発生しました: {str(error)}", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Failed to send error message to user: {e}")
+    
+    async def on_command_error(self, ctx, error):
+        """通常コマンドのエラーハンドリング"""
+        logger.error(f"Command error in {ctx.command}: {error}", exc_info=True)
+    
     async def close(self):
         """Bot終了時のクリーンアップ"""
         logger.info("Bot is shutting down, cleaning up resources...")

@@ -194,7 +194,7 @@ class RecordingCog(commands.Cog):
         user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None
     ):
         """録音をリプレイ（bot_simple.pyの実装を統合）"""
-        await ctx.defer()
+        await ctx.defer(ephemeral=True)
         
         if not self.recording_enabled:
             await ctx.respond("⚠️ 録音機能が無効です。", ephemeral=True)
@@ -204,6 +204,14 @@ class RecordingCog(commands.Cog):
             await ctx.respond("⚠️ 現在録音中ではありません。", ephemeral=True)
             return
         
+        # 重い処理を別タスクで実行してボットのブロックを回避
+        asyncio.create_task(self._process_replay_async(ctx, duration, user))
+        
+        # すぐにユーザーに応答
+        await ctx.respond("🎵 録音を処理中です...", ephemeral=True)
+    
+    async def _process_replay_async(self, ctx, duration: float, user):
+        """replayコマンドの重い処理を非同期で実行"""
         try:
             import io
             from datetime import datetime
@@ -230,13 +238,13 @@ class RecordingCog(commands.Cog):
             if user:
                 # 特定ユーザーの音声
                 if user.id not in user_audio_buffers or not user_audio_buffers[user.id]:
-                    await ctx.respond(f"⚠️ {user.mention} の音声データが見つかりません。", ephemeral=True)
+                    await ctx.followup.send(f"⚠️ {user.mention} の音声データが見つかりません。", ephemeral=True)
                     return
                 
                 # 最新のバッファを取得
                 sorted_buffers = sorted(user_audio_buffers[user.id], key=lambda x: x[1])
                 if not sorted_buffers:
-                    await ctx.respond(f"⚠️ {user.mention} の音声データがありません。", ephemeral=True)
+                    await ctx.followup.send(f"⚠️ {user.mention} の音声データがありません。", ephemeral=True)
                     return
                 
                 # 最新のバッファを結合
@@ -253,15 +261,16 @@ class RecordingCog(commands.Cog):
                 
                 processed_buffer = await self._process_audio_buffer(audio_buffer)
                 
-                await ctx.respond(
+                await ctx.followup.send(
                     f"🎵 {user.mention} の録音です（{duration}秒分、ノーマライズ済み）",
-                    file=discord.File(processed_buffer, filename=filename)
+                    file=discord.File(processed_buffer, filename=filename),
+                    ephemeral=True
                 )
                 
             else:
                 # 全員の音声をマージ
                 if not user_audio_buffers:
-                    await ctx.respond("⚠️ 録音データがありません。", ephemeral=True)
+                    await ctx.followup.send("⚠️ 録音データがありません。", ephemeral=True)
                     return
                 
                 # 全ユーザーの音声データを収集・マージ
@@ -287,7 +296,7 @@ class RecordingCog(commands.Cog):
                         all_audio_data.append(user_audio)
                 
                 if not all_audio_data:
-                    await ctx.respond("⚠️ 有効な録音データがありません。", ephemeral=True)
+                    await ctx.followup.send("⚠️ 有効な録音データがありません。", ephemeral=True)
                     return
                 
                 # 全員の音声を1つのファイルに結合
@@ -304,16 +313,17 @@ class RecordingCog(commands.Cog):
                 
                 processed_buffer = await self._process_audio_buffer(merged_audio)
                 
-                await ctx.respond(
+                await ctx.followup.send(
                     f"🎵 全員の録音です（{user_count}人分、{duration}秒分、ノーマライズ済み）",
-                    file=discord.File(processed_buffer, filename=filename)
+                    file=discord.File(processed_buffer, filename=filename),
+                    ephemeral=True
                 )
             
             self.logger.info(f"Replaying {duration}s audio (user: {user}) for {ctx.user} in {ctx.guild.name}")
             
         except Exception as e:
-            self.logger.error(f"Failed to replay audio: {e}")
-            await ctx.respond(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
+            self.logger.error(f"Failed to replay audio: {e}", exc_info=True)
+            await ctx.followup.send(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
     
     @discord.slash_command(name="recordings", description="最近の録音リストを表示します")
     async def recordings_command(self, ctx: discord.ApplicationContext):
