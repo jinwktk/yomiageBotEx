@@ -649,6 +649,37 @@ yomiageBotEx/
   - Discord音声接続の安定性向上
   - ユーザー体験向上
 
+### 2024-06-29 録音重複エラー修正（第18回）
+- **discord.sinks.errors.RecordingException: Already recordingエラーの解決**: 複数メンバーによる同時録音開始で発生する重複エラーを修正
+- **Guild別asyncio.Lock機構の追加**: 
+  - `RecordingCog.recording_locks`辞書でGuild別ロック管理
+  - `handle_bot_joined_with_user`メソッドでロック使用して同時実行防止
+- **録音開始ロジックの改善**:
+  - `utils/real_audio_recorder.py`で既に録音中の場合はスキップ（エラーではなくdebugログ）
+  - VoiceCogでTTS処理と録音処理を分離（録音は最初の1名のみ実行）
+  - `_process_member_tts`と`_process_member_recording`メソッドに分割
+- **ログレベル最適化**: ERROR→DEBUGに変更してログノイズを削減
+- **期待される効果**:
+  - 起動時の"Already recording"エラー完全解消
+  - Discord音声接続の安定性向上
+  - ログ出力の大幅削減（パフォーマンス向上）
+  - 複数ギルド環境での信頼性向上
+
+### 2024-06-29 ファイルアクセス競合修正（第19回）
+- **WinError 32「プロセスはファイルにアクセスできません」エラーの解決**: 複数ギルド録音時のバッファファイル書き込み競合を修正
+- **非同期ファイル書き込みロック機構**:
+  - `_file_write_lock`で複数の保存処理を順次実行
+  - `async with`文による確実なロック管理
+- **Windowsファイルロック対応リトライ機構**:
+  - 最大3回リトライ（指数バックオフ: 0.1秒、0.2秒、0.3秒）
+  - `PermissionError`、`OSError`の特別対応
+  - 成功まで継続、失敗時はwarningログで通知
+- **期待される効果**:
+  - 複数ギルド同時録音時のファイル競合解消
+  - バッファ保存の確実性向上
+  - エラーログノイズの削減
+  - Windows環境での安定性向上
+
 ### 今後の改善案
 - Web管理画面の追加
 - 複数言語サポート
