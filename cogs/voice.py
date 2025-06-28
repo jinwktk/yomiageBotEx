@@ -115,7 +115,7 @@ class VoiceCog(commands.Cog):
     async def startup_auto_join_check(self):
         """起動時自動参加チェック（1回限り実行）"""
         # Bot起動直後に実行されるので、少し待つ
-        await asyncio.sleep(10)
+        await asyncio.sleep(15)
         
         self.logger.info("Starting startup auto-join check...")
         await self.check_startup_auto_join()
@@ -125,6 +125,10 @@ class VoiceCog(commands.Cog):
         """startup_auto_join_check開始前の処理"""
         await self.bot.wait_until_ready()
         self.logger.info("Bot is ready, preparing startup auto-join check")
+        
+        # Guild情報が完全に同期されるまで追加で待機
+        await asyncio.sleep(5)
+        self.logger.info("Guild sync wait completed")
     
     async def check_startup_auto_join(self):
         """起動時の自動VC参加処理"""
@@ -157,11 +161,40 @@ class VoiceCog(commands.Cog):
                 
                 # 各ボイスチャンネルをチェック
                 for channel in guild.voice_channels:
-                    # チャンネル内のメンバーをチェック
-                    all_members = channel.members
+                    # 複数の方法でメンバー情報を取得
+                    all_members = []
+                    non_bot_members = []
+                    
+                    # 方法1: 標準のchannel.members
+                    standard_members = channel.members
+                    self.logger.debug(f"Standard method - Channel {channel.name}: {len(standard_members)} members")
+                    
+                    # 方法2: ギルドのvoice_statesから取得
+                    voice_state_members = []
+                    for member in guild.members:
+                        if member.voice and member.voice.channel and member.voice.channel.id == channel.id:
+                            voice_state_members.append(member)
+                    self.logger.debug(f"Voice states method - Channel {channel.name}: {len(voice_state_members)} members")
+                    
+                    # より多くのメンバーが検出された方を使用
+                    if len(voice_state_members) > len(standard_members):
+                        all_members = voice_state_members
+                        self.logger.info(f"Using voice_states method for {channel.name}")
+                    else:
+                        all_members = standard_members
+                        self.logger.info(f"Using standard method for {channel.name}")
+                    
+                    # ボット以外のメンバーをフィルタ
                     non_bot_members = [m for m in all_members if not m.bot]
                     
                     self.logger.info(f"Channel {channel.name}: {len(all_members)} total members, {len(non_bot_members)} non-bot members")
+                    
+                    # メンバーの詳細情報をログ出力
+                    if len(all_members) > 0:
+                        member_info = []
+                        for member in all_members:
+                            member_info.append(f"{member.display_name}({'bot' if member.bot else 'user'})")
+                        self.logger.info(f"Channel {channel.name} members: {', '.join(member_info)}")
                     
                     if len(non_bot_members) > 0:
                         # ユーザー名をログ出力

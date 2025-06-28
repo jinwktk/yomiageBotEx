@@ -76,6 +76,7 @@ class YomiageBot(discord.Bot):
         intents.message_content = True
         intents.voice_states = True
         intents.guilds = True
+        intents.members = True  # メンバー情報の取得を有効化
         
         # DEBUG_GUILD_IDの設定（開発用）
         debug_guild_id = os.getenv("DEBUG_GUILD_ID")
