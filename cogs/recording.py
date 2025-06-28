@@ -165,8 +165,12 @@ class RecordingCog(commands.Cog):
                 
                 # リアルタイム録音を開始
                 try:
-                    self.real_time_recorder.start_recording(guild.id, voice_client)
+                    await self.real_time_recorder.start_recording(guild.id, voice_client)
                     self.logger.info(f"Recording: Started real-time recording for {voice_client.channel.name}")
+                    
+                    # 録音状況デバッグ
+                    await asyncio.sleep(1)  # 録音開始を待つ
+                    self.real_time_recorder.debug_recording_status(guild.id)
                 except Exception as e:
                     self.logger.error(f"Recording: Failed to start real-time recording: {e}")
                     # フォールバック: シミュレーション録音
@@ -383,6 +387,48 @@ class RecordingCog(commands.Cog):
             self.logger.error(f"Failed to clear buffer: {e}")
             await ctx.respond(
                 "❌ バッファのクリアに失敗しました。",
+                ephemeral=True
+            )
+    
+    @discord.slash_command(name="debug_recording", description="録音状況をデバッグします（管理者限定）")
+    async def debug_recording_command(self, ctx: discord.ApplicationContext):
+        """録音デバッグコマンド"""
+        await self.rate_limit_delay()
+        
+        # 管理者権限チェック
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.respond(
+                "❌ このコマンドは管理者のみ実行できます。",
+                ephemeral=True
+            )
+            return
+        
+        try:
+            # 録音状況のデバッグ
+            self.real_time_recorder.debug_recording_status(ctx.guild.id)
+            
+            # バッファ状況の確認
+            buffers = self.real_time_recorder.get_user_audio_buffers()
+            
+            debug_text = f"📊 **録音デバッグ情報**\n"
+            debug_text += f"録音機能有効: {self.recording_enabled}\n"
+            debug_text += f"ボット接続状況: {ctx.guild.voice_client is not None}\n"
+            
+            if ctx.guild.voice_client:
+                debug_text += f"接続チャンネル: {ctx.guild.voice_client.channel.name}\n"
+                debug_text += f"録音中: {getattr(ctx.guild.voice_client, 'recording', False)}\n"
+            
+            debug_text += f"バッファユーザー数: {len(buffers)}\n"
+            
+            for user_id, user_buffers in buffers.items():
+                debug_text += f"  - ユーザー {user_id}: {len(user_buffers)} バッファ\n"
+            
+            await ctx.respond(debug_text, ephemeral=True)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to debug recording: {e}")
+            await ctx.respond(
+                "❌ デバッグ中にエラーが発生しました。",
                 ephemeral=True
             )
     
