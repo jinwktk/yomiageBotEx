@@ -21,7 +21,8 @@ yomiageBotEx/
 │   ├── recording.py   # 録音・リプレイ機能Cog
 │   ├── message_reader.py # チャット読み上げ機能Cog
 │   ├── dictionary.py  # 辞書機能Cog
-│   └── user_settings.py # ユーザー設定機能Cog
+│   ├── user_settings.py # ユーザー設定機能Cog
+│   └── reload.py      # ホットリロード・Cog管理機能
 ├── utils/             # ユーティリティモジュール
 │   ├── __init__.py    # ユーティリティパッケージ初期化
 │   ├── logger.py      # ロギング設定ユーティリティ（ローテーション付き）
@@ -36,7 +37,8 @@ yomiageBotEx/
 │   └── simple_recorder.py # シンプル音声録音（フォールバック）
 ├── scripts/           # 起動スクリプト
 │   ├── start.sh       # Linux/macOS用起動スクリプト
-│   └── start.bat      # Windows用起動スクリプト
+│   ├── start.bat      # Windows用起動スクリプト
+│   └── reload.bat     # Windows用リロードスクリプト（Bot停止不要）
 ├── pyproject.toml     # uv用プロジェクト設定
 ├── .python-version    # Python バージョン指定
 ├── uv.lock           # uv依存関係ロックファイル
@@ -527,6 +529,25 @@ yomiageBotEx/
   - ❌ **Voice heartbeat blocked**: replayコマンドの並列処理化で解決  
   - ❌ **replayコマンドがephemeralでない**: defer(ephemeral=True)とfollowup.send(ephemeral=True)で解決
   - ❌ **未捕捉の例外**: グローバルエラーハンドラーで全て捕捉・ログ記録
+
+### 2024-06-28 ホットリロード機能実装
+- **cogwatch統合**: コードファイル変更の自動検知とCog再読み込み機能を実装
+- **@watchデコレータ追加**: bot.pyのon_readyメソッドにcogs/ディレクトリ監視を設定
+- **手動リロードコマンド追加**:
+  - `/reload_cog` - 指定したCogを手動で再読み込み（管理者限定）
+  - `/reload_all` - すべてのCogを一括再読み込み（管理者限定）
+  - `/list_cogs` - 現在ロードされているCogの一覧表示
+- **開発効率の向上**:
+  - コード変更時のBot再起動が不要
+  - ボイスチャンネル接続を維持したまま開発可能
+  - セッション復元機能との連携により、万が一の再起動時も自動復帰
+- **reload.batスクリプト追加**: Bot停止不要で`git pull` + 依存関係更新を実行
+- **Python要求バージョン更新**: cogwatch要求によりPython 3.9→3.10に変更
+
+**解決された問題**:
+- ❌ **コード変更時のBot再起動**: cogwatchで自動リロード
+- ❌ **VC切断問題**: Bot本体稼働維持でVC接続保持
+- ❌ **開発効率低下**: ホットリロードで即座に変更反映
 
 ### 今後の改善案
 - Web管理画面の追加

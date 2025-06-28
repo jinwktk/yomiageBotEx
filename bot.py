@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 import yaml
 from dotenv import load_dotenv
+from cogwatch import watch
 
 from utils.logger import setup_logging, start_log_cleanup_task
 
@@ -174,6 +175,7 @@ class YomiageBot(discord.Bot):
             "cogs.message_reader",
             "cogs.dictionary",
             "cogs.user_settings",
+            "cogs.reload",
         ]
         
         for cog in cogs:
@@ -188,11 +190,13 @@ class YomiageBot(discord.Bot):
         """Cogを読み込む（非同期版）"""
         self.load_cogs_sync()
     
+    @watch(path="cogs", preload=True)
     async def on_ready(self):
         """Bot準備完了時のイベント"""
         logger.info(f"Bot is ready! Logged in as {self.user} (ID: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guild(s)")
         logger.info(f"Voice client type: {VOICE_CLIENT_TYPE}")
+        logger.info("🔄 Cogwatch enabled - Cogs will auto-reload on file changes")
         
         # デバッグ用にギルドIDをログ出力
         if self.guilds:
