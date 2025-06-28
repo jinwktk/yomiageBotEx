@@ -81,8 +81,9 @@ class TTSCog(commands.Cog):
         
         try:
             greeting_config = self.config.get("tts", {}).get("greeting", {})
+            tts_config = self.config.get("tts", {})
             
-            # グローバル設定のみ使用
+            # メッセージ生成
             if greeting_type == "join":
                 message = f"{member.display_name}{greeting_config.get('join_message', 'さん、こんちゃ！')}"
             elif greeting_type == "leave":
@@ -90,10 +91,11 @@ class TTSCog(commands.Cog):
             else:
                 return
             
+            # 統一されたTTS設定を使用
             user_tts_settings = {
-                "model_id": greeting_config.get("model_id", 5),
-                "speaker_id": greeting_config.get("speaker_id", 0),
-                "style": greeting_config.get("style", "01")
+                "model_id": tts_config.get("model_id", 5),
+                "speaker_id": tts_config.get("speaker_id", 0),
+                "style": tts_config.get("style", "01")
             }
             
             # ユーザー個別のTTS設定で音声生成

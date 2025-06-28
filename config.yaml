@@ -13,14 +13,14 @@ tts:
   cache_size: 5                     # キャッシュする音声の数
   cache_hours: 24                   # キャッシュの有効期限（時間）
   max_text_length: 100              # 1回のTTSで処理する最大文字数
+  model_id: 5                       # TTSモデルID（全機能共通）
+  speaker_id: 0                     # スピーカーID（全機能共通）
+  style: "01"                       # スタイル（全機能共通）
   greeting:
     enabled: true                    # 挨拶機能の有効/無効
     skip_on_startup: true            # ボット起動時に既存ユーザーへの挨拶をスキップ
     join_message: "さん、こんちゃ！"     # 参加時の挨拶
     leave_message: "さん、またね！"      # 退出時の挨拶
-    model_id: 5                      # 挨拶用のモデルID
-    speaker_id: 0                    # 挨拶用のスピーカーID
-    style: "01"                      # 挨拶用のスタイル
 
 audio_processing:
   normalize: true           # 音声ノーマライズ機能の有効/無効
@@ -41,9 +41,6 @@ message_reading:
   max_length: 100                         # 読み上げる最大文字数
   ignore_prefixes: ["!", "/", ".", "?"]   # 読み上げしないプレフィックス
   ignore_bots: true                       # ボットのメッセージを無視
-  model_id: 5                             # 読み上げ用のモデルID
-  speaker_id: 0                           # 読み上げ用のスピーカーID
-  style: "01"                             # 読み上げ用のスタイル
 
 logging:
   level: "INFO"

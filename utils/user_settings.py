@@ -183,21 +183,16 @@ class UserSettingsManager:
             reading = settings.get("reading", {})
             
             # グローバルTTS設定を取得
-            tts_config = self.config.get("message_reading", {})
-            greeting_config = self.config.get("tts", {}).get("greeting", {})
+            tts_config = self.config.get("tts", {})
             
             lines = [
                 f"📢 **読み上げ設定（個人）**",
                 f"有効: {'✅' if reading.get('enabled', True) else '❌'} | 最大文字数: {reading.get('max_length', 100)}",
                 f"メンション無視: {'✅' if reading.get('ignore_mentions', False) else '❌'} | リンク無視: {'✅' if reading.get('ignore_links', True) else '❌'}",
                 "",
-                f"🎤 **TTS設定（サーバー共通）**",
+                f"🎤 **TTS設定（全機能共通）**",
                 f"モデルID: {tts_config.get('model_id', 5)} | 話者ID: {tts_config.get('speaker_id', 0)}",
-                f"スタイル: {tts_config.get('style', '01')}",
-                "",
-                f"👋 **挨拶設定（サーバー共通）**",
-                f"モデルID: {greeting_config.get('model_id', 5)} | 話者ID: {greeting_config.get('speaker_id', 0)}",
-                f"スタイル: {greeting_config.get('style', '01')}"
+                f"スタイル: {tts_config.get('style', '01')}"
             ]
             
             return "\n".join(lines)

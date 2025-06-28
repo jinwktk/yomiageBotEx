@@ -122,8 +122,7 @@ class UserSettingsCog(commands.Cog):
         
         try:
             # 現在の設定を取得
-            tts_config = self.config.get("message_reading", {})
-            greeting_config = self.config.get("tts", {}).get("greeting", {})
+            tts_config = self.config.get("tts", {})
             
             # TTSManagerからモデル情報を取得
             available_models = None
@@ -143,7 +142,7 @@ class UserSettingsCog(commands.Cog):
                 available_models = None
             
             # プルダウン選択用のビューを作成
-            view = GlobalTTSSettingsView(self, tts_config, greeting_config, available_models)
+            view = GlobalTTSSettingsView(self, tts_config, available_models)
             
             # 現在の設定を表示
             embed = discord.Embed(
@@ -152,30 +151,20 @@ class UserSettingsCog(commands.Cog):
             )
             
             # モデル情報を含めた現在の設定表示
-            tts_model_name = "不明"
-            greeting_model_name = "不明"
+            model_name = "不明"
             
             if available_models:
-                tts_model_id = str(tts_config.get('model_id', 5))
-                greeting_model_id = str(greeting_config.get('model_id', 5))
+                model_id = str(tts_config.get('model_id', 5))
                 
-                if tts_model_id in available_models:
-                    tts_model_info = available_models[tts_model_id]
-                    tts_speaker_names = list(tts_model_info.get("id2spk", {}).values())
-                    tts_model_name = tts_speaker_names[0] if tts_speaker_names else f"モデル{tts_model_id}"
-                
-                if greeting_model_id in available_models:
-                    greeting_model_info = available_models[greeting_model_id]
-                    greeting_speaker_names = list(greeting_model_info.get("id2spk", {}).values())
-                    greeting_model_name = greeting_speaker_names[0] if greeting_speaker_names else f"モデル{greeting_model_id}"
+                if model_id in available_models:
+                    model_info = available_models[model_id]
+                    speaker_names = list(model_info.get("id2spk", {}).values())
+                    model_name = speaker_names[0] if speaker_names else f"モデル{model_id}"
             
             description = f"**現在の設定:**\n" \
-                         f"🎤 **メッセージ読み上げ**\n" \
-                         f"モデル: {tts_model_name} (ID: {tts_config.get('model_id', 5)}) | " \
-                         f"スタイル: {tts_config.get('style', 'Neutral')}\n\n" \
-                         f"👋 **挨拶**\n" \
-                         f"モデル: {greeting_model_name} (ID: {greeting_config.get('model_id', 5)}) | " \
-                         f"スタイル: {greeting_config.get('style', 'Neutral')}"
+                         f"🎤 **TTS設定（全機能共通）**\n" \
+                         f"モデル: {model_name} (ID: {tts_config.get('model_id', 5)}) | " \
+                         f"スタイル: {tts_config.get('style', 'Neutral')}"
             
             if available_models:
                 description += f"\n\n📋 **利用可能モデル数:** {len(available_models)}種類"
@@ -249,20 +238,16 @@ class UserSettingsCog(commands.Cog):
 class GlobalTTSSettingsView(discord.ui.View):
     """グローバルTTS設定のプルダウン選択UI"""
     
-    def __init__(self, cog: UserSettingsCog, tts_config: Dict[str, Any], greeting_config: Dict[str, Any], available_models: Optional[Dict[str, Any]] = None):
+    def __init__(self, cog: UserSettingsCog, tts_config: Dict[str, Any], available_models: Optional[Dict[str, Any]] = None):
         super().__init__(timeout=300)  # 5分でタイムアウト
         self.cog = cog
         self.tts_config = tts_config
-        self.greeting_config = greeting_config
         self.available_models = available_models or {}
         
         # 現在の設定値
-        self.current_tts_model = tts_config.get("model_id", 5)
-        self.current_tts_speaker = tts_config.get("speaker_id", 0)
-        self.current_tts_style = tts_config.get("style", "Neutral")
-        self.current_greeting_model = greeting_config.get("model_id", 5)
-        self.current_greeting_speaker = greeting_config.get("speaker_id", 0)
-        self.current_greeting_style = greeting_config.get("style", "Neutral")
+        self.current_model = tts_config.get("model_id", 5)
+        self.current_speaker = tts_config.get("speaker_id", 0)
+        self.current_style = tts_config.get("style", "Neutral")
         
         # 動的にSelectMenuを追加
         self._add_dynamic_selects()
@@ -272,18 +257,13 @@ class GlobalTTSSettingsView(discord.ui.View):
         # モデル選択肢を生成
         model_options = self._create_model_options()
         if model_options:
-            self.add_item(TTSModelSelect(placeholder="メッセージ読み上げのモデルを選択", options=model_options, setting_type="tts"))
-            self.add_item(TTSModelSelect(placeholder="挨拶のモデルを選択", options=model_options, setting_type="greeting"))
+            self.add_item(TTSModelSelect(placeholder="TTSモデルを選択", options=model_options))
         
         # 現在選択されているモデルのスタイル選択肢を生成
-        tts_style_options = self._create_style_options(self.current_tts_model)
-        greeting_style_options = self._create_style_options(self.current_greeting_model)
+        style_options = self._create_style_options(self.current_model)
         
-        if tts_style_options:
-            self.add_item(TTSStyleSelect(placeholder="メッセージ読み上げのスタイルを選択", options=tts_style_options, setting_type="tts"))
-        
-        if greeting_style_options:
-            self.add_item(TTSStyleSelect(placeholder="挨拶のスタイルを選択", options=greeting_style_options, setting_type="greeting"))
+        if style_options:
+            self.add_item(TTSStyleSelect(placeholder="スタイルを選択", options=style_options))
     
     def _create_model_options(self) -> List[discord.SelectOption]:
         """モデル選択肢を作成"""
@@ -306,7 +286,7 @@ class GlobalTTSSettingsView(discord.ui.View):
             style_count = len(model_info.get("style2id", {}))
             
             # デフォルトマークを追加
-            is_default = int(model_id) == self.current_tts_model
+            is_default = int(model_id) == self.current_model
             label = f"{speaker_name} (ID: {model_id})" + (" ⭐" if is_default else "")
             description = f"{style_count}スタイル利用可能"
             
@@ -337,9 +317,7 @@ class GlobalTTSSettingsView(discord.ui.View):
         
         for style_name, style_id in style2id.items():
             # 現在の設定と比較してデフォルトマークを追加
-            is_default_tts = style_name == self.current_tts_style
-            is_default_greeting = style_name == self.current_greeting_style
-            is_default = is_default_tts or is_default_greeting
+            is_default = style_name == self.current_style
             
             label = style_name + (" ⭐" if is_default else "")
             description = f"スタイルID: {style_id}"
@@ -361,11 +339,10 @@ class GlobalTTSSettingsView(discord.ui.View):
 
 
 class TTSModelSelect(discord.ui.Select):
-    """TTS/グリーティングモデル選択用のSelectコンポーネント"""
+    """TTSモデル選択用のSelectコンポーネント"""
     
-    def __init__(self, placeholder: str, options: List[discord.SelectOption], setting_type: str):
+    def __init__(self, placeholder: str, options: List[discord.SelectOption]):
         super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
-        self.setting_type = setting_type  # "tts" or "greeting"
     
     async def callback(self, interaction: discord.Interaction):
         try:
@@ -373,14 +350,8 @@ class TTSModelSelect(discord.ui.Select):
             view: GlobalTTSSettingsView = self.view
             
             # 設定を更新
-            if self.setting_type == "tts":
-                await view.cog._update_global_config("message_reading", "model_id", new_model_id)
-                view.current_tts_model = new_model_id
-                setting_name = "メッセージ読み上げ"
-            else:  # greeting
-                await view.cog._update_global_config("tts", "greeting", "model_id", new_model_id)
-                view.current_greeting_model = new_model_id
-                setting_name = "挨拶"
+            await view.cog._update_global_config("tts", "model_id", new_model_id)
+            view.current_model = new_model_id
             
             # TTSManagerの設定を更新
             if hasattr(view.cog.bot, 'get_cog'):
@@ -399,25 +370,24 @@ class TTSModelSelect(discord.ui.Select):
                 model_name = speaker_names[0] if speaker_names else f"モデル{new_model_id}"
             
             await interaction.response.send_message(
-                f"✅ {setting_name}のモデルを '{model_name}' (ID: {new_model_id}) に変更しました。",
+                f"✅ TTSモデルを '{model_name}' (ID: {new_model_id}) に変更しました。",
                 ephemeral=True
             )
-            view.cog.logger.info(f"Global {self.setting_type} model updated to {new_model_id}")
+            view.cog.logger.info(f"Global TTS model updated to {new_model_id}")
             
         except Exception as e:
-            view.cog.logger.error(f"Failed to update {self.setting_type} model: {e}")
+            view.cog.logger.error(f"Failed to update TTS model: {e}")
             await interaction.response.send_message(
-                f"❌ {setting_name}モデルの変更に失敗しました。",
+                "❌ TTSモデルの変更に失敗しました。",
                 ephemeral=True
             )
 
 
 class TTSStyleSelect(discord.ui.Select):
-    """TTS/グリーティングスタイル選択用のSelectコンポーネント"""
+    """TTSスタイル選択用のSelectコンポーネント"""
     
-    def __init__(self, placeholder: str, options: List[discord.SelectOption], setting_type: str):
+    def __init__(self, placeholder: str, options: List[discord.SelectOption]):
         super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
-        self.setting_type = setting_type  # "tts" or "greeting"
     
     async def callback(self, interaction: discord.Interaction):
         try:
@@ -425,14 +395,8 @@ class TTSStyleSelect(discord.ui.Select):
             view: GlobalTTSSettingsView = self.view
             
             # 設定を更新
-            if self.setting_type == "tts":
-                await view.cog._update_global_config("message_reading", "style", new_style)
-                view.current_tts_style = new_style
-                setting_name = "メッセージ読み上げ"
-            else:  # greeting
-                await view.cog._update_global_config("tts", "greeting", "style", new_style)
-                view.current_greeting_style = new_style
-                setting_name = "挨拶"
+            await view.cog._update_global_config("tts", "style", new_style)
+            view.current_style = new_style
             
             # TTSManagerの設定を更新
             if hasattr(view.cog.bot, 'get_cog'):
@@ -444,15 +408,15 @@ class TTSStyleSelect(discord.ui.Select):
                     message_reader_cog.tts_manager.reload_config()
             
             await interaction.response.send_message(
-                f"✅ {setting_name}のスタイルを '{new_style}' に変更しました。",
+                f"✅ TTSスタイルを '{new_style}' に変更しました。",
                 ephemeral=True
             )
-            view.cog.logger.info(f"Global {self.setting_type} style updated to {new_style}")
+            view.cog.logger.info(f"Global TTS style updated to {new_style}")
             
         except Exception as e:
-            view.cog.logger.error(f"Failed to update {self.setting_type} style: {e}")
+            view.cog.logger.error(f"Failed to update TTS style: {e}")
             await interaction.response.send_message(
-                f"❌ {setting_name}スタイルの変更に失敗しました。",
+                "❌ TTSスタイルの変更に失敗しました。",
                 ephemeral=True
             )
     
