@@ -7,12 +7,13 @@
 import asyncio
 import logging
 import random
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 import discord
 from discord.ext import commands
 
 from utils.user_settings import UserSettingsManager
+from utils.tts import TTSManager
 
 
 class UserSettingsCog(commands.Cog):
@@ -23,6 +24,11 @@ class UserSettingsCog(commands.Cog):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.user_settings = UserSettingsManager(config)
+        self.tts_manager = TTSManager(config)
+        
+        # キャッシュされたモデル・話者情報
+        self.cached_models: Optional[Dict[str, Any]] = None
+        self.cached_speakers: Dict[int, Dict[str, Any]] = {}
         
         # 初期化時の設定値をログ出力
         self.logger.info(f"UserSettings: Initialized for {self.user_settings.get_user_count()} users")
@@ -56,60 +62,74 @@ class UserSettingsCog(commands.Cog):
                 ephemeral=True
             )
     
-    @discord.slash_command(name="set_tts", description="TTS設定を変更します")
-    async def set_tts_command(
-        self, 
-        ctx: discord.ApplicationContext,
-        model_id: discord.Option(int, "モデルID", min_value=0, required=False) = None,
-        speaker_id: discord.Option(int, "話者ID", min_value=0, required=False) = None,
-        style: discord.Option(str, "スタイル", required=False) = None,
-        speed: discord.Option(float, "速度", min_value=0.5, max_value=2.0, required=False) = None,
-        volume: discord.Option(float, "音量", min_value=0.1, max_value=2.0, required=False) = None
-    ):
-        """TTS設定を変更"""
+    async def get_model_choices(self) -> List[discord.OptionChoice]:
+        """モデル選択肢を取得"""
+        try:
+            if self.cached_models is None:
+                self.cached_models = await self.tts_manager.get_available_models()
+            
+            if self.cached_models:
+                choices = []
+                for model_id, model_info in list(self.cached_models.items())[:25]:  # Discord制限
+                    name = model_info.get("name", f"Model {model_id}")
+                    choices.append(discord.OptionChoice(name=f"{model_id}: {name}"[:100], value=int(model_id)))
+                return choices
+        except:
+            pass
+        
+        # フォールバック：デフォルト選択肢
+        return [discord.OptionChoice(name="0: デフォルト", value=0)]
+    
+    async def get_speaker_choices(self, model_id: int) -> List[discord.OptionChoice]:
+        """話者選択肢を取得"""
+        try:
+            if model_id not in self.cached_speakers:
+                self.cached_speakers[model_id] = await self.tts_manager.get_model_speakers(model_id)
+            
+            speakers = self.cached_speakers[model_id]
+            if speakers:
+                choices = []
+                for speaker_id, speaker_info in list(speakers.items())[:25]:  # Discord制限
+                    name = speaker_info.get("name", f"Speaker {speaker_id}")
+                    choices.append(discord.OptionChoice(name=f"{speaker_id}: {name}"[:100], value=int(speaker_id)))
+                return choices
+        except:
+            pass
+        
+        # フォールバック：デフォルト選択肢
+        return [discord.OptionChoice(name="0: デフォルト", value=0)]
+    
+    @discord.slash_command(name="set_tts", description="TTS設定を変更します（プルダウン選択）")
+    async def set_tts_command(self, ctx: discord.ApplicationContext):
+        """TTS設定を変更（プルダウン選択式）"""
         await self.rate_limit_delay()
         
         try:
-            updated_settings = []
+            # 現在の設定を取得
+            current_settings = self.user_settings.get_tts_settings(ctx.user.id)
             
-            # 各パラメータを更新
-            if model_id is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "tts", "model_id", model_id)
-                updated_settings.append(f"モデルID: {model_id}")
+            # シンプルなビューを作成
+            view = SimpleTTSSettingsView(self, ctx.user.id, current_settings)
             
-            if speaker_id is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "tts", "speaker_id", speaker_id)
-                updated_settings.append(f"話者ID: {speaker_id}")
+            # 現在の設定を表示
+            embed = discord.Embed(
+                title="⚙️ TTS設定",
+                description=f"**現在の設定:**\n"
+                           f"モデルID: {current_settings.get('model_id', 0)}\n"
+                           f"話者ID: {current_settings.get('speaker_id', 0)}\n"
+                           f"スタイル: {current_settings.get('style', 'Neutral')}\n"
+                           f"速度: {current_settings.get('speed', 1.0)}\n"
+                           f"音量: {current_settings.get('volume', 1.0)}",
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text="下のプルダウンメニューから設定を変更してください")
             
-            if style is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "tts", "style", style)
-                updated_settings.append(f"スタイル: {style}")
-            
-            if speed is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "tts", "speed", speed)
-                updated_settings.append(f"速度: {speed}")
-            
-            if volume is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "tts", "volume", volume)
-                updated_settings.append(f"音量: {volume}")
-            
-            if updated_settings:
-                settings_text = "\n".join([f"• {setting}" for setting in updated_settings])
-                await ctx.respond(
-                    f"✅ TTS設定を更新しました:\n{settings_text}",
-                    ephemeral=True
-                )
-                self.logger.info(f"Updated TTS settings for user {ctx.user}: {updated_settings}")
-            else:
-                await ctx.respond(
-                    "❌ 更新する設定項目を指定してください。",
-                    ephemeral=True
-                )
+            await ctx.respond(embed=embed, view=view, ephemeral=True)
             
         except Exception as e:
-            self.logger.error(f"Failed to update TTS settings: {e}")
+            self.logger.error(f"Failed to show TTS settings: {e}")
             await ctx.respond(
-                "❌ TTS設定の更新中にエラーが発生しました。",
+                "❌ TTS設定の表示中にエラーが発生しました。",
                 ephemeral=True
             )
     
@@ -300,6 +320,128 @@ class UserSettingsCog(commands.Cog):
     def get_user_greeting_settings(self, user_id: int) -> Dict[str, Any]:
         """外部からユーザーの挨拶設定を取得"""
         return self.user_settings.get_greeting_settings(user_id)
+
+
+class SimpleTTSSettingsView(discord.ui.View):
+    """シンプルなTTS設定用のビュー"""
+    
+    def __init__(self, cog: 'UserSettingsCog', user_id: int, current_settings: Dict[str, Any]):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+        self.current_settings = current_settings
+    
+    @discord.ui.select(
+        placeholder="モデルIDを選択してください",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="0: デフォルトモデル", value="0"),
+            discord.SelectOption(label="1: モデル1", value="1"),
+            discord.SelectOption(label="2: モデル2", value="2"),
+            discord.SelectOption(label="3: モデル3", value="3"),
+            discord.SelectOption(label="4: モデル4", value="4")
+        ]
+    )
+    async def model_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        try:
+            model_id = int(select.values[0])
+            self.cog.user_settings.set_user_setting(self.user_id, "tts", "model_id", model_id)
+            
+            await interaction.response.send_message(
+                f"✅ モデルIDを {model_id} に設定しました",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                "❌ モデル設定中にエラーが発生しました",
+                ephemeral=True
+            )
+    
+    @discord.ui.select(
+        placeholder="話者IDを選択してください",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="0: デフォルト話者", value="0"),
+            discord.SelectOption(label="1: 話者1", value="1"),
+            discord.SelectOption(label="2: 話者2", value="2"),
+            discord.SelectOption(label="3: 話者3", value="3"),
+            discord.SelectOption(label="4: 話者4", value="4")
+        ]
+    )
+    async def speaker_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        try:
+            speaker_id = int(select.values[0])
+            self.cog.user_settings.set_user_setting(self.user_id, "tts", "speaker_id", speaker_id)
+            
+            await interaction.response.send_message(
+                f"✅ 話者IDを {speaker_id} に設定しました",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                "❌ 話者設定中にエラーが発生しました",
+                ephemeral=True
+            )
+    
+    @discord.ui.select(
+        placeholder="スタイルを選択してください",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="Neutral", value="Neutral"),
+            discord.SelectOption(label="Happy", value="Happy"),
+            discord.SelectOption(label="Sad", value="Sad"),
+            discord.SelectOption(label="Angry", value="Angry"),
+            discord.SelectOption(label="Fear", value="Fear"),
+            discord.SelectOption(label="Surprise", value="Surprise")
+        ]
+    )
+    async def style_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        try:
+            style = select.values[0]
+            self.cog.user_settings.set_user_setting(self.user_id, "tts", "style", style)
+            
+            await interaction.response.send_message(
+                f"✅ スタイルを {style} に設定しました",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                "❌ スタイル設定中にエラーが発生しました",
+                ephemeral=True
+            )
+    
+    @discord.ui.select(
+        placeholder="速度を選択してください",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="0.5: とても遅い", value="0.5"),
+            discord.SelectOption(label="0.75: 遅い", value="0.75"),
+            discord.SelectOption(label="1.0: 標準", value="1.0"),
+            discord.SelectOption(label="1.25: 速い", value="1.25"),
+            discord.SelectOption(label="1.5: とても速い", value="1.5"),
+            discord.SelectOption(label="2.0: 最高速", value="2.0")
+        ]
+    )
+    async def speed_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        try:
+            speed = float(select.values[0])
+            self.cog.user_settings.set_user_setting(self.user_id, "tts", "speed", speed)
+            
+            await interaction.response.send_message(
+                f"✅ 速度を {speed} に設定しました",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                "❌ 速度設定中にエラーが発生しました",
+                ephemeral=True
+            )
+
+
 
 
 def setup(bot):

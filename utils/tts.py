@@ -147,7 +147,7 @@ class TTSManager:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.api_url = config.get("tts", {}).get("api_url", "http://127.0.0.1:5000")
-        self.timeout = config.get("tts", {}).get("timeout", 10)
+        self.timeout = config.get("tts", {}).get("timeout", 30)  # タイムアウトを30秒に延長
         self.cache = TTSCache(
             cache_dir=Path("cache/tts"),
             max_size=config.get("tts", {}).get("cache_size", 5),
@@ -163,7 +163,12 @@ class TTSManager:
         """HTTP セッションを初期化"""
         if self.session is None:
             connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
+            # TTSリクエスト用のタイムアウト設定
+            timeout = aiohttp.ClientTimeout(
+                total=self.timeout,
+                connect=10,  # 接続タイムアウト
+                sock_read=self.timeout  # 読み取りタイムアウト
+            )
             self.session = aiohttp.ClientSession(
                 connector=connector,
                 timeout=timeout
@@ -176,14 +181,17 @@ class TTSManager:
             self.session = None
     
     async def is_api_available(self) -> bool:
-        """TTSAPIサーバーが利用可能かチェック"""
+        """TTSAPIサーバーが利用可能かチェック（高速化）"""
         try:
-            await self.init_session()
-            # Style-Bert-VITS2は/statusエンドポイントを使用
-            async with self.session.get(f"{self.api_url}/status") as response:
-                return response.status == 200
+            # 高速なヘルスチェック用の短いタイムアウト
+            connector = aiohttp.TCPConnector(limit=1)
+            timeout = aiohttp.ClientTimeout(total=3, connect=2)  # 短縮
+            
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                async with session.get(f"{self.api_url}/status") as response:
+                    return response.status == 200
         except Exception as e:
-            logger.warning(f"TTS API not available: {e}")
+            logger.debug(f"TTS API not available: {e}")
             return False
     
     async def generate_speech(
@@ -225,29 +233,39 @@ class TTSManager:
                 "language": "JP"
             }
             
-            logger.info(f"TTS API request: {self.api_url}/voice with params: {params}")
+            logger.debug(f"TTS API request: {self.api_url}/voice with params: {params}")
             
-            # Style-Bert-VITS2はGETメソッドでクエリパラメータを送信
-            async with self.session.get(
-                f"{self.api_url}/voice",
-                params=params
-            ) as response:
-                logger.info(f"TTS API response status: {response.status}")
-                if response.status == 200:
-                    audio_data = await response.read()
+            # asyncio.wait_forでタイムアウト制御を強化
+            async def make_request():
+                async with self.session.get(
+                    f"{self.api_url}/voice",
+                    params=params
+                ) as response:
+                    if response.status == 200:
+                        audio_data = await response.read()
+                        return audio_data
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"TTS API error: {response.status} - {error_text}")
+                        return None
+            
+            # タイムアウト付きでリクエスト実行
+            audio_data = await asyncio.wait_for(make_request(), timeout=self.timeout)
+            
+            if audio_data:
+                # キャッシュに保存
+                await self.cache.set(text, str(model_id), audio_data)
+                logger.debug(f"Generated speech: {text[:30]}...")
+                return audio_data
+            else:
+                logger.warning("TTS API returned error, using fallback")
+                return await self.generate_fallback_speech(text)
                     
-                    # キャッシュに保存
-                    await self.cache.set(text, str(model_id), audio_data)
-                    
-                    logger.info(f"Generated speech: {text[:30]}...")
-                    return audio_data
-                else:
-                    error_text = await response.text()
-                    logger.error(f"TTS API error: {response.status} - {error_text}")
-                    return await self.generate_fallback_speech(text)
-                    
+        except asyncio.TimeoutError:
+            logger.warning(f"TTS API timeout after {self.timeout}s, using fallback")
+            return await self.generate_fallback_speech(text)
         except Exception as e:
-            logger.error(f"Failed to generate speech: {e}")
+            logger.warning(f"TTS API error: {e}, using fallback")
             return await self.generate_fallback_speech(text)
     
     async def generate_fallback_speech(self, text: str) -> Optional[bytes]:

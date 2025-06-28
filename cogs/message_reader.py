@@ -39,6 +39,14 @@ class MessageReaderCog(commands.Cog):
         # 初期化時の設定値をログ出力
         self.logger.info(f"MessageReader: Initializing with reading_enabled: {self.reading_enabled}")
         self.logger.info(f"MessageReader: Config section: {config.get('message_reading', {})}")
+        
+        # 辞書の初期状態をログ出力
+        global_count = len(self.dictionary_manager.global_dictionary)
+        guild_count = len(self.dictionary_manager.guild_dictionaries)
+        self.logger.info(f"MessageReader: Dictionary loaded - Global: {global_count} words, Guilds: {guild_count}")
+        if global_count > 0:
+            sample_words = list(self.dictionary_manager.global_dictionary.items())[:3]
+            self.logger.info(f"MessageReader: Sample dictionary entries: {sample_words}")
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
@@ -113,7 +121,14 @@ class MessageReaderCog(commands.Cog):
                 return
             
             # 辞書を適用
+            original_content = processed_content
             processed_content = self.dictionary_manager.apply_dictionary(processed_content, message.guild.id)
+            
+            # 辞書適用のデバッグログ
+            if original_content != processed_content:
+                self.logger.info(f"MessageReader: Dictionary applied: '{original_content}' -> '{processed_content}'")
+            else:
+                self.logger.debug(f"MessageReader: No dictionary changes applied to: '{original_content}'")
             
             self.logger.info(f"MessageReader: Reading message from {message.author.display_name}: {processed_content[:50]}...")
             
