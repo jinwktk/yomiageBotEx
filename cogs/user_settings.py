@@ -333,12 +333,102 @@ class GlobalTTSSettingsView(discord.ui.View):
         # 既存のスタイル選択を削除
         self.children = [child for child in self.children if not isinstance(child, TTSStyleSelect)]
         
+        # モデル選択のデフォルト値を更新
+        for child in self.children:
+            if isinstance(child, TTSModelSelect):
+                # 既存のモデル選択肢のデフォルト状態を更新
+                child.options = self._create_model_options_with_selection(selected_model_id)
+        
         # 新しいスタイル選択肢を生成
         style_options = self._create_style_options(selected_model_id)
         
         if style_options:
             # 新しいスタイル選択を追加
             self.add_item(TTSStyleSelect(placeholder="スタイルを選択", options=style_options))
+    
+    def _create_model_options_with_selection(self, selected_model_id: int) -> List[discord.SelectOption]:
+        """指定されたモデルIDを選択状態にしたモデル選択肢を作成"""
+        options = []
+        
+        if not self.available_models:
+            # フォールバック用の固定選択肢
+            return [
+                discord.SelectOption(label="モデル5 (デフォルト)", value="5", description="デフォルトモデル", default=(selected_model_id == 5)),
+                discord.SelectOption(label="モデル0", value="0", description="モデル0", default=(selected_model_id == 0)),
+                discord.SelectOption(label="モデル1", value="1", description="モデル1", default=(selected_model_id == 1)),
+            ]
+        
+        for model_id, model_info in self.available_models.items():
+            # id2spkから話者名を取得
+            speaker_names = list(model_info.get("id2spk", {}).values())
+            speaker_name = speaker_names[0] if speaker_names else f"モデル{model_id}"
+            
+            # style2idからスタイル数を取得
+            style_count = len(model_info.get("style2id", {}))
+            
+            # デフォルトマークを追加
+            is_default = int(model_id) == selected_model_id
+            label = f"{speaker_name} (ID: {model_id})" + (" ⭐" if is_default else "")
+            description = f"{style_count}スタイル利用可能"
+            
+            options.append(discord.SelectOption(
+                label=label,
+                value=model_id,
+                description=description,
+                default=is_default
+            ))
+        
+        # 25個まで制限（Discordの制限）
+        return options[:25]
+    
+    def _update_style_select_with_selection(self, model_id: int, selected_style: str):
+        """選択されたスタイルを維持したスタイル選択を更新"""
+        # 既存のスタイル選択を削除
+        self.children = [child for child in self.children if not isinstance(child, TTSStyleSelect)]
+        
+        # モデル選択のデフォルト値を更新
+        for child in self.children:
+            if isinstance(child, TTSModelSelect):
+                # 既存のモデル選択肢のデフォルト状態を更新
+                child.options = self._create_model_options_with_selection(model_id)
+        
+        # 選択されたスタイルを維持したスタイル選択肢を生成
+        style_options = self._create_style_options_with_selection(model_id, selected_style)
+        
+        if style_options:
+            # 新しいスタイル選択を追加
+            self.add_item(TTSStyleSelect(placeholder="スタイルを選択", options=style_options))
+    
+    def _create_style_options_with_selection(self, model_id: int, selected_style: str) -> List[discord.SelectOption]:
+        """指定されたスタイルを選択状態にしたスタイル選択肢を作成"""
+        options = []
+        
+        if not self.available_models or str(model_id) not in self.available_models:
+            # フォールバック用の固定選択肢
+            return [
+                discord.SelectOption(label="Neutral", value="Neutral", description="標準スタイル", default=(selected_style == "Neutral")),
+                discord.SelectOption(label="01", value="01", description="スタイル01", default=(selected_style == "01")),
+                discord.SelectOption(label="02", value="02", description="スタイル02", default=(selected_style == "02")),
+            ]
+        
+        model_info = self.available_models[str(model_id)]
+        style2id = model_info.get("style2id", {})
+        
+        for style_name, style_id in style2id.items():
+            # 現在の設定と比較してデフォルトマークを追加
+            is_default = style_name == selected_style
+            
+            label = style_name + (" ⭐" if is_default else "")
+            description = f"スタイルID: {style_id}"
+            
+            options.append(discord.SelectOption(
+                label=label,
+                value=style_name,
+                description=description,
+                default=is_default
+            ))
+        
+        return options[:25]  # 25個まで制限
     
     async def on_timeout(self):
         """タイムアウト時の処理"""
@@ -464,6 +554,9 @@ class TTSStyleSelect(discord.ui.Select):
             
             embed.description = description
             embed.set_footer(text="設定を変更したい場合は、再度 /set_global_tts コマンドを実行してください")
+            
+            # スタイル選択のデフォルト値を更新
+            view._update_style_select_with_selection(view.current_model, new_style)
             
             # メッセージを編集
             await interaction.response.edit_message(embed=embed, view=view)
