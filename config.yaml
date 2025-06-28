@@ -16,9 +16,9 @@ tts:
     enabled: true                    # 挨拶機能の有効/無効
     join_message: "さん、こんちゃ！"     # 参加時の挨拶
     leave_message: "さん、またね！"      # 退出時の挨拶
-    model_id: 0                      # 挨拶用のモデルID
+    model_id: 5                      # 挨拶用のモデルID
     speaker_id: 0                    # 挨拶用のスピーカーID
-    style: "Neutral"                 # 挨拶用のスタイル
+    style: "01"                      # 挨拶用のスタイル
 
 audio_processing:
   normalize: true           # 音声ノーマライズ機能の有効/無効
@@ -39,9 +39,9 @@ message_reading:
   max_length: 100                         # 読み上げる最大文字数
   ignore_prefixes: ["!", "/", ".", "?"]   # 読み上げしないプレフィックス
   ignore_bots: true                       # ボットのメッセージを無視
-  model_id: 0                             # 読み上げ用のモデルID
+  model_id: 5                             # 読み上げ用のモデルID
   speaker_id: 0                           # 読み上げ用のスピーカーID
-  style: "Neutral"                        # 読み上げ用のスタイル
+  style: "01"                             # 読み上げ用のスタイル
 
 logging:
   level: "INFO"
