@@ -82,41 +82,19 @@ class TTSCog(commands.Cog):
         try:
             greeting_config = self.config.get("tts", {}).get("greeting", {})
             
-            # ユーザー個別の挨拶設定を取得
-            user_settings_cog = self.bot.get_cog("UserSettingsCog")
-            if user_settings_cog:
-                user_greeting_settings = user_settings_cog.get_user_greeting_settings(member.id)
-                user_tts_settings = user_settings_cog.get_user_tts_settings(member.id)
-                
-                # ユーザーが挨拶を無効にしている場合はスキップ
-                if not user_greeting_settings.get("enabled", True):
-                    return
-                
-                # カスタム挨拶メッセージの取得
-                if greeting_type == "join":
-                    custom_message = user_greeting_settings.get("custom_join")
-                    default_message = greeting_config.get('join_message', 'さん、こんちゃ！')
-                    message = custom_message if custom_message else f"{member.display_name}{default_message}"
-                elif greeting_type == "leave":
-                    custom_message = user_greeting_settings.get("custom_leave")
-                    default_message = greeting_config.get('leave_message', 'さん、またね！')
-                    message = custom_message if custom_message else f"{member.display_name}{default_message}"
-                else:
-                    return
+            # グローバル設定のみ使用
+            if greeting_type == "join":
+                message = f"{member.display_name}{greeting_config.get('join_message', 'さん、こんちゃ！')}"
+            elif greeting_type == "leave":
+                message = f"{member.display_name}{greeting_config.get('leave_message', 'さん、またね！')}"
             else:
-                # フォールバック：デフォルト設定
-                if greeting_type == "join":
-                    message = f"{member.display_name}{greeting_config.get('join_message', 'さん、こんちゃ！')}"
-                elif greeting_type == "leave":
-                    message = f"{member.display_name}{greeting_config.get('leave_message', 'さん、またね！')}"
-                else:
-                    return
-                
-                user_tts_settings = {
-                    "model_id": greeting_config.get("model_id", 0),
-                    "speaker_id": greeting_config.get("speaker_id", 0),
-                    "style": greeting_config.get("style", "Neutral")
-                }
+                return
+            
+            user_tts_settings = {
+                "model_id": greeting_config.get("model_id", 5),
+                "speaker_id": greeting_config.get("speaker_id", 0),
+                "style": greeting_config.get("style", "01")
+            }
             
             # ユーザー個別のTTS設定で音声生成
             audio_data = await self.tts_manager.generate_speech(

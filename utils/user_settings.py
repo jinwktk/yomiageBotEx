@@ -24,23 +24,11 @@ class UserSettingsManager:
         
         # デフォルト設定
         self.default_settings = {
-            "tts": {
-                "model_id": 0,
-                "speaker_id": 0,
-                "style": "Neutral",
-                "speed": 1.0,
-                "volume": 1.0
-            },
             "reading": {
                 "enabled": True,
                 "max_length": 100,
                 "ignore_mentions": False,
                 "ignore_links": True
-            },
-            "greeting": {
-                "enabled": True,
-                "custom_join": None,
-                "custom_leave": None
             }
         }
         
@@ -152,20 +140,12 @@ class UserSettingsManager:
             logger.error(f"Failed to reset user settings: {e}")
             return False
     
-    def get_tts_settings(self, user_id: int) -> Dict[str, Any]:
-        """TTS設定を取得"""
-        settings = self.get_user_settings(user_id)
-        return settings.get("tts", {})
     
     def get_reading_settings(self, user_id: int) -> Dict[str, Any]:
         """読み上げ設定を取得"""
         settings = self.get_user_settings(user_id)
         return settings.get("reading", {})
     
-    def get_greeting_settings(self, user_id: int) -> Dict[str, Any]:
-        """挨拶設定を取得"""
-        settings = self.get_user_settings(user_id)
-        return settings.get("greeting", {})
     
     def is_reading_enabled(self, user_id: int) -> bool:
         """ユーザーの読み上げが有効かチェック"""
@@ -200,27 +180,15 @@ class UserSettingsManager:
         try:
             settings = self.get_user_settings(user_id)
             
-            tts = settings.get("tts", {})
             reading = settings.get("reading", {})
-            greeting = settings.get("greeting", {})
             
             lines = [
-                f"🎤 **TTS設定**",
-                f"モデル: {tts.get('model_id', 0)} | 話者: {tts.get('speaker_id', 0)} | スタイル: {tts.get('style', 'Neutral')}",
-                f"速度: {tts.get('speed', 1.0)} | 音量: {tts.get('volume', 1.0)}",
-                "",
                 f"📢 **読み上げ設定**",
                 f"有効: {'✅' if reading.get('enabled', True) else '❌'} | 最大文字数: {reading.get('max_length', 100)}",
                 f"メンション無視: {'✅' if reading.get('ignore_mentions', False) else '❌'} | リンク無視: {'✅' if reading.get('ignore_links', True) else '❌'}",
                 "",
-                f"👋 **挨拶設定**",
-                f"有効: {'✅' if greeting.get('enabled', True) else '❌'}"
+                f"ℹ️ **TTS設定はサーバー共通です**"
             ]
-            
-            if greeting.get("custom_join"):
-                lines.append(f"参加挨拶: {greeting['custom_join']}")
-            if greeting.get("custom_leave"):
-                lines.append(f"退出挨拶: {greeting['custom_leave']}")
             
             return "\n".join(lines)
             
