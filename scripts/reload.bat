@@ -1,61 +1,61 @@
 @echo off
-rem yomiageBotEx reload script (Windows) - Bot停止不要で最新化
+rem yomiageBotEx reload script (Windows) - Bot restart not required
 setlocal enabledelayedexpansion
 
 echo ========================================
-echo yomiageBotEx リロードスクリプト
+echo yomiageBotEx Reload Script
 echo ========================================
 echo.
 
 rem Get latest code
-echo [1/4] 最新コードを取得中...
+echo [1/4] Getting latest code...
 git pull
 if %errorlevel% neq 0 (
-    echo ❌ Git pullに失敗しました。手動で確認してください。
+    echo [ERROR] Git pull failed. Please check manually.
     echo.
     pause
     exit /b 1
 ) else (
-    echo ✅ 最新コードを取得しました
+    echo [OK] Latest code retrieved
 )
 echo.
 
 rem Check for changes in dependencies
-echo [2/4] 依存関係の変更をチェック中...
+echo [2/4] Checking dependency changes...
 set "deps_changed=false"
 git diff HEAD~1 HEAD --name-only | findstr "pyproject.toml" >nul
 if %errorlevel% equ 0 (
     set "deps_changed=true"
-    echo ⚠️  pyproject.tomlに変更があります
+    echo [WARNING] pyproject.toml has changes
 )
 
 git diff HEAD~1 HEAD --name-only | findstr "requirements.txt" >nul
 if %errorlevel% equ 0 (
     set "deps_changed=true"
-    echo ⚠️  requirements.txtに変更があります
+    echo [WARNING] requirements.txt has changes
 )
 
 if "!deps_changed!"=="true" (
     echo.
-    echo [3/4] 依存関係を更新中...
+    echo [3/4] Updating dependencies...
     uv sync
     if %errorlevel% neq 0 (
-        echo ❌ 依存関係の更新に失敗しました
+        echo [ERROR] Failed to update dependencies
         pause
         exit /b 1
     ) else (
-        echo ✅ 依存関係を更新しました
+        echo [OK] Dependencies updated
     )
 ) else (
-    echo ✅ 依存関係の変更はありません
-    echo [3/4] 依存関係更新をスキップ
+    echo [OK] No dependency changes
+    echo [3/4] Skipping dependency update
 )
 echo.
 
 rem Check what files changed
-echo [4/4] 変更されたファイルを確認中...
+echo [4/4] Checking changed files...
 echo.
-echo 📋 変更されたファイル:
+echo Changed files:
 git diff HEAD~1 HEAD --name-only
 echo.
 
@@ -63,46 +63,46 @@ rem Check if cogs were changed
 set "cogs_changed=false"
 for /f %%i in ('git diff HEAD~1 HEAD --name-only ^| findstr "cogs/"') do (
     set "cogs_changed=true"
-    echo 🔄 Cogファイルが変更されています: %%i
+    echo [COG CHANGED] %%i
 )
 
 rem Check if bot.py was changed
 git diff HEAD~1 HEAD --name-only | findstr "bot.py" >nul
 if %errorlevel% equ 0 (
-    echo ⚠️  bot.pyが変更されています（要再起動）
+    echo [BOT CHANGED] bot.py changed (restart required)
 )
 
 rem Check if utils were changed
 for /f %%i in ('git diff HEAD~1 HEAD --name-only ^| findstr "utils/"') do (
-    echo 🔄 ユーティリティが変更されています: %%i
+    echo [UTIL CHANGED] %%i
 )
 
 echo.
 echo ========================================
-echo リロード完了
+echo Reload Complete
 echo ========================================
 
 if "!cogs_changed!"=="true" (
-    echo 💡 Cogファイルが変更されました
-    echo    - Botが起動中の場合: 自動リロードされます
-    echo    - または /reload_all コマンドを実行してください
+    echo [INFO] Cog files changed
+    echo        - If bot is running: Auto-reload will happen
+    echo        - Or run /reload_all command in Discord
 )
 
 if "!deps_changed!"=="true" (
-    echo 💡 依存関係が変更されました
-    echo    - 新しいライブラリがある場合はBot再起動を推奨
+    echo [INFO] Dependencies changed
+    echo        - Bot restart recommended for new libraries
 )
 
 git diff HEAD~1 HEAD --name-only | findstr "bot.py" >nul
 if %errorlevel% equ 0 (
-    echo ⚠️  bot.pyが変更されました
-    echo    - Bot本体の再起動が必要です
+    echo [INFO] bot.py changed
+    echo        - Bot restart required
 )
 
 echo.
-echo 📌 次のステップ:
-echo    - Cogのみ変更: そのまま開発継続可能
-echo    - bot.py/依存関係変更: scripts/start.bat で再起動
+echo Next steps:
+echo   - Cog only changes: Continue development
+echo   - bot.py/deps changes: Restart with scripts/start.bat
 echo.
 
 pause
