@@ -65,6 +65,7 @@ class RealTimeAudioRecorder:
         self.channels = 2  # ステレオ
         self.sample_width = 2  # 16-bit
         self.use_enhanced_client = True  # 拡張VoiceClientを使用
+        self.active_recordings: Dict[int, asyncio.Task] = {}  # ギルドごとの録音タスク
         
     def get_audio_sink(self, guild_id: int) -> AudioSink:
         """ギルド用の音声シンクを取得"""
@@ -77,47 +78,80 @@ class RealTimeAudioRecorder:
         return self.guild_sinks[guild_id]
     
     def start_recording(self, guild_id: int, voice_client: discord.VoiceClient):
-        """録音開始"""
+        """録音開始 - 定期的な録音サイクルを開始"""
         try:
-            # py-cordのWaveSinkを使用した録音（bot_simple.pyと同じ方式）
-            if hasattr(voice_client, 'start_recording') and callable(voice_client.start_recording):
-                # WaveSinkを作成
-                from discord.sinks import WaveSink
-                sink = WaveSink()
-                
-                # 録音完了時のコールバック
-                async def finished_callback(sink_obj, guild_id_param):
-                    """録音完了時の処理"""
-                    try:
-                        for user_id, audio in sink_obj.audio_data.items():
-                            if audio.file:
-                                audio.file.seek(0)
-                                audio_data = audio.file.read()
-                                
-                                if audio_data:
-                                    # 録音データをRecordingManagerに追加
-                                    self.recording_manager.add_audio_data(guild_id_param, audio_data, user_id)
-                                    logger.debug(f"Added audio data for user {user_id}: {len(audio_data)} bytes")
-                    except Exception as e:
-                        logger.error(f"Error in finished_callback: {e}")
-                
-                # py-cord形式で録音開始
-                voice_client.start_recording(sink, finished_callback, guild_id)
-                logger.info(f"RealTimeRecorder: Started py-cord WaveSink recording for guild {guild_id}")
-            else:
-                # フォールバック: シミュレーション録音
-                logger.warning(f"RealTimeRecorder: Voice client has no start_recording, using simulation")
-                asyncio.create_task(self._simulate_recording(guild_id))
+            # 既存の録音タスクがあれば停止
+            if guild_id in self.active_recordings:
+                self.active_recordings[guild_id].cancel()
+            
+            # 定期録音タスクを開始
+            task = asyncio.create_task(self._continuous_recording_cycle(guild_id, voice_client))
+            self.active_recordings[guild_id] = task
+            logger.info(f"RealTimeRecorder: Started continuous recording cycle for guild {guild_id}")
                 
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to start recording: {e}")
             # エラー時はシミュレーション録音にフォールバック
             asyncio.create_task(self._simulate_recording(guild_id))
     
+    async def _continuous_recording_cycle(self, guild_id: int, voice_client: discord.VoiceClient):
+        """継続的な録音サイクル（10秒ごとに録音停止・再開）"""
+        try:
+            while True:
+                # py-cordのWaveSinkを使用した録音
+                if hasattr(voice_client, 'start_recording') and callable(voice_client.start_recording):
+                    from discord.sinks import WaveSink
+                    sink = WaveSink()
+                    
+                    # 録音完了時のコールバック
+                    async def finished_callback(sink_obj, guild_id_param):
+                        """録音完了時の処理"""
+                        try:
+                            for user_id, audio in sink_obj.audio_data.items():
+                                if audio.file:
+                                    audio.file.seek(0)
+                                    audio_data = audio.file.read()
+                                    
+                                    if audio_data:
+                                        # 録音データをRecordingManagerに追加
+                                        self.recording_manager.add_audio_data(guild_id_param, audio_data, user_id)
+                                        logger.debug(f"Added audio data for user {user_id}: {len(audio_data)} bytes")
+                        except Exception as e:
+                            logger.error(f"Error in finished_callback: {e}")
+                    
+                    # 録音開始
+                    voice_client.start_recording(sink, finished_callback, guild_id)
+                    logger.debug(f"RealTimeRecorder: Started 10s recording segment for guild {guild_id}")
+                    
+                    # 10秒待機
+                    await asyncio.sleep(10)
+                    
+                    # 録音停止（これでfinished_callbackが呼ばれる）
+                    if hasattr(voice_client, 'stop_recording') and voice_client.recording:
+                        voice_client.stop_recording()
+                        logger.debug(f"RealTimeRecorder: Stopped 10s recording segment for guild {guild_id}")
+                    
+                    # 短時間待機してから次のサイクル
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.warning(f"RealTimeRecorder: Voice client lacks recording capability")
+                    break
+                    
+        except asyncio.CancelledError:
+            logger.info(f"RealTimeRecorder: Recording cycle cancelled for guild {guild_id}")
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Error in recording cycle: {e}")
+    
     def stop_recording(self, guild_id: int, voice_client: Optional[discord.VoiceClient] = None):
         """録音停止"""
         try:
-            # py-cordのstop_recording()を呼び出し
+            # 継続的な録音タスクを停止
+            if guild_id in self.active_recordings:
+                self.active_recordings[guild_id].cancel()
+                del self.active_recordings[guild_id]
+                logger.info(f"RealTimeRecorder: Cancelled recording cycle for guild {guild_id}")
+            
+            # 現在の録音を停止
             if voice_client and hasattr(voice_client, 'stop_recording') and hasattr(voice_client, 'recording') and voice_client.recording:
                 voice_client.stop_recording()
                 logger.info(f"RealTimeRecorder: Stopped py-cord recording for guild {guild_id}")
@@ -161,6 +195,12 @@ class RealTimeAudioRecorder:
     
     def cleanup(self):
         """クリーンアップ"""
+        # 全ての録音タスクを停止
+        for task in self.active_recordings.values():
+            task.cancel()
+        self.active_recordings.clear()
+        
+        # シンクのクリーンアップ
         for sink in self.guild_sinks.values():
             sink.cleanup()
         self.guild_sinks.clear()
