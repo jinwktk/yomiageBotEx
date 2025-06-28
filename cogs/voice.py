@@ -146,7 +146,15 @@ class VoiceCog(commands.Cog):
         guild_count = len(self.bot.guilds)
         self.logger.info(f"Found {guild_count} guilds to check")
         
+        # デバッグ用：特定のギルドのみに限定
+        target_guild_id = 813783748566581249
+        
         for guild in self.bot.guilds:
+            # 特定のギルドのみ処理
+            if guild.id != target_guild_id:
+                self.logger.info(f"Skipping guild {guild.name} (ID: {guild.id}) - not target guild")
+                continue
+                
             self.logger.info(f"Checking guild: {guild.name} (ID: {guild.id})")
             
             try:
