@@ -354,26 +354,31 @@ class VoiceCog(commands.Cog):
             members = [m for m in channel.members if not m.bot]
             self.logger.info(f"Bot joined channel with {len(members)} members: {[m.display_name for m in members]}")
             
-            # 各メンバーに対してTTSと録音の処理を並列実行
+            # TTS処理は並列実行、録音処理は最初の1回のみ実行
             if members:
-                tasks = []
+                # TTS挨拶処理は並列実行
+                tts_tasks = []
                 for member in members:
-                    task = asyncio.create_task(self._process_member_on_join(guild, member, is_startup))
-                    tasks.append(task)
+                    task = asyncio.create_task(self._process_member_tts(guild, member, is_startup))
+                    tts_tasks.append(task)
                 
-                # 全メンバーを並列処理
-                await asyncio.gather(*tasks, return_exceptions=True)
+                # TTS処理を並列実行
+                await asyncio.gather(*tts_tasks, return_exceptions=True)
+                
+                # 録音処理は最初のメンバーでのみ実行（重複を防ぐ）
+                first_member = members[0]
+                await self._process_member_recording(guild, first_member)
                     
         except Exception as e:
             self.logger.error(f"Failed to notify other cogs: {e}")
     
-    async def _process_member_on_join(self, guild: discord.Guild, member: discord.Member, is_startup: bool = False):
-        """個別メンバーの参加処理"""
+    async def _process_member_tts(self, guild: discord.Guild, member: discord.Member, is_startup: bool = False):
+        """個別メンバーのTTS処理"""
         try:
             # 接続確認
             current_voice_client = guild.voice_client
             if not current_voice_client or not current_voice_client.is_connected():
-                self.logger.warning(f"Voice client disconnected before processing member {member.display_name}")
+                self.logger.warning(f"Voice client disconnected before TTS processing for {member.display_name}")
                 return
             
             # TTSCogに挨拶を依頼（起動時情報を渡す）
@@ -381,16 +386,29 @@ class VoiceCog(commands.Cog):
             if tts_cog:
                 await tts_cog.handle_bot_joined_with_user(guild, member, is_startup=is_startup)
             
-            # 短い間隔でTTSと録音を分離
-            await asyncio.sleep(0.3)  # 0.5秒→0.3秒に短縮
+                
+        except Exception as e:
+            self.logger.error(f"Failed to process member TTS for {member.display_name}: {e}")
+    
+    async def _process_member_recording(self, guild: discord.Guild, member: discord.Member):
+        """個別メンバーの録音処理（最初の1名のみ）"""
+        try:
+            # 接続確認
+            current_voice_client = guild.voice_client
+            if not current_voice_client or not current_voice_client.is_connected():
+                self.logger.warning(f"Voice client disconnected before recording processing for {member.display_name}")
+                return
             
-            # RecordingCogに録音開始を依頼
+            # 短い間隔を置いてから録音処理
+            await asyncio.sleep(0.5)
+            
+            # RecordingCogに録音開始を依頼（代表のメンバーで1回のみ）
             recording_cog = self.bot.get_cog("RecordingCog")
             if recording_cog:
                 await recording_cog.handle_bot_joined_with_user(guild, member)
                 
         except Exception as e:
-            self.logger.error(f"Failed to process member {member.display_name}: {e}")
+            self.logger.error(f"Failed to process member recording for {member.display_name}: {e}")
     
     async def handle_user_leave(self, guild: discord.Guild, channel: discord.VoiceChannel):
         """ユーザー退出時の処理"""

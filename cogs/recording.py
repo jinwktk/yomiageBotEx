@@ -38,6 +38,9 @@ class RecordingCog(commands.Cog):
         # リアルタイム音声録音管理
         self.real_time_recorder = RealTimeAudioRecorder(self.recording_manager)
         
+        # 録音開始のロック機構（Guild別）
+        self.recording_locks: Dict[int, asyncio.Lock] = {}
+        
         # 音声処理
         self.audio_processor = AudioProcessor(config)
         
@@ -141,48 +144,54 @@ class RecordingCog(commands.Cog):
     async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
         """ボットがVCに参加した際、既にいるユーザーがいる場合の録音開始処理"""
         try:
-            # 複数回チェックして接続の安定性を確保
-            voice_client = None
-            for attempt in range(5):
-                voice_client = guild.voice_client
-                if voice_client and voice_client.is_connected():
-                    # 追加の安定性チェック
-                    await asyncio.sleep(0.2)
-                    if voice_client.is_connected():
-                        break
-                await asyncio.sleep(0.5)
+            # Guild別のロックを取得・作成
+            if guild.id not in self.recording_locks:
+                self.recording_locks[guild.id] = asyncio.Lock()
             
-            if voice_client and voice_client.is_connected():
-                self.logger.info(f"Recording: Bot joined, starting recording for user {member.display_name}")
+            # ロックを使用して同時実行を防ぐ
+            async with self.recording_locks[guild.id]:
+                # 複数回チェックして接続の安定性を確保
+                voice_client = None
+                for attempt in range(5):
+                    voice_client = guild.voice_client
+                    if voice_client and voice_client.is_connected():
+                        # 追加の安定性チェック
+                        await asyncio.sleep(0.2)
+                        if voice_client.is_connected():
+                            break
+                    await asyncio.sleep(0.5)
                 
-                # さらに短い安定化待機
-                await asyncio.sleep(0.3)
-                
-                # 最終接続確認
-                if not voice_client.is_connected():
-                    self.logger.warning(f"Recording: Voice client disconnected before starting recording for {member.display_name}")
-                    return
-                
-                # リアルタイム録音を開始
-                try:
-                    await self.real_time_recorder.start_recording(guild.id, voice_client)
-                    self.logger.info(f"Recording: Started real-time recording for {voice_client.channel.name}")
+                if voice_client and voice_client.is_connected():
+                    self.logger.info(f"Recording: Bot joined, starting recording for user {member.display_name}")
                     
-                    # 録音状況デバッグ（一時的に無効化 - パフォーマンス問題回避）
-                    await asyncio.sleep(1)  # 録音開始を待つ
-                    # self.real_time_recorder.debug_recording_status(guild.id)
-                except Exception as e:
-                    self.logger.error(f"Recording: Failed to start real-time recording: {e}")
-                    # フォールバック: シミュレーション録音
+                    # さらに短い安定化待機
+                    await asyncio.sleep(0.3)
+                    
+                    # 最終接続確認
+                    if not voice_client.is_connected():
+                        self.logger.warning(f"Recording: Voice client disconnected before starting recording for {member.display_name}")
+                        return
+                    
+                    # リアルタイム録音を開始
                     try:
-                        sink = self.get_recording_sink(guild.id)
-                        if not sink.is_recording:
-                            sink.start_recording()
-                            self.logger.info(f"Recording: Started fallback simulation recording for {voice_client.channel.name}")
-                    except Exception as fallback_error:
-                        self.logger.error(f"Recording: Fallback recording also failed: {fallback_error}")
-            else:
-                self.logger.warning(f"Recording: No stable voice client when trying to start recording for {member.display_name}")
+                        await self.real_time_recorder.start_recording(guild.id, voice_client)
+                        self.logger.info(f"Recording: Started real-time recording for {voice_client.channel.name}")
+                        
+                        # 録音状況デバッグ（一時的に無効化 - パフォーマンス問題回避）
+                        await asyncio.sleep(1)  # 録音開始を待つ
+                        # self.real_time_recorder.debug_recording_status(guild.id)
+                    except Exception as e:
+                        self.logger.error(f"Recording: Failed to start real-time recording: {e}")
+                        # フォールバック: シミュレーション録音
+                        try:
+                            sink = self.get_recording_sink(guild.id)
+                            if not sink.is_recording:
+                                sink.start_recording()
+                                self.logger.info(f"Recording: Started fallback simulation recording for {voice_client.channel.name}")
+                        except Exception as fallback_error:
+                            self.logger.error(f"Recording: Fallback recording also failed: {fallback_error}")
+                else:
+                    self.logger.warning(f"Recording: No stable voice client when trying to start recording for {member.display_name}")
         except Exception as e:
             self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
     

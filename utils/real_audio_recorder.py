@@ -49,15 +49,15 @@ class RealTimeAudioRecorder:
             return
             
         try:
+            # 既に録音中の場合はスキップ（重複エラーを防ぐ）
+            if hasattr(voice_client, 'recording') and voice_client.recording:
+                logger.debug(f"RealTimeRecorder: Already recording for guild {guild_id}, skipping")
+                return
+            
             # 既存の録音タスクがあれば停止
             if guild_id in self.active_recordings:
                 self.active_recordings[guild_id].cancel()
-            
-            # 既に録音中かチェック
-            if hasattr(voice_client, 'recording') and voice_client.recording:
-                logger.info(f"RealTimeRecorder: Already recording for guild {guild_id}, stopping first")
-                voice_client.stop_recording()
-                await asyncio.sleep(0.5)  # 停止を待つ
+                await asyncio.sleep(0.1)  # 短時間待機
             
             # WaveSinkを使用した録音開始
             sink = WaveSink()
