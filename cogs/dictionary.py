@@ -43,8 +43,9 @@ class DictionaryCog(commands.Cog):
         """単語を辞書に追加"""
         await self.rate_limit_delay()
         
-        # 権限チェック（グローバル辞書は管理者のみ）
-        if scope == "グローバル" and not ctx.user.guild_permissions.administrator:
+        # 権限チェック（グローバル辞書は特定ユーザーのみ）
+        admin_user_id = self.config.get("bot", {}).get("admin_user_id", 372768430149074954)
+        if scope == "グローバル" and ctx.user.id != admin_user_id:
             await ctx.respond(
                 "❌ グローバル辞書への追加は管理者のみ実行できます。",
                 ephemeral=True
@@ -83,8 +84,9 @@ class DictionaryCog(commands.Cog):
         """単語を辞書から削除"""
         await self.rate_limit_delay()
         
-        # 権限チェック（グローバル辞書は管理者のみ）
-        if scope == "グローバル" and not ctx.user.guild_permissions.administrator:
+        # 権限チェック（グローバル辞書は特定ユーザーのみ）
+        admin_user_id = self.config.get("bot", {}).get("admin_user_id", 372768430149074954)
+        if scope == "グローバル" and ctx.user.id != admin_user_id:
             await ctx.respond(
                 "❌ グローバル辞書からの削除は管理者のみ実行できます。",
                 ephemeral=True

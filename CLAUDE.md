@@ -706,6 +706,17 @@ yomiageBotEx/
 - CPU使用率: アイドル時5%以下
 - 応答時間: 1秒以内
 
+### 2024-06-29 管理者権限方式変更（第18回）
+- **ギルド権限から特定ユーザーIDベースに変更**: 
+  - config.yamlに`bot.admin_user_id: 372768430149074954`を追加
+  - `ctx.author.guild_permissions.administrator`チェックを廃止
+  - `ctx.author.id == admin_user_id`による特定ユーザーチェックに統一
+- **影響範囲**:
+  - `/set_global_tts`: サーバー全体のTTS設定変更（管理者限定）
+  - `/dict_add`のグローバル辞書追加（管理者限定）  
+  - `/dict_remove`のグローバル辞書削除（管理者限定）
+- **目的**: 複数サーバーで統一的な管理者権限を持つため
+
 ## 参考リンク
 - [TypeScript版（参考）](https://github.com/jinwktk/yomiageBotTS)
 - [Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2)

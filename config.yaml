@@ -5,6 +5,7 @@ bot:
   auto_join: true
   auto_leave: true
   rate_limit_delay: [0.5, 1.0]  # API呼び出し時のランダム遅延（秒）
+  admin_user_id: 372768430149074954  # 管理者ユーザーID
 
 tts:
   api_url: "http://192.168.0.99:5000"  # Style-Bert-VITS2 APIサーバーのURL

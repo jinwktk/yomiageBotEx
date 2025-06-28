@@ -114,8 +114,9 @@ class UserSettingsCog(commands.Cog):
         """グローバルTTS設定を変更（プルダウン選択式・管理者限定）"""
         await self.rate_limit_delay()
         
-        # 管理者権限チェック
-        if not ctx.author.guild_permissions.administrator:
+        # 特定ユーザーIDでの管理者権限チェック
+        admin_user_id = self.config.get("bot", {}).get("admin_user_id", 372768430149074954)
+        if ctx.author.id != admin_user_id:
             await ctx.respond("❌ この機能は管理者限定です。", ephemeral=True)
             return
         
