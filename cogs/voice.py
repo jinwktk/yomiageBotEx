@@ -101,8 +101,8 @@ class VoiceCog(commands.Cog):
                 await self.bot.connect_to_voice(channel)
                 self.logger.info(f"Restored session: {channel.name} in {guild.name}")
                 
-                # セッション復元後に他のCogに通知
-                await self.notify_bot_joined_channel(guild, channel)
+                # セッション復元後に他のCogに通知（起動時フラグを設定）
+                await self.notify_bot_joined_channel(guild, channel, is_startup=True)
                 
             except Exception as e:
                 self.logger.error(f"Failed to restore session for guild {guild_id}: {e}")
@@ -208,9 +208,9 @@ class VoiceCog(commands.Cog):
                             await self.bot.connect_to_voice(channel)
                             self.logger.info(f"Successfully auto-joined on startup: {channel.name} in {guild.name}")
                             
-                            # 他のCogに参加を通知
-                            self.logger.info(f"Notifying other Cogs about join to {channel.name}")
-                            await self.notify_bot_joined_channel(guild, channel)
+                            # 他のCogに参加を通知（起動時フラグを設定）
+                            self.logger.info(f"Notifying other Cogs about startup join to {channel.name}")
+                            await self.notify_bot_joined_channel(guild, channel, is_startup=True)
                             
                             # セッションを保存
                             self.save_sessions()
@@ -296,7 +296,7 @@ class VoiceCog(commands.Cog):
             except Exception as e:
                 self.logger.error(f"Failed to auto-join voice channel: {e}")
     
-    async def notify_bot_joined_channel(self, guild: discord.Guild, channel: discord.VoiceChannel):
+    async def notify_bot_joined_channel(self, guild: discord.Guild, channel: discord.VoiceChannel, is_startup: bool = False):
         """ボットがチャンネルに接続した際の他Cogへの通知"""
         try:
             # 音声接続が完全に確立されるまで待機
@@ -353,10 +353,10 @@ class VoiceCog(commands.Cog):
                     return
                 
                 try:
-                    # TTSCogに挨拶を依頼
+                    # TTSCogに挨拶を依頼（起動時情報を渡す）
                     tts_cog = self.bot.get_cog("TTSCog")
                     if tts_cog:
-                        await tts_cog.handle_bot_joined_with_user(guild, member)
+                        await tts_cog.handle_bot_joined_with_user(guild, member, is_startup=is_startup)
                     
                     # 短い間隔でTTSと録音を分離
                     await asyncio.sleep(0.5)

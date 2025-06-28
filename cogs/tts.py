@@ -169,16 +169,24 @@ class TTSCog(commands.Cog):
             self.logger.info(f"TTS: User {member.display_name} left bot channel {bot_channel.name}")
             await self.speak_greeting(voice_client, member, "leave")
     
-    async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
+    async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member, is_startup: bool = False):
         """ボットがVCに参加した際、既にいるユーザーに対する処理"""
         try:
             if not self.greeting_enabled:
                 self.logger.debug(f"TTS: Greeting disabled, skipping user {member.display_name}")
                 return
+            
+            # 起動時の挨拶スキップ設定をチェック
+            if is_startup:
+                skip_on_startup = self.config.get("tts", {}).get("greeting", {}).get("skip_on_startup", True)
+                if skip_on_startup:
+                    self.logger.info(f"TTS: Skipping startup greeting for existing user {member.display_name}")
+                    return
                 
             voice_client = guild.voice_client
             if voice_client and voice_client.is_connected():
-                self.logger.info(f"TTS: Bot joined, greeting user {member.display_name}")
+                greeting_type = "startup greeting" if is_startup else "greeting"
+                self.logger.info(f"TTS: Bot joined, {greeting_type} user {member.display_name}")
                 await self.speak_greeting(voice_client, member, "join")
             else:
                 self.logger.warning(f"TTS: No voice client when trying to greet {member.display_name}")
