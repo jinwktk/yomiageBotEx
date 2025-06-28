@@ -432,6 +432,69 @@ class RecordingCog(commands.Cog):
                 ephemeral=True
             )
     
+    @discord.slash_command(name="test_recording", description="録音をテストします（管理者限定）")
+    async def test_recording_command(self, ctx: discord.ApplicationContext):
+        """録音テストコマンド（録音停止→再開でコールバック確認）"""
+        await self.rate_limit_delay()
+        
+        # 管理者権限チェック
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.respond(
+                "❌ このコマンドは管理者のみ実行できます。",
+                ephemeral=True
+            )
+            return
+        
+        if not ctx.guild.voice_client:
+            await ctx.respond(
+                "❌ ボットがボイスチャンネルに接続していません。",
+                ephemeral=True
+            )
+            return
+        
+        try:
+            await ctx.respond("🎙️ 録音テスト中... 5秒後に結果を表示します", ephemeral=True)
+            
+            guild_id = ctx.guild.id
+            voice_client = ctx.guild.voice_client
+            
+            # 録音を一度停止（コールバックをトリガー）
+            self.logger.info(f"Test: Stopping recording for callback trigger")
+            await self.real_time_recorder.stop_recording(guild_id)
+            
+            await asyncio.sleep(2)  # コールバック処理を待つ
+            
+            # バッファ確認
+            buffers = self.real_time_recorder.get_user_audio_buffers()
+            
+            # 録音再開
+            self.logger.info(f"Test: Restarting recording")
+            await self.real_time_recorder.start_recording(guild_id, voice_client)
+            
+            await asyncio.sleep(3)  # 結果確認の時間
+            
+            # 結果表示
+            result_text = f"📊 **録音テスト結果**\n"
+            result_text += f"取得された音声バッファ数: {len(buffers)}\n"
+            
+            if buffers:
+                for user_id, user_buffers in buffers.items():
+                    result_text += f"  - ユーザー {user_id}: {len(user_buffers)} バッファ\n"
+                    for i, (buffer, timestamp) in enumerate(user_buffers):
+                        buffer_size = len(buffer.getvalue()) if buffer else 0
+                        result_text += f"    - バッファ {i+1}: {buffer_size} bytes\n"
+            else:
+                result_text += "⚠️ 音声データが取得されませんでした\n"
+            
+            await ctx.followup.send(result_text, ephemeral=True)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to test recording: {e}")
+            await ctx.followup.send(
+                f"❌ 録音テスト中にエラーが発生しました: {str(e)}",
+                ephemeral=True
+            )
+    
     async def _process_audio_buffer(self, audio_buffer):
         """音声バッファをノーマライズ処理"""
         try:
