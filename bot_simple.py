@@ -77,16 +77,26 @@ class CustomBot(discord.Bot):
     async def connect_voice_safely(self, channel):
         """安全な音声接続"""
         try:
-            # self_deafとself_muteを設定して接続の安定性を向上
-            return await channel.connect(
+            # タイムアウトとreconnectで接続の安定性を向上
+            vc = await channel.connect(
                 timeout=30.0,
-                reconnect=True,
+                reconnect=True
+            )
+            # 接続後にdeafenを設定
+            await channel.guild.change_voice_state(
+                channel=channel,
                 self_deaf=True,
                 self_mute=False
             )
+            return vc
         except Exception as e:
             logger.error(f"Failed to connect safely: {e}")
-            raise
+            # フォールバック：基本的な接続を試みる
+            try:
+                return await channel.connect()
+            except Exception as e2:
+                logger.error(f"Fallback connection also failed: {e2}")
+                raise
 
 bot = CustomBot(intents=intents, debug_guilds=[DEBUG_GUILD_ID])
 

@@ -309,16 +309,17 @@ yomiageBotEx/
 ### 2024-06-28 音声接続エラー修正（第7回）
 - **IndexError: list index out of range修正**: py-cordの音声接続で発生する暗号化モード選択エラーを解決
 - **CustomBotクラス追加**: 安全な音声接続のためのconnect_voice_safely()メソッドを実装
-- **接続パラメータ最適化**: self_deaf=True、timeout=30.0、reconnect=Trueで接続安定性向上
+- **接続パラメータ最適化**: timeout=30.0、reconnect=Trueで接続安定性向上
+- **self_deafエラー修正**: py-cordのconnect()ではself_deafパラメータ未対応のため接続後に設定
 - **問題**:
   - `mode = modes[0]` で `IndexError: list index out of range`
+  - `TypeError: Connectable.connect() got an unexpected keyword argument 'self_deaf'`
   - Discord音声サーバーとの暗号化モード互換性問題
-  - 標準のchannel.connect()が失敗
 - **修正内容**:
   - CustomBotクラスでconnect_voice_safely()メソッド実装
-  - self_deafパラメータ追加で音声受信のオーバーヘッド削減
+  - 接続後にchange_voice_state()でself_deaf=Trueを設定
+  - フォールバック機能：エラー時は基本的なconnect()を試行
   - タイムアウト値を15秒→30秒に延長
-  - 自動参加と手動/joinコマンド両方で同じ安全接続メソッド使用
 
 ### 今後の改善案
 - 音声品質の最適化とパフォーマンス向上
