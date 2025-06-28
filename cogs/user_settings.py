@@ -110,16 +110,8 @@ class UserSettingsCog(commands.Cog):
             )
     
     @discord.slash_command(name="set_global_tts", description="サーバー全体のTTS設定を変更します（管理者限定）")
-    async def set_global_tts_command(
-        self, 
-        ctx: discord.ApplicationContext,
-        model_id: discord.Option(int, "モデルID (0-5)", min_value=0, max_value=5, required=False) = None,
-        speaker_id: discord.Option(int, "話者ID (0)", min_value=0, max_value=0, required=False) = None,
-        style: discord.Option(str, "スタイル", 
-                             choices=["Neutral", "Happy", "Sad", "Angry", "01", "02", "03", "04"], 
-                             required=False) = None
-    ):
-        """グローバルTTS設定を変更（管理者限定）"""
+    async def set_global_tts_command(self, ctx: discord.ApplicationContext):
+        """グローバルTTS設定を変更（プルダウン選択式・管理者限定）"""
         await self.rate_limit_delay()
         
         # 管理者権限チェック
@@ -128,51 +120,31 @@ class UserSettingsCog(commands.Cog):
             return
         
         try:
-            updated_settings = []
+            # 現在の設定を取得
+            tts_config = self.config.get("message_reading", {})
+            greeting_config = self.config.get("tts", {}).get("greeting", {})
             
-            # config.yamlの更新とファイル書き込み
-            if model_id is not None:
-                await self._update_global_config("message_reading", "model_id", model_id)
-                await self._update_global_config("tts", "greeting", "model_id", model_id)
-                updated_settings.append(f"モデルID: {model_id}")
+            # プルダウン選択用のビューを作成
+            view = GlobalTTSSettingsView(self, tts_config, greeting_config)
             
-            if speaker_id is not None:
-                await self._update_global_config("message_reading", "speaker_id", speaker_id)
-                await self._update_global_config("tts", "greeting", "speaker_id", speaker_id)
-                updated_settings.append(f"話者ID: {speaker_id}")
+            # 現在の設定を表示
+            embed = discord.Embed(
+                title="⚙️ サーバー全体のTTS設定",
+                description=f"**現在の設定:**\n"
+                           f"🎤 **メッセージ読み上げ**\n"
+                           f"モデルID: {tts_config.get('model_id', 5)} | 話者ID: {tts_config.get('speaker_id', 0)} | スタイル: {tts_config.get('style', '01')}\n\n"
+                           f"👋 **挨拶**\n"
+                           f"モデルID: {greeting_config.get('model_id', 5)} | 話者ID: {greeting_config.get('speaker_id', 0)} | スタイル: {greeting_config.get('style', '01')}",
+                color=discord.Color.gold()
+            )
+            embed.set_footer(text="下のプルダウンメニューから設定を変更してください（全ユーザーに即座に反映されます）")
             
-            if style is not None:
-                await self._update_global_config("message_reading", "style", style)
-                await self._update_global_config("tts", "greeting", "style", style)
-                updated_settings.append(f"スタイル: {style}")
-            
-            if updated_settings:
-                settings_text = "\n".join([f"• {setting}" for setting in updated_settings])
-                await ctx.respond(
-                    f"✅ **サーバー全体**のTTS設定を更新しました:\n{settings_text}\n\n"
-                    f"ℹ️ 変更は即座に全ユーザーに反映されます",
-                    ephemeral=True
-                )
-                self.logger.info(f"Updated global TTS settings by {ctx.author}: {updated_settings}")
-                
-                # TTSManagerに設定変更を通知
-                tts_cog = self.bot.get_cog("TTSCog")
-                if tts_cog and hasattr(tts_cog, 'tts_manager'):
-                    tts_cog.tts_manager.reload_config()
-                    
-                message_reader_cog = self.bot.get_cog("MessageReaderCog")
-                if message_reader_cog:
-                    message_reader_cog.config = self.config
-            else:
-                await ctx.respond(
-                    "❌ 更新する設定項目を指定してください。",
-                    ephemeral=True
-                )
+            await ctx.respond(embed=embed, view=view, ephemeral=True)
             
         except Exception as e:
-            self.logger.error(f"Failed to update global TTS settings: {e}")
+            self.logger.error(f"Failed to show global TTS settings: {e}")
             await ctx.respond(
-                "❌ グローバルTTS設定の更新中にエラーが発生しました。",
+                "❌ グローバルTTS設定の表示中にエラーが発生しました。",
                 ephemeral=True
             )
     
@@ -226,6 +198,221 @@ class UserSettingsCog(commands.Cog):
 
 
 
+
+
+class GlobalTTSSettingsView(discord.ui.View):
+    """グローバルTTS設定のプルダウン選択UI"""
+    
+    def __init__(self, cog: UserSettingsCog, tts_config: Dict[str, Any], greeting_config: Dict[str, Any]):
+        super().__init__(timeout=300)  # 5分でタイムアウト
+        self.cog = cog
+        self.tts_config = tts_config
+        self.greeting_config = greeting_config
+        
+        # 現在の設定値
+        self.current_tts_model = tts_config.get("model_id", 5)
+        self.current_tts_speaker = tts_config.get("speaker_id", 0)
+        self.current_tts_style = tts_config.get("style", "01")
+        self.current_greeting_model = greeting_config.get("model_id", 5)
+        self.current_greeting_speaker = greeting_config.get("speaker_id", 0)
+        self.current_greeting_style = greeting_config.get("style", "01")
+    
+    @discord.ui.select(
+        placeholder="メッセージ読み上げのモデルIDを選択",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="モデル1", value="1", description="モデル1の説明"),
+            discord.SelectOption(label="モデル5 (デフォルト)", value="5", description="モデル5の説明"),
+            discord.SelectOption(label="モデル10", value="10", description="モデル10の説明"),
+        ]
+    )
+    async def tts_model_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        """メッセージ読み上げのモデル選択"""
+        try:
+            new_model_id = int(select.values[0])
+            await self.cog._update_global_config("message_reading", "model_id", new_model_id)
+            
+            # TTSManagerの設定を更新
+            if hasattr(self.cog.bot, 'get_cog'):
+                tts_cog = self.cog.bot.get_cog('TTSCog')
+                message_reader_cog = self.cog.bot.get_cog('MessageReaderCog')
+                if tts_cog and hasattr(tts_cog, 'tts_manager'):
+                    tts_cog.tts_manager.reload_config()
+                if message_reader_cog and hasattr(message_reader_cog, 'tts_manager'):
+                    message_reader_cog.tts_manager.reload_config()
+            
+            self.current_tts_model = new_model_id
+            await interaction.response.send_message(
+                f"✅ メッセージ読み上げのモデルIDを {new_model_id} に変更しました。",
+                ephemeral=True
+            )
+            self.cog.logger.info(f"Global TTS model updated to {new_model_id}")
+            
+        except Exception as e:
+            self.cog.logger.error(f"Failed to update TTS model: {e}")
+            await interaction.response.send_message(
+                "❌ モデルIDの変更に失敗しました。",
+                ephemeral=True
+            )
+    
+    @discord.ui.select(
+        placeholder="メッセージ読み上げの話者IDを選択",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="話者0 (デフォルト)", value="0", description="デフォルト話者"),
+            discord.SelectOption(label="話者1", value="1", description="話者1の説明"),
+            discord.SelectOption(label="話者2", value="2", description="話者2の説明"),
+        ]
+    )
+    async def tts_speaker_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        """メッセージ読み上げの話者選択"""
+        try:
+            new_speaker_id = int(select.values[0])
+            await self.cog._update_global_config("message_reading", "speaker_id", new_speaker_id)
+            
+            # TTSManagerの設定を更新
+            if hasattr(self.cog.bot, 'get_cog'):
+                tts_cog = self.cog.bot.get_cog('TTSCog')
+                message_reader_cog = self.cog.bot.get_cog('MessageReaderCog')
+                if tts_cog and hasattr(tts_cog, 'tts_manager'):
+                    tts_cog.tts_manager.reload_config()
+                if message_reader_cog and hasattr(message_reader_cog, 'tts_manager'):
+                    message_reader_cog.tts_manager.reload_config()
+            
+            self.current_tts_speaker = new_speaker_id
+            await interaction.response.send_message(
+                f"✅ メッセージ読み上げの話者IDを {new_speaker_id} に変更しました。",
+                ephemeral=True
+            )
+            self.cog.logger.info(f"Global TTS speaker updated to {new_speaker_id}")
+            
+        except Exception as e:
+            self.cog.logger.error(f"Failed to update TTS speaker: {e}")
+            await interaction.response.send_message(
+                "❌ 話者IDの変更に失敗しました。",
+                ephemeral=True
+            )
+    
+    @discord.ui.select(
+        placeholder="メッセージ読み上げのスタイルを選択",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="01 (デフォルト)", value="01", description="標準スタイル"),
+            discord.SelectOption(label="02", value="02", description="スタイル02"),
+            discord.SelectOption(label="03", value="03", description="スタイル03"),
+            discord.SelectOption(label="Neutral", value="Neutral", description="ニュートラル"),
+        ]
+    )
+    async def tts_style_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        """メッセージ読み上げのスタイル選択"""
+        try:
+            new_style = select.values[0]
+            await self.cog._update_global_config("message_reading", "style", new_style)
+            
+            # TTSManagerの設定を更新
+            if hasattr(self.cog.bot, 'get_cog'):
+                tts_cog = self.cog.bot.get_cog('TTSCog')
+                message_reader_cog = self.cog.bot.get_cog('MessageReaderCog')
+                if tts_cog and hasattr(tts_cog, 'tts_manager'):
+                    tts_cog.tts_manager.reload_config()
+                if message_reader_cog and hasattr(message_reader_cog, 'tts_manager'):
+                    message_reader_cog.tts_manager.reload_config()
+            
+            self.current_tts_style = new_style
+            await interaction.response.send_message(
+                f"✅ メッセージ読み上げのスタイルを {new_style} に変更しました。",
+                ephemeral=True
+            )
+            self.cog.logger.info(f"Global TTS style updated to {new_style}")
+            
+        except Exception as e:
+            self.cog.logger.error(f"Failed to update TTS style: {e}")
+            await interaction.response.send_message(
+                "❌ スタイルの変更に失敗しました。",
+                ephemeral=True
+            )
+    
+    @discord.ui.select(
+        placeholder="挨拶のモデルIDを選択",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="モデル1", value="1", description="モデル1の説明"),
+            discord.SelectOption(label="モデル5 (デフォルト)", value="5", description="モデル5の説明"),
+            discord.SelectOption(label="モデル10", value="10", description="モデル10の説明"),
+        ]
+    )
+    async def greeting_model_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        """挨拶のモデル選択"""
+        try:
+            new_model_id = int(select.values[0])
+            await self.cog._update_global_config("tts", "greeting", "model_id", new_model_id)
+            
+            # TTSManagerの設定を更新
+            if hasattr(self.cog.bot, 'get_cog'):
+                tts_cog = self.cog.bot.get_cog('TTSCog')
+                if tts_cog and hasattr(tts_cog, 'tts_manager'):
+                    tts_cog.tts_manager.reload_config()
+            
+            self.current_greeting_model = new_model_id
+            await interaction.response.send_message(
+                f"✅ 挨拶のモデルIDを {new_model_id} に変更しました。",
+                ephemeral=True
+            )
+            self.cog.logger.info(f"Global greeting model updated to {new_model_id}")
+            
+        except Exception as e:
+            self.cog.logger.error(f"Failed to update greeting model: {e}")
+            await interaction.response.send_message(
+                "❌ 挨拶モデルIDの変更に失敗しました。",
+                ephemeral=True
+            )
+    
+    @discord.ui.select(
+        placeholder="挨拶のスタイルを選択",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="01 (デフォルト)", value="01", description="標準スタイル"),
+            discord.SelectOption(label="02", value="02", description="スタイル02"),
+            discord.SelectOption(label="03", value="03", description="スタイル03"),
+            discord.SelectOption(label="Neutral", value="Neutral", description="ニュートラル"),
+        ]
+    )
+    async def greeting_style_select(self, select: discord.ui.Select, interaction: discord.Interaction):
+        """挨拶のスタイル選択"""
+        try:
+            new_style = select.values[0]
+            await self.cog._update_global_config("tts", "greeting", "style", new_style)
+            
+            # TTSManagerの設定を更新
+            if hasattr(self.cog.bot, 'get_cog'):
+                tts_cog = self.cog.bot.get_cog('TTSCog')
+                if tts_cog and hasattr(tts_cog, 'tts_manager'):
+                    tts_cog.tts_manager.reload_config()
+            
+            self.current_greeting_style = new_style
+            await interaction.response.send_message(
+                f"✅ 挨拶のスタイルを {new_style} に変更しました。",
+                ephemeral=True
+            )
+            self.cog.logger.info(f"Global greeting style updated to {new_style}")
+            
+        except Exception as e:
+            self.cog.logger.error(f"Failed to update greeting style: {e}")
+            await interaction.response.send_message(
+                "❌ 挨拶スタイルの変更に失敗しました。",
+                ephemeral=True
+            )
+    
+    async def on_timeout(self):
+        """タイムアウト時の処理"""
+        # ビューを無効化
+        for item in self.children:
+            item.disabled = True
 
 
 def setup(bot):
