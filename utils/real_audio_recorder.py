@@ -79,11 +79,9 @@ class RealTimeAudioRecorder:
             logger.info(f"  - Recording active: {getattr(voice_client, 'recording', False)}")
             logger.info(f"  - Sink type: {type(sink).__name__}")
             
-            # 現在のバッファ状況
+            # 現在のバッファ状況（簡略化）
             current_buffers = self.guild_user_buffers.get(guild_id, {})
             logger.info(f"  - Existing buffers: {len(current_buffers)} users")
-            for uid, buffers in current_buffers.items():
-                logger.info(f"    - User {uid}: {len(buffers)} buffers")
                 
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to start recording: {e}", exc_info=True)
@@ -109,15 +107,8 @@ class RealTimeAudioRecorder:
             logger.info(f"  - Audio data keys: {list(sink.audio_data.keys())}")
             logger.info(f"  - Number of users: {len(sink.audio_data)}")
             
-            # 各ユーザーの音声データサイズをログ
-            for user_id, audio in sink.audio_data.items():
-                if audio and audio.file:
-                    audio.file.seek(0, 2)  # ファイル末尾に移動してサイズ取得
-                    file_size = audio.file.tell()
-                    audio.file.seek(0)  # 先頭に戻す
-                    logger.info(f"  - User {user_id}: {file_size} bytes in audio file")
-                else:
-                    logger.info(f"  - User {user_id}: No audio file")
+            # ユーザー数のみログ（詳細は省略）
+            logger.debug(f"  - Processing audio for {len(sink.audio_data)} users")
             
             audio_count = 0
             for user_id, audio in sink.audio_data.items():
@@ -151,8 +142,9 @@ class RealTimeAudioRecorder:
             
             logger.info(f"RealTimeRecorder: Processed {audio_count} audio files in callback")
             
-            # バッファを永続化
+            # バッファを永続化（非同期タスクとして実行）
             if audio_count > 0:
+                # save_buffers()は内部で非同期タスクを作成するので、awaitは不要
                 self.save_buffers()
                         
         except Exception as e:
@@ -192,8 +184,8 @@ class RealTimeAudioRecorder:
                 if not self.guild_user_buffers[gid]:
                     del self.guild_user_buffers[gid]
         
-        # バッファが変更された場合は保存（非同期タスクとして実行）
-        asyncio.create_task(self._save_buffers_async())
+        # バッファが変更された場合は保存（save_buffers内で非同期化される）
+        self.save_buffers()
     
     def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
         """ユーザーの音声バッファを取得（Guild別対応）"""
@@ -229,14 +221,9 @@ class RealTimeAudioRecorder:
         guild_buffers = self.guild_user_buffers[guild_id]
         logger.info(f"RealTimeRecorder: Available users in guild {guild_id}: {list(guild_buffers.keys())}")
         
-        for uid, buffers in guild_buffers.items():
-            logger.info(f"RealTimeRecorder: Guild {guild_id}, User {uid} has {len(buffers)} buffers")
-            # 各バッファの詳細情報
-            for i, (buffer, timestamp) in enumerate(buffers):
-                buffer_size = len(buffer.getvalue()) if buffer else 0
-                import time
-                age_minutes = (time.time() - timestamp) / 60
-                logger.info(f"    - Buffer {i+1}: {buffer_size} bytes, {age_minutes:.1f} minutes old")
+        # バッファ数のサマリーのみ（詳細はdebugレベルで）
+        buffer_summary = {uid: len(buffers) for uid, buffers in guild_buffers.items()}
+        logger.info(f"RealTimeRecorder: Guild {guild_id} buffer summary: {buffer_summary}")
         
         if user_id:
             result = {user_id: guild_buffers.get(user_id, [])}
@@ -282,51 +269,68 @@ class RealTimeAudioRecorder:
             logger.error(f"RealTimeRecorder Debug: Error getting status: {e}")
     
     def save_buffers(self):
-        """音声バッファを永続化（最新20件のみ）"""
-        try:
-            # バッファサイズを制限
-            simplified_buffers = {}
+        """音声バッファを永続化（非同期タスクとして実行されることを推奨）"""
+        # 即座に非同期タスクを作成して戻る
+        asyncio.create_task(self._save_buffers_async())
+    
+    def _prepare_buffer_data(self):
+        """バッファデータの準備（CPU集約的な処理）"""
+        simplified_buffers = {}
+        
+        for guild_id, users in self.guild_user_buffers.items():
+            simplified_buffers[str(guild_id)] = {}
             
-            for guild_id, users in self.guild_user_buffers.items():
-                simplified_buffers[str(guild_id)] = {}
+            for user_id, buffers in users.items():
+                # 最新3件のみ保存（I/O負荷を軽減）
+                recent_buffers = sorted(buffers, key=lambda x: x[1])[-3:]
+                encoded_buffers = []
                 
-                for user_id, buffers in users.items():
-                    # 最新5件のみ保存
-                    recent_buffers = sorted(buffers, key=lambda x: x[1])[-5:]
-                    encoded_buffers = []
-                    
-                    for buffer, timestamp in recent_buffers:
-                        try:
-                            buffer.seek(0)
-                            audio_data = buffer.read()
-                            # Base64エンコードで文字列化
-                            encoded_data = base64.b64encode(audio_data).decode('utf-8')
-                            encoded_buffers.append({
-                                'data': encoded_data,
-                                'timestamp': timestamp,
-                                'size': len(audio_data)
-                            })
-                        except Exception as e:
-                            logger.warning(f"Failed to encode buffer for user {user_id}: {e}")
-                            continue
-                    
-                    if encoded_buffers:
-                        simplified_buffers[str(guild_id)][str(user_id)] = encoded_buffers
+                for buffer, timestamp in recent_buffers:
+                    try:
+                        buffer.seek(0)
+                        audio_data = buffer.read()
+                        # Base64エンコードで文字列化
+                        encoded_data = base64.b64encode(audio_data).decode('utf-8')
+                        encoded_buffers.append({
+                            'data': encoded_data,
+                            'timestamp': timestamp,
+                            'size': len(audio_data)
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to encode buffer for user {user_id}: {e}")
+                        continue
+                
+                if encoded_buffers:
+                    simplified_buffers[str(guild_id)][str(user_id)] = encoded_buffers
+        
+        return simplified_buffers
+    
+    def _write_buffer_file(self, data):
+        """ファイルへの書き込み（ブロッキングI/O）"""
+        try:
+            # 一時ファイルに書き込んでから置き換える（アトミック操作）
+            temp_file = self.buffer_file.with_suffix('.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, separators=(',', ':'))  # indent削除でサイズ削減
             
-            # JSONファイルに保存
-            with open(self.buffer_file, 'w', encoding='utf-8') as f:
-                json.dump(simplified_buffers, f, indent=2)
+            # アトミックに置き換え
+            temp_file.replace(self.buffer_file)
             
-            total_buffers = sum(len(users) for users in simplified_buffers.values())
+            total_buffers = sum(len(users) for users in data.values())
             logger.info(f"RealTimeRecorder: Saved {total_buffers} user buffers to {self.buffer_file}")
-            
         except Exception as e:
-            logger.error(f"RealTimeRecorder: Failed to save buffers: {e}")
+            logger.error(f"RealTimeRecorder: Failed to write buffer file: {e}")
     
     async def _save_buffers_async(self):
-        """非同期でバッファを保存（ワーカータスク）"""
+        """非同期でバッファを保存（メインループをブロックしない）"""
         try:
-            await asyncio.get_event_loop().run_in_executor(None, self.save_buffers)
+            # CPU集約的な処理（Base64エンコード）を別スレッドで実行
+            loop = asyncio.get_event_loop()
+            buffer_data = await loop.run_in_executor(None, self._prepare_buffer_data)
+            
+            # I/O処理も別スレッドで実行
+            await loop.run_in_executor(None, self._write_buffer_file, buffer_data)
+            
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to save buffers async: {e}")
     
@@ -389,8 +393,10 @@ class RealTimeAudioRecorder:
     def cleanup(self):
         """クリーンアップ"""
         try:
-            # バッファを保存してからクリア
+            # 最終的なバッファ保存（非同期タスクとして実行）
             self.save_buffers()
+            # 少し待機して保存タスクが開始されることを確認
+            asyncio.create_task(asyncio.sleep(0.1))
         except:
             pass
         
