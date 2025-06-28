@@ -159,6 +159,6 @@ class TTSCog(commands.Cog):
             return False
 
 
-async def setup(bot: commands.Bot, config: Dict[str, Any]):
+def setup(bot):
     """Cogのセットアップ"""
-    await bot.add_cog(TTSCog(bot, config))
+    bot.add_cog(TTSCog(bot, bot.config))

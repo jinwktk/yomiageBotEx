@@ -193,6 +193,6 @@ class MessageReaderCog(commands.Cog):
             )
 
 
-async def setup(bot: commands.Bot, config: Dict[str, Any]):
+def setup(bot):
     """Cogのセットアップ"""
-    await bot.add_cog(MessageReaderCog(bot, config))
+    bot.add_cog(MessageReaderCog(bot, bot.config))

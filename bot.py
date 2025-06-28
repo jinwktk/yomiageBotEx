@@ -87,37 +87,61 @@ class YomiageBot(discord.Bot):
         )
         
         self.config = config
-        
-    async def setup_hook(self):
-        """起動時の初期設定"""
-        logger.info("Bot setup started...")
-        
-        # Cogの読み込み
-        await self.load_cogs()
-        
-        # ログクリーンアップタスクの開始
-        asyncio.create_task(start_log_cleanup_task(self.config))
-        
-        # py-cordではスラッシュコマンドは自動同期されるため、手動同期は不要
-        logger.info("Bot setup completed (py-cord auto-syncs slash commands)")
     
-    async def load_cogs(self):
-        """Cogを読み込む"""
+    async def connect_voice_safely(self, channel):
+        """安全な音声接続（bot_simple.pyから移植）"""
+        try:
+            # タイムアウトとreconnectで接続の安定性を向上
+            vc = await channel.connect(
+                timeout=30.0,
+                reconnect=True
+            )
+            # 接続後にdeafenを設定
+            await channel.guild.change_voice_state(
+                channel=channel,
+                self_deaf=True,
+                self_mute=False
+            )
+            return vc
+        except Exception as e:
+            logger.error(f"Failed to connect safely: {e}")
+            # フォールバック：基本的な接続を試みる
+            try:
+                return await channel.connect()
+            except Exception as e2:
+                logger.error(f"Fallback connection also failed: {e2}")
+                raise
+        
+    def setup_cogs(self):
+        """起動時のCog読み込み（同期処理）"""
+        logger.info("Loading cogs...")
+        
+        try:
+            self.load_cogs_sync()
+            logger.info(f"Cogs loaded. Total cogs: {len(self.cogs)}")
+        except Exception as e:
+            logger.error(f"Failed to load cogs: {e}", exc_info=True)
+    
+    def load_cogs_sync(self):
+        """Cogを読み込む（同期版）"""
         cogs = [
             "cogs.voice",
-            "cogs.tts",
+            "cogs.tts", 
             "cogs.recording",
             "cogs.message_reader",
         ]
         
         for cog in cogs:
             try:
-                # Cogモジュールを動的にインポート
-                module = __import__(cog, fromlist=["setup"])
-                await module.setup(self, self.config)
+                # py-cordの推奨方法でCogを読み込み
+                self.load_extension(cog)
                 logger.info(f"Loaded cog: {cog}")
             except Exception as e:
-                logger.error(f"Failed to load cog {cog}: {e}")
+                logger.error(f"Failed to load cog {cog}: {e}", exc_info=True)
+                
+    async def load_cogs(self):
+        """Cogを読み込む（非同期版）"""
+        self.load_cogs_sync()
     
     async def on_ready(self):
         """Bot準備完了時のイベント"""
@@ -131,14 +155,21 @@ class YomiageBot(discord.Bot):
             for guild in self.guilds:
                 logger.info(f"  - {guild.name}: {guild.id}")
                 
-        # py-cordのスラッシュコマンド同期確認
-        commands_info = []
-        for command in self.pending_application_commands:
-            commands_info.append(f"/{command.name}")
-        if commands_info:
-            logger.info(f"Registered slash commands: {', '.join(commands_info)}")
-        else:
-            logger.warning("No slash commands found!")
+        # py-cordのスラッシュコマンド確認（bot_simple.pyから移植）
+        logger.info(f"Bot commands: {len(self.commands)}")
+        logger.info(f"Bot cogs: {list(self.cogs.keys())}")
+        for cmd in self.commands:
+            logger.info(f"  Command: {cmd.name} (type: {type(cmd).__name__})")
+        
+        # Cogのコマンド詳細確認
+        for cog_name, cog in self.cogs.items():
+            cog_commands = cog.get_commands()
+            logger.info(f"Cog {cog_name}: {len(cog_commands)} commands")
+            for cmd in cog_commands:
+                logger.info(f"  - {cmd.name}")
+        
+        # ログクリーンアップタスクの開始
+        asyncio.create_task(start_log_cleanup_task(self.config))
         
         # ステータスの設定
         await self.change_presence(
@@ -158,11 +189,19 @@ class YomiageBot(discord.Bot):
         if channel.guild.voice_client:
             await channel.guild.voice_client.disconnect()
         
-        # EnhancedVoiceClientを使用して接続
-        return await channel.connect(cls=EnhancedVoiceClient)
+        # 安全な接続を試行
+        try:
+            return await self.connect_voice_safely(channel)
+        except Exception as e:
+            logger.error(f"Safe connection failed, trying EnhancedVoiceClient: {e}")
+            # フォールバック：EnhancedVoiceClientを使用
+            return await channel.connect(cls=EnhancedVoiceClient)
     
 # Botインスタンスの作成
 bot = YomiageBot()
+
+# Cogの初期読み込み
+bot.setup_cogs()
 
 def main():
     """メイン実行関数"""

@@ -37,9 +37,8 @@ class RecordingCog(commands.Cog):
         # リアルタイム音声録音管理
         self.real_time_recorder = RealTimeAudioRecorder(self.recording_manager)
         
-        # クリーンアップタスクを開始
-        if self.recording_enabled:
-            asyncio.create_task(self.recording_manager.start_cleanup_task())
+        # クリーンアップタスクは後で開始
+        self.cleanup_task_started = False
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
@@ -62,6 +61,14 @@ class RecordingCog(commands.Cog):
                 self.recording_manager, guild_id
             )
         return self.recording_sinks[guild_id]
+    
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Bot準備完了時のクリーンアップタスク開始"""
+        if self.recording_enabled and not self.cleanup_task_started:
+            asyncio.create_task(self.recording_manager.start_cleanup_task())
+            self.cleanup_task_started = True
+            self.logger.info("Recording: Cleanup task started")
     
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
@@ -335,6 +342,6 @@ class RecordingCog(commands.Cog):
             )
 
 
-async def setup(bot: commands.Bot, config: Dict[str, Any]):
+def setup(bot):
     """Cogのセットアップ"""
-    await bot.add_cog(RecordingCog(bot, config))
+    bot.add_cog(RecordingCog(bot, bot.config))

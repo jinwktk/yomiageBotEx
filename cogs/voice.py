@@ -333,6 +333,6 @@ class VoiceCog(commands.Cog):
             self.logger.error(f"Failed to disconnect from voice channel: {e}")
 
 
-async def setup(bot: commands.Bot, config: Dict[str, Any]):
+def setup(bot):
     """Cogのセットアップ"""
-    await bot.add_cog(VoiceCog(bot, config))
+    bot.add_cog(VoiceCog(bot, bot.config))
