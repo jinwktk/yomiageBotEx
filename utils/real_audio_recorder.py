@@ -70,6 +70,20 @@ class RealTimeAudioRecorder:
             voice_client.start_recording(sink, callback)
             logger.info(f"RealTimeRecorder: Started recording for guild {guild_id} with channel {voice_client.channel.name}")
             logger.info(f"RealTimeRecorder: Voice client recording status: {voice_client.recording}")
+            
+            # 録音開始のデバッグ情報
+            logger.info(f"RealTimeRecorder: Recording setup complete:")
+            logger.info(f"  - Guild ID: {guild_id}")
+            logger.info(f"  - Channel: {voice_client.channel.name}")
+            logger.info(f"  - Current members: {[m.display_name for m in voice_client.channel.members]}")
+            logger.info(f"  - Recording active: {getattr(voice_client, 'recording', False)}")
+            logger.info(f"  - Sink type: {type(sink).__name__}")
+            
+            # 現在のバッファ状況
+            current_buffers = self.guild_user_buffers.get(guild_id, {})
+            logger.info(f"  - Existing buffers: {len(current_buffers)} users")
+            for uid, buffers in current_buffers.items():
+                logger.info(f"    - User {uid}: {len(buffers)} buffers")
                 
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to start recording: {e}", exc_info=True)
@@ -90,7 +104,20 @@ class RealTimeAudioRecorder:
         """録音完了時のコールバック（bot_simple.pyから移植）"""
         try:
             logger.info(f"RealTimeRecorder: Finished callback called for guild {guild_id}")
-            logger.info(f"RealTimeRecorder: Sink audio_data keys: {list(sink.audio_data.keys())}")
+            logger.info(f"RealTimeRecorder: Callback details:")
+            logger.info(f"  - Sink type: {type(sink).__name__}")
+            logger.info(f"  - Audio data keys: {list(sink.audio_data.keys())}")
+            logger.info(f"  - Number of users: {len(sink.audio_data)}")
+            
+            # 各ユーザーの音声データサイズをログ
+            for user_id, audio in sink.audio_data.items():
+                if audio and audio.file:
+                    audio.file.seek(0, 2)  # ファイル末尾に移動してサイズ取得
+                    file_size = audio.file.tell()
+                    audio.file.seek(0)  # 先頭に戻す
+                    logger.info(f"  - User {user_id}: {file_size} bytes in audio file")
+                else:
+                    logger.info(f"  - User {user_id}: No audio file")
             
             audio_count = 0
             for user_id, audio in sink.audio_data.items():
@@ -171,9 +198,32 @@ class RealTimeAudioRecorder:
     def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
         """ユーザーの音声バッファを取得（Guild別対応）"""
         logger.info(f"RealTimeRecorder: Getting buffers for guild {guild_id}, user {user_id}")
+        logger.info(f"RealTimeRecorder: Current recording state for guild {guild_id}:")
+        
+        # 録音状況を詳細に確認
+        if guild_id in self.connections:
+            vc = self.connections[guild_id]
+            logger.info(f"  - Voice client connected: {vc.is_connected() if vc else False}")
+            logger.info(f"  - Currently recording: {getattr(vc, 'recording', False)}")
+            logger.info(f"  - Channel: {vc.channel.name if vc and vc.channel else 'None'}")
+        else:
+            logger.info(f"  - No active connection for guild {guild_id}")
+        
+        # バッファの詳細状況
+        logger.info(f"  - All guild buffers: {list(self.guild_user_buffers.keys())}")
         
         if guild_id not in self.guild_user_buffers:
-            logger.info(f"RealTimeRecorder: No buffers for guild {guild_id}")
+            logger.warning(f"RealTimeRecorder: No buffers for guild {guild_id}")
+            logger.info(f"  - Available guilds: {list(self.guild_user_buffers.keys())}")
+            
+            # 録音中にも関わらずバッファがない場合の警告
+            if guild_id in self.connections:
+                vc = self.connections[guild_id]
+                if hasattr(vc, 'recording') and vc.recording:
+                    logger.warning(f"RealTimeRecorder: WARNING - Currently recording but no buffers exist!")
+                    logger.warning(f"  - This suggests audio data is not being saved to buffers yet")
+                    logger.warning(f"  - Buffers are created only when recording is stopped")
+            
             return {}
         
         guild_buffers = self.guild_user_buffers[guild_id]
@@ -181,12 +231,39 @@ class RealTimeAudioRecorder:
         
         for uid, buffers in guild_buffers.items():
             logger.info(f"RealTimeRecorder: Guild {guild_id}, User {uid} has {len(buffers)} buffers")
+            # 各バッファの詳細情報
+            for i, (buffer, timestamp) in enumerate(buffers):
+                buffer_size = len(buffer.getvalue()) if buffer else 0
+                import time
+                age_minutes = (time.time() - timestamp) / 60
+                logger.info(f"    - Buffer {i+1}: {buffer_size} bytes, {age_minutes:.1f} minutes old")
         
         if user_id:
             result = {user_id: guild_buffers.get(user_id, [])}
             logger.info(f"RealTimeRecorder: Returning buffers for guild {guild_id}, user {user_id}: {len(result[user_id])} items")
             return result
         return guild_buffers.copy()
+    
+    async def force_recording_checkpoint(self, guild_id: int):
+        """録音中でも現在までの音声データを強制的にバッファに保存"""
+        try:
+            if guild_id in self.connections:
+                vc = self.connections[guild_id]
+                if hasattr(vc, 'recording') and vc.recording:
+                    logger.info(f"RealTimeRecorder: Forcing checkpoint for guild {guild_id}")
+                    
+                    # 現在の録音を一時停止してバッファに保存
+                    vc.stop_recording()
+                    await asyncio.sleep(0.5)  # コールバック完了を待つ
+                    
+                    # 録音を再開
+                    await self.start_recording(guild_id, vc)
+                    logger.info(f"RealTimeRecorder: Checkpoint complete, recording restarted")
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Failed to create checkpoint: {e}")
+            return False
     
     def debug_recording_status(self, guild_id: int):
         """録音状況のデバッグ情報を出力"""

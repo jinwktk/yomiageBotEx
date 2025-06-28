@@ -210,6 +210,18 @@ class RecordingCog(commands.Cog):
             
             # リアルタイム録音データから直接バッファを取得（Guild別）
             guild_id = ctx.guild.id
+            
+            # 録音中の場合は強制的にチェックポイントを作成
+            if guild_id in self.real_time_recorder.connections:
+                vc = self.real_time_recorder.connections[guild_id]
+                if hasattr(vc, 'recording') and vc.recording:
+                    self.logger.info(f"Recording is active, creating checkpoint before replay")
+                    checkpoint_success = await self.real_time_recorder.force_recording_checkpoint(guild_id)
+                    if checkpoint_success:
+                        self.logger.info(f"Checkpoint created successfully")
+                    else:
+                        self.logger.warning(f"Failed to create checkpoint, using existing buffers")
+            
             user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(guild_id, user.id if user else None)
             
             # バッファクリーンアップ（Guild別）
