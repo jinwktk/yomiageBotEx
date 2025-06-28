@@ -354,25 +354,33 @@ class TTSManager:
         
         lines = ["🎤 **利用可能なモデル一覧**\n"]
         
-        for i, (model_id, model_info) in enumerate(models.items()):
-            model_name = model_info.get("name", f"Model {model_id}")
-            speaker_count = len(model_info.get("speakers", []))
-            lines.append(f"**{model_id}**: {model_name} ({speaker_count}話者)")
+        for model_id, model_info in models.items():
+            # id2spkから話者名を取得
+            speaker_names = list(model_info.get("id2spk", {}).values())
+            speaker_name = speaker_names[0] if speaker_names else f"Model {model_id}"
+            
+            # style2idからスタイル数を取得
+            style_count = len(model_info.get("style2id", {}))
+            
+            lines.append(f"**{model_id}**: {speaker_name} ({style_count}スタイル)")
         
         return "\n".join(lines)
     
-    def format_speakers_for_display(self, model_id: int, speakers: Dict[str, Any]) -> str:
+    def format_speakers_for_display(self, model_id: int, model_info: Dict[str, Any]) -> str:
         """話者一覧を表示用にフォーマット"""
-        if not speakers:
-            return f"モデル {model_id} の話者情報が取得できません"
+        if not model_info:
+            return f"モデル {model_id} の情報が取得できません"
         
-        lines = [f"🗣️ **モデル {model_id} の話者一覧**\n"]
+        # id2spkから話者名を取得
+        speaker_names = list(model_info.get("id2spk", {}).values())
+        speaker_name = speaker_names[0] if speaker_names else f"Model {model_id}"
         
-        for speaker_id, speaker_info in speakers.items():
-            speaker_name = speaker_info.get("name", f"Speaker {speaker_id}")
-            styles = speaker_info.get("styles", ["Neutral"])
-            style_text = ", ".join(styles) if len(styles) <= 3 else f"{', '.join(styles[:3])}..."
-            lines.append(f"**{speaker_id}**: {speaker_name} ({style_text})")
+        # style2idから利用可能スタイルを取得
+        styles = list(model_info.get("style2id", {}).keys())
+        
+        lines = [f"🗣️ **モデル {model_id}: {speaker_name}**\n"]
+        lines.append("**話者ID**: 0 (固定)")
+        lines.append(f"**利用可能スタイル**: {', '.join(styles) if styles else 'Neutral'}")
         
         return "\n".join(lines)
     

@@ -111,12 +111,24 @@ class UserSettingsCog(commands.Cog):
             # シンプルなビューを作成
             view = SimpleTTSSettingsView(self, ctx.user.id, current_settings)
             
+            # モデル名を取得
+            model_id = current_settings.get('model_id', 0)
+            model_names = {
+                0: "jvnv-F1-jp（女性1）",
+                1: "jvnv-F2-jp（女性2）", 
+                2: "jvnv-M1-jp（男性1）",
+                3: "jvnv-M2-jp（男性2）",
+                4: "小春音アミ",
+                5: "あみたろ"
+            }
+            model_name = model_names.get(model_id, f"Model {model_id}")
+            
             # 現在の設定を表示
             embed = discord.Embed(
                 title="⚙️ TTS設定",
                 description=f"**現在の設定:**\n"
-                           f"モデルID: {current_settings.get('model_id', 0)}\n"
-                           f"話者ID: {current_settings.get('speaker_id', 0)}\n"
+                           f"モデル: {model_id} - {model_name}\n"
+                           f"話者ID: {current_settings.get('speaker_id', 0)} (標準話者)\n"
                            f"スタイル: {current_settings.get('style', 'Neutral')}\n"
                            f"速度: {current_settings.get('speed', 1.0)}\n"
                            f"音量: {current_settings.get('volume', 1.0)}",
@@ -332,15 +344,16 @@ class SimpleTTSSettingsView(discord.ui.View):
         self.current_settings = current_settings
     
     @discord.ui.select(
-        placeholder="モデルIDを選択してください",
+        placeholder="モデルを選択してください",
         min_values=1,
         max_values=1,
         options=[
-            discord.SelectOption(label="0: デフォルトモデル", value="0"),
-            discord.SelectOption(label="1: モデル1", value="1"),
-            discord.SelectOption(label="2: モデル2", value="2"),
-            discord.SelectOption(label="3: モデル3", value="3"),
-            discord.SelectOption(label="4: モデル4", value="4")
+            discord.SelectOption(label="0: jvnv-F1-jp（女性1）", value="0"),
+            discord.SelectOption(label="1: jvnv-F2-jp（女性2）", value="1"),
+            discord.SelectOption(label="2: jvnv-M1-jp（男性1）", value="2"),
+            discord.SelectOption(label="3: jvnv-M2-jp（男性2）", value="3"),
+            discord.SelectOption(label="4: 小春音アミ", value="4"),
+            discord.SelectOption(label="5: あみたろ", value="5")
         ]
     )
     async def model_select(self, select: discord.ui.Select, interaction: discord.Interaction):
@@ -359,15 +372,11 @@ class SimpleTTSSettingsView(discord.ui.View):
             )
     
     @discord.ui.select(
-        placeholder="話者IDを選択してください",
+        placeholder="話者を選択してください（選択されたモデルに依存）",
         min_values=1,
         max_values=1,
         options=[
-            discord.SelectOption(label="0: デフォルト話者", value="0"),
-            discord.SelectOption(label="1: 話者1", value="1"),
-            discord.SelectOption(label="2: 話者2", value="2"),
-            discord.SelectOption(label="3: 話者3", value="3"),
-            discord.SelectOption(label="4: 話者4", value="4")
+            discord.SelectOption(label="0: 標準話者（全モデル共通）", value="0")
         ]
     )
     async def speaker_select(self, select: discord.ui.Select, interaction: discord.Interaction):
@@ -390,12 +399,22 @@ class SimpleTTSSettingsView(discord.ui.View):
         min_values=1,
         max_values=1,
         options=[
-            discord.SelectOption(label="Neutral", value="Neutral"),
-            discord.SelectOption(label="Happy", value="Happy"),
-            discord.SelectOption(label="Sad", value="Sad"),
-            discord.SelectOption(label="Angry", value="Angry"),
-            discord.SelectOption(label="Fear", value="Fear"),
-            discord.SelectOption(label="Surprise", value="Surprise")
+            discord.SelectOption(label="Neutral（標準）", value="Neutral"),
+            discord.SelectOption(label="Happy（嬉しい）", value="Happy"),
+            discord.SelectOption(label="Sad（悲しい）", value="Sad"),
+            discord.SelectOption(label="Angry（怒り）", value="Angry"),
+            discord.SelectOption(label="Fear（恐怖）", value="Fear"),
+            discord.SelectOption(label="Surprise（驚き）", value="Surprise"),
+            discord.SelectOption(label="Disgust（嫌悪）", value="Disgust"),
+            discord.SelectOption(label="るんるん（小春音アミ専用）", value="るんるん"),
+            discord.SelectOption(label="ささやきA（小春音アミ専用）", value="ささやきA（無声）"),
+            discord.SelectOption(label="ささやきB（小春音アミ専用）", value="ささやきB（有声）"),
+            discord.SelectOption(label="ノーマル（小春音アミ専用）", value="ノーマル"),
+            discord.SelectOption(label="よふかし（小春音アミ専用）", value="よふかし"),
+            discord.SelectOption(label="01（あみたろ専用）", value="01"),
+            discord.SelectOption(label="02（あみたろ専用）", value="02"),
+            discord.SelectOption(label="03（あみたろ専用）", value="03"),
+            discord.SelectOption(label="04（あみたろ専用）", value="04")
         ]
     )
     async def style_select(self, select: discord.ui.Select, interaction: discord.Interaction):

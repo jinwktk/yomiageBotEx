@@ -206,13 +206,15 @@ class TTSCog(commands.Cog):
         await self.rate_limit_delay()
         
         try:
-            speakers = await self.tts_manager.get_model_speakers(model_id)
+            # 全モデル情報を取得してから指定モデルの情報を抽出
+            models = await self.tts_manager.get_available_models()
             
-            if speakers:
-                speaker_text = self.tts_manager.format_speakers_for_display(model_id, speakers)
+            if models and str(model_id) in models:
+                model_info = models[str(model_id)]
+                speaker_text = self.tts_manager.format_speakers_for_display(model_id, model_info)
                 
                 embed = discord.Embed(
-                    title=f"🗣️ モデル {model_id} の話者一覧",
+                    title=f"🗣️ モデル {model_id} の詳細",
                     description=speaker_text,
                     color=discord.Color.green()
                 )
@@ -221,7 +223,7 @@ class TTSCog(commands.Cog):
                 await ctx.respond(embed=embed, ephemeral=True)
             else:
                 await ctx.respond(
-                    f"❌ モデル {model_id} の話者情報を取得できませんでした。",
+                    f"❌ モデル {model_id} の情報を取得できませんでした。",
                     ephemeral=True
                 )
                 
