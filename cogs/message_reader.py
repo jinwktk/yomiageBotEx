@@ -167,27 +167,27 @@ class MessageReaderCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"MessageReader: Failed to play audio: {e}")
     
-    @discord.app_commands.command(name="reading", description="チャット読み上げのON/OFFを切り替えます")
-    async def toggle_reading(self, interaction: discord.Interaction):
+    @discord.slash_command(name="reading", description="チャット読み上げのON/OFFを切り替えます")
+    async def toggle_reading(self, ctx: discord.ApplicationContext):
         """読み上げ機能のON/OFF切り替え"""
         try:
-            guild_id = interaction.guild.id
+            guild_id = ctx.guild.id
             current_state = self.is_reading_enabled(guild_id)
             new_state = not current_state
             
             self.guild_reading_enabled[guild_id] = new_state
             
             state_text = "有効" if new_state else "無効"
-            await interaction.response.send_message(
+            await ctx.respond(
                 f"📢 チャット読み上げを{state_text}にしました。",
                 ephemeral=True
             )
             
-            self.logger.info(f"MessageReader: Reading toggled to {new_state} for guild {interaction.guild.name}")
+            self.logger.info(f"MessageReader: Reading toggled to {new_state} for guild {ctx.guild.name}")
             
         except Exception as e:
             self.logger.error(f"MessageReader: Failed to toggle reading: {e}")
-            await interaction.response.send_message(
+            await ctx.respond(
                 "❌ 設定の変更に失敗しました。",
                 ephemeral=True
             )

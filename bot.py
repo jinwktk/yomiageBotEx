@@ -67,7 +67,7 @@ config = load_config()
 # ロギングの初期化
 logger = setup_logging(config)
 
-class YomiageBot(commands.Bot):
+class YomiageBot(discord.Bot):
     """読み上げボットのメインクラス"""
     
     def __init__(self):
@@ -77,10 +77,13 @@ class YomiageBot(commands.Bot):
         intents.voice_states = True
         intents.guilds = True
         
+        # DEBUG_GUILD_IDの設定（開発用）
+        debug_guild_id = os.getenv("DEBUG_GUILD_ID")
+        debug_guilds = [int(debug_guild_id)] if debug_guild_id else None
+        
         super().__init__(
-            command_prefix=config["bot"]["command_prefix"],
             intents=intents,
-            help_command=None  # デフォルトのヘルプコマンドを無効化
+            debug_guilds=debug_guilds  # 開発用ギルド指定でスラッシュコマンド即時同期
         )
         
         self.config = config
@@ -121,6 +124,21 @@ class YomiageBot(commands.Bot):
         logger.info(f"Bot is ready! Logged in as {self.user} (ID: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guild(s)")
         logger.info(f"Voice client type: {VOICE_CLIENT_TYPE}")
+        
+        # デバッグ用にギルドIDをログ出力
+        if self.guilds:
+            logger.info("Guild IDs:")
+            for guild in self.guilds:
+                logger.info(f"  - {guild.name}: {guild.id}")
+                
+        # py-cordのスラッシュコマンド同期確認
+        commands_info = []
+        for command in self.pending_application_commands:
+            commands_info.append(f"/{command.name}")
+        if commands_info:
+            logger.info(f"Registered slash commands: {', '.join(commands_info)}")
+        else:
+            logger.warning("No slash commands found!")
         
         # ステータスの設定
         await self.change_presence(
