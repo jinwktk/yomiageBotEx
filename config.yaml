@@ -50,6 +50,7 @@ logging:
     max_bytes: 10485760        # ファイルサイズ上限（10MB）
     backup_count: 5            # 保持するバックアップ数
     compression: true          # gzip圧縮の有効/無効
+    rotate_on_startup: true    # 起動時のログローテーション
   cleanup:                     # 古いログファイルのクリーンアップ
     enabled: true              # クリーンアップ機能の有効/無効
     max_days: 30               # ログファイルの保持日数

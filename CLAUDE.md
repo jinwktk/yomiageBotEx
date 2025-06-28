@@ -484,6 +484,8 @@ yomiageBotEx/
   - ✅ ユーザー別個人設定システム
   - ✅ プルダウン式設定UI
   - ✅ タイムアウト問題の解決
+  - ✅ 全コマンドephemeral化
+  - ✅ 起動時ログローテーション
 
 ### 2024-06-28 バグ修正・改善（第10回）
 - **aiohttp セッション適切なクリーンアップ実装**: Bot終了時にTTSManagerのHTTPセッションが確実に閉じられるように修正
@@ -494,6 +496,17 @@ yomiageBotEx/
   - ❌ **aiohttp client session not closed properly**: bot.py終了時クリーンアップで解決
   - ✅ **/replayコマンド未実装**: 既に完全実装済み（ユーザー指定録音・全員音声マージ対応）
   - ❌ **自動挨拶機能**: config.yamlでgreeting.enabled=falseに変更済み
+
+### 2024-06-28 UX改善（第11回）
+- **全スラッシュコマンドのephemeral化完了**: 全ての`ctx.respond`に`ephemeral=True`が既に設定済み（voice.py、recording.py、message_reader.py、dictionary.py、user_settings.py、tts.py）
+- **ボット再起動時のログローテーション機能追加**: 
+  - `utils/logger.py`に`rotate_log_on_startup()`関数を追加
+  - 起動時に既存ログをタイムスタンプ付きでローテーション・圧縮
+  - `config.yaml`に`rotation.rotate_on_startup`設定を追加
+  - ログファイルサイズが0より大きい場合のみローテーション実行
+- **目的**: 
+  - ユーザーの応答を他のユーザーから隠す（プライバシー保護）
+  - 再起動ごとに新しいログファイルで開始（管理性向上）
 
 ### 今後の改善案
 - Web管理画面の追加

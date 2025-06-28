@@ -46,6 +46,40 @@ class CompressedRotatingFileHandler(logging.handlers.RotatingFileHandler):
             self.stream = self._open()
 
 
+def rotate_log_on_startup(log_file: str):
+    """起動時にログをローテーションする"""
+    try:
+        log_path = Path(log_file)
+        if not log_path.exists():
+            return
+        
+        # 現在のログファイルのサイズをチェック
+        file_size = log_path.stat().st_size
+        
+        # ファイルが存在し、サイズが0より大きい場合のみローテーション
+        if file_size > 0:
+            # タイムスタンプ付きのバックアップファイル名を生成
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_file = log_path.parent / f"{log_path.stem}_{timestamp}.log"
+            
+            # 現在のログファイルをリネーム
+            log_path.rename(backup_file)
+            
+            # バックアップファイルを圧縮
+            compressed_file = backup_file.with_suffix('.log.gz')
+            with open(backup_file, 'rb') as f_in:
+                with gzip.open(compressed_file, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            
+            # 元のファイルを削除
+            backup_file.unlink()
+            
+            print(f"✅ Log rotated on startup: {compressed_file}")
+        
+    except Exception as e:
+        print(f"⚠️ Failed to rotate log on startup: {e}")
+
+
 def setup_logging(config: Dict[str, Any]) -> logging.Logger:
     """ロギングの設定（ローテーション機能付き）"""
     log_config = config.get("logging", {})
@@ -57,10 +91,15 @@ def setup_logging(config: Dict[str, Any]) -> logging.Logger:
     max_bytes = rotation_config.get("max_bytes", 10 * 1024 * 1024)  # 10MB
     backup_count = rotation_config.get("backup_count", 5)
     use_compression = rotation_config.get("compression", True)
+    rotate_on_startup = rotation_config.get("rotate_on_startup", True)
     
     # ログディレクトリの作成
     log_path = Path(log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # 起動時のログローテーション
+    if rotate_on_startup:
+        rotate_log_on_startup(log_file)
     
     # ロガーの設定
     logger = logging.getLogger()
