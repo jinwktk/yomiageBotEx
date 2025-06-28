@@ -90,28 +90,70 @@ class YomiageBot(discord.Bot):
         self.config = config
     
     async def connect_voice_safely(self, channel):
-        """安全な音声接続（bot_simple.pyから移植）"""
-        try:
-            # タイムアウトとreconnectで接続の安定性を向上
-            vc = await channel.connect(
-                timeout=30.0,
-                reconnect=True
-            )
-            # 接続後にdeafenを設定
-            await channel.guild.change_voice_state(
-                channel=channel,
-                self_deaf=True,
-                self_mute=False
-            )
-            return vc
-        except Exception as e:
-            logger.error(f"Failed to connect safely: {e}")
-            # フォールバック：基本的な接続を試みる
+        """安全な音声接続（WebSocketエラー対応強化版）"""
+        max_retries = 3
+        retry_delay = 2.0
+        
+        for attempt in range(max_retries):
             try:
-                return await channel.connect()
-            except Exception as e2:
-                logger.error(f"Fallback connection also failed: {e2}")
-                raise
+                logger.info(f"Voice connection attempt {attempt + 1}/{max_retries} to {channel.name}")
+                
+                # タイムアウトとreconnectで接続の安定性を向上
+                vc = await channel.connect(
+                    timeout=45.0,  # タイムアウトを延長
+                    reconnect=True
+                )
+                
+                # 接続成功後の安定化待機
+                await asyncio.sleep(1.0)
+                
+                # 接続状態の確認
+                if vc and vc.is_connected():
+                    logger.info(f"Voice connection successful to {channel.name}")
+                    
+                    try:
+                        # 接続後にdeafenを設定
+                        await channel.guild.change_voice_state(
+                            channel=channel,
+                            self_deaf=True,
+                            self_mute=False
+                        )
+                        logger.info("Voice state (self_deaf=True) set successfully")
+                    except Exception as state_error:
+                        logger.warning(f"Failed to set voice state, but connection is OK: {state_error}")
+                    
+                    return vc
+                else:
+                    logger.warning(f"Connection established but not stable, attempt {attempt + 1}")
+                    if vc:
+                        await vc.disconnect()
+                    raise Exception("Connection not stable")
+                    
+            except Exception as e:
+                logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
+                
+                # WebSocket 4000 エラーの特別な処理
+                if "4000" in str(e) or "WebSocket" in str(e):
+                    logger.warning(f"WebSocket error detected: {e}")
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying after {retry_delay}s due to WebSocket error...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 1.5  # 指数バックオフ
+                        continue
+                
+                # 最後の試行でない場合はリトライ
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying connection after {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 1.2
+                else:
+                    # 最後の試行：フォールバック
+                    logger.error("All connection attempts failed, trying basic connect")
+                    try:
+                        return await channel.connect()
+                    except Exception as e2:
+                        logger.error(f"Fallback connection also failed: {e2}")
+                        raise
         
     def setup_cogs(self):
         """起動時のCog読み込み（同期処理）"""

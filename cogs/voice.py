@@ -282,8 +282,46 @@ class VoiceCog(commands.Cog):
     async def notify_bot_joined_channel(self, guild: discord.Guild, channel: discord.VoiceChannel):
         """ボットがチャンネルに接続した際の他Cogへの通知"""
         try:
-            # 少し待ってから処理（接続の安定化）
-            await asyncio.sleep(1)
+            # 音声接続が完全に確立されるまで待機
+            self.logger.info("Waiting for voice connection to stabilize...")
+            
+            stable_connection = False
+            for attempt in range(15):  # 最大15回試行（7.5秒間）
+                await asyncio.sleep(0.5)
+                
+                voice_client = guild.voice_client
+                if voice_client and voice_client.is_connected():
+                    # 追加の安定性チェック：WebSocketの状態も確認
+                    try:
+                        # ボイスクライアントの内部状態をチェック
+                        if hasattr(voice_client, '_connected') and voice_client._connected:
+                            self.logger.info(f"Voice connection confirmed after {(attempt + 1) * 0.5}s")
+                            stable_connection = True
+                            break
+                        elif hasattr(voice_client, 'is_connected') and voice_client.is_connected():
+                            self.logger.info(f"Voice connection stable after {(attempt + 1) * 0.5}s")
+                            stable_connection = True
+                            break
+                    except Exception as e:
+                        self.logger.debug(f"Connection stability check failed: {e}")
+                        continue
+                
+                if attempt >= 14:
+                    self.logger.warning("Voice connection not stable after 7.5s, aborting")
+                    return
+            
+            if not stable_connection:
+                self.logger.warning("Voice connection stability could not be verified")
+                return
+            
+            # 追加の安定化待機
+            await asyncio.sleep(1.5)
+            
+            # 最終確認：接続がまだ有効か
+            voice_client = guild.voice_client
+            if not voice_client or not voice_client.is_connected():
+                self.logger.warning("Voice client disconnected during stabilization wait")
+                return
             
             # チャンネルにいる全メンバーを取得（ボット以外）
             members = [m for m in channel.members if not m.bot]
@@ -291,15 +329,29 @@ class VoiceCog(commands.Cog):
             
             # 各メンバーに対してTTSと録音の処理を開始
             for member in members:
-                # TTSCogに挨拶を依頼
-                tts_cog = self.bot.get_cog("TTSCog")
-                if tts_cog:
-                    await tts_cog.handle_bot_joined_with_user(guild, member)
+                # 各処理前に接続確認
+                current_voice_client = guild.voice_client
+                if not current_voice_client or not current_voice_client.is_connected():
+                    self.logger.warning(f"Voice client disconnected before processing member {member.display_name}")
+                    return
                 
-                # RecordingCogに録音開始を依頼
-                recording_cog = self.bot.get_cog("RecordingCog")
-                if recording_cog:
-                    await recording_cog.handle_bot_joined_with_user(guild, member)
+                try:
+                    # TTSCogに挨拶を依頼
+                    tts_cog = self.bot.get_cog("TTSCog")
+                    if tts_cog:
+                        await tts_cog.handle_bot_joined_with_user(guild, member)
+                    
+                    # 短い間隔でTTSと録音を分離
+                    await asyncio.sleep(0.5)
+                    
+                    # RecordingCogに録音開始を依頼
+                    recording_cog = self.bot.get_cog("RecordingCog")
+                    if recording_cog:
+                        await recording_cog.handle_bot_joined_with_user(guild, member)
+                        
+                except Exception as e:
+                    self.logger.error(f"Failed to process member {member.display_name}: {e}")
+                    continue
                     
         except Exception as e:
             self.logger.error(f"Failed to notify other cogs: {e}")

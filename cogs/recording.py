@@ -141,9 +141,27 @@ class RecordingCog(commands.Cog):
     async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
         """ボットがVCに参加した際、既にいるユーザーがいる場合の録音開始処理"""
         try:
-            voice_client = guild.voice_client
+            # 複数回チェックして接続の安定性を確保
+            voice_client = None
+            for attempt in range(5):
+                voice_client = guild.voice_client
+                if voice_client and voice_client.is_connected():
+                    # 追加の安定性チェック
+                    await asyncio.sleep(0.2)
+                    if voice_client.is_connected():
+                        break
+                await asyncio.sleep(0.5)
+            
             if voice_client and voice_client.is_connected():
                 self.logger.info(f"Recording: Bot joined, starting recording for user {member.display_name}")
+                
+                # さらに短い安定化待機
+                await asyncio.sleep(0.3)
+                
+                # 最終接続確認
+                if not voice_client.is_connected():
+                    self.logger.warning(f"Recording: Voice client disconnected before starting recording for {member.display_name}")
+                    return
                 
                 # リアルタイム録音を開始
                 try:
@@ -152,12 +170,15 @@ class RecordingCog(commands.Cog):
                 except Exception as e:
                     self.logger.error(f"Recording: Failed to start real-time recording: {e}")
                     # フォールバック: シミュレーション録音
-                    sink = self.get_recording_sink(guild.id)
-                    if not sink.is_recording:
-                        sink.start_recording()
-                        self.logger.info(f"Recording: Started fallback simulation recording for {voice_client.channel.name}")
+                    try:
+                        sink = self.get_recording_sink(guild.id)
+                        if not sink.is_recording:
+                            sink.start_recording()
+                            self.logger.info(f"Recording: Started fallback simulation recording for {voice_client.channel.name}")
+                    except Exception as fallback_error:
+                        self.logger.error(f"Recording: Fallback recording also failed: {fallback_error}")
             else:
-                self.logger.warning(f"Recording: No voice client when trying to start recording for {member.display_name}")
+                self.logger.warning(f"Recording: No stable voice client when trying to start recording for {member.display_name}")
         except Exception as e:
             self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
     

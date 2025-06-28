@@ -352,6 +352,30 @@ yomiageBotEx/
   - ユーザー未指定時：全ユーザーの音声をマージ
   - ファイル名にユーザー情報を含める（_user{id}、_all_{count}users）
 
+### 2024-06-28 音声接続安定化対応（第9回）
+- **音声接続エラー（WebSocket 4000）の根本的解決**: 音声データ取得問題の修正
+- **VoiceCogのnotify_bot_joined_channelメソッド強化**:
+  - 接続安定性チェックの時間を7.5秒に延長（15回×0.5秒）
+  - WebSocketの内部状態確認（`_connected`プロパティ）
+  - 追加の安定化待機（1.5秒）
+  - 各メンバー処理前の接続確認
+  - TTSと録音処理の間隔調整（0.5秒）
+- **bot.pyのconnect_voice_safelyメソッド改良**:
+  - 最大3回のリトライ機構
+  - WebSocket 4000エラーの特別な処理（指数バックオフ）
+  - 接続タイムアウトを45秒に延長
+  - 接続後の安定化待機（1.0秒）
+  - self_deaf設定のエラーハンドリング強化
+- **RecordingCogのhandle_bot_joined_with_userメソッド改善**:
+  - 5回の接続安定性チェック
+  - 録音開始前の最終接続確認
+  - フォールバック録音のエラーハンドリング強化
+- **期待される改善**:
+  - 音声データ取得の安定性向上
+  - WebSocket切断エラーの大幅減少
+  - TTS挨拶と録音機能の確実な動作
+  - 起動時自動参加の信頼性向上
+
 ### 2024-06-28 Phase 5: 機能拡張完了
 - **bot_simple.pyの録音機能統合**: utils/real_audio_recorder.pyでpy-cordのWaveSink機能を完全統合
 - **FFmpegノーマライズ処理**: utils/audio_processor.pyで音声正規化、フィルタリング機能を実装
