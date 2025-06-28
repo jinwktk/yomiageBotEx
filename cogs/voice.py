@@ -256,9 +256,26 @@ class VoiceCog(commands.Cog):
         
         # 既に接続している場合
         if guild.voice_client:
-            # 同じチャンネルの場合は何もしない
+            # 同じチャンネルの場合、録音が開始されているか確認
             if guild.voice_client.channel == channel:
+                # 新しいユーザーが参加した時の録音開始処理
+                self.logger.info(f"User joined same channel as bot: {channel.name}")
+                
+                # RecordingCogに録音開始を通知（ユーザー参加時）
+                recording_cog = self.bot.get_cog("RecordingCog")
+                if recording_cog:
+                    try:
+                        # 録音が既に開始されているかチェック
+                        if not getattr(guild.voice_client, 'recording', False):
+                            self.logger.info(f"Starting recording for user join: {channel.name}")
+                            await recording_cog.real_time_recorder.start_recording(guild.id, guild.voice_client)
+                            recording_cog.real_time_recorder.debug_recording_status(guild.id)
+                        else:
+                            self.logger.info(f"Recording already active in {channel.name}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to start recording on user join: {e}")
                 return
+            
             # 別のチャンネルに移動
             try:
                 await guild.voice_client.move_to(channel)
