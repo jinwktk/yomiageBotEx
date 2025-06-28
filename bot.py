@@ -79,13 +79,11 @@ class YomiageBot(discord.Bot):
         intents.guilds = True
         intents.members = True  # メンバー情報の取得を有効化
         
-        # DEBUG_GUILD_IDの設定（開発用）
-        debug_guild_id = os.getenv("DEBUG_GUILD_ID")
-        debug_guilds = [int(debug_guild_id)] if debug_guild_id else None
-        
+        # グローバルコマンド同期（すべてのギルドで利用可能）
+        # debug_guildsを指定しないことで、すべてのギルドでコマンドが同期される
         super().__init__(
-            intents=intents,
-            debug_guilds=debug_guilds  # 開発用ギルド指定でスラッシュコマンド即時同期
+            intents=intents
+            # debug_guildsを削除してグローバル同期に変更
         )
         
         self.config = config
