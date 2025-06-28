@@ -15,6 +15,7 @@ from discord.ext import commands
 import yaml
 from dotenv import load_dotenv
 from cogwatch import watch
+import fnmatch
 
 from utils.logger import setup_logging, start_log_cleanup_task
 
@@ -81,6 +82,10 @@ class YomiageBot(discord.Bot):
         )
         
         self.config = config
+        self._cogs_loaded = False
+        
+        # 起動時にCogを読み込み
+        self.setup_cogs()
     
     async def connect_voice_safely(self, channel):
         """安全な音声接続（WebSocketエラー対応強化版）"""
@@ -154,6 +159,7 @@ class YomiageBot(discord.Bot):
         
         try:
             self.load_cogs_sync()
+            self._cogs_loaded = True
             logger.info(f"Cogs loaded. Total cogs: {len(self.cogs)}")
         except Exception as e:
             logger.error(f"Failed to load cogs: {e}", exc_info=True)
@@ -181,13 +187,19 @@ class YomiageBot(discord.Bot):
         """Cogを読み込む（非同期版）"""
         self.load_cogs_sync()
     
-    @watch(path="cogs", preload=True)
+    @watch(path="cogs", preload=True, debug=False)
     async def on_ready(self):
         """Bot準備完了時のイベント"""
         logger.info(f"Bot is ready! Logged in as {self.user} (ID: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guild(s)")
         logger.info(f"Voice client type: {VOICE_CLIENT_TYPE}")
         logger.info("🔄 Cogwatch enabled - Cogs will auto-reload on file changes")
+        
+        # Cogが読み込まれていない場合は手動で読み込み
+        if len(self.cogs) == 0 and not self._cogs_loaded:
+            logger.warning("No cogs loaded, attempting manual load...")
+            await self.load_cogs()
+            self._cogs_loaded = True
         
         # デバッグ用にギルドIDをログ出力
         if self.guilds:
