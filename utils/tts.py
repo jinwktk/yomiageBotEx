@@ -216,10 +216,10 @@ class TTSManager:
         if cached_audio:
             return cached_audio
         
-        # APIサーバーが利用できない場合はフォールバック
+        # APIサーバーが利用できない場合はスキップ
         if not await self.is_api_available():
-            logger.warning("TTS API not available, using fallback")
-            return await self.generate_fallback_speech(text)
+            logger.warning("TTS API not available, skipping audio")
+            return None
         
         try:
             await self.init_session()
@@ -258,15 +258,15 @@ class TTSManager:
                 logger.debug(f"Generated speech: {text[:30]}...")
                 return audio_data
             else:
-                logger.warning("TTS API returned error, using fallback")
-                return await self.generate_fallback_speech(text)
+                logger.warning("TTS API returned error, skipping audio")
+                return None
                     
         except asyncio.TimeoutError:
-            logger.warning(f"TTS API timeout after {self.timeout}s, using fallback")
-            return await self.generate_fallback_speech(text)
+            logger.warning(f"TTS API timeout after {self.timeout}s, skipping audio")
+            return None
         except Exception as e:
-            logger.warning(f"TTS API error: {e}, using fallback")
-            return await self.generate_fallback_speech(text)
+            logger.warning(f"TTS API error: {e}, skipping audio")
+            return None
     
     async def generate_fallback_speech(self, text: str) -> Optional[bytes]:
         """フォールバック用のシンプルな音声生成（ビープ音など）"""

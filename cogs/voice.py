@@ -28,10 +28,15 @@ class VoiceCog(commands.Cog):
         # 定期チェックタスクを開始
         if not self.empty_channel_check.is_running():
             self.empty_channel_check.start()
+        
+        # 起動時自動参加チェックのタスクを開始
+        if not self.startup_auto_join_check.is_running():
+            self.startup_auto_join_check.start()
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
         self.empty_channel_check.cancel()
+        self.startup_auto_join_check.cancel()
     
     def load_sessions(self) -> Dict[int, int]:
         """保存されたセッション情報を読み込み"""
@@ -105,37 +110,73 @@ class VoiceCog(commands.Cog):
         # セッション復元後は一度保存
         self.save_sessions()
     
-    @commands.Cog.listener()
-    async def on_ready(self):
-        """Bot起動時の自動VC参加処理"""
-        if not self.config.get("bot", {}).get("auto_join", True):
+    
+    @tasks.loop(count=1)  # 1回だけ実行
+    async def startup_auto_join_check(self):
+        """起動時自動参加チェック（1回限り実行）"""
+        # Bot起動直後に実行されるので、少し待つ
+        await asyncio.sleep(10)
+        
+        self.logger.info("Starting startup auto-join check...")
+        await self.check_startup_auto_join()
+    
+    @startup_auto_join_check.before_loop
+    async def before_startup_auto_join_check(self):
+        """startup_auto_join_check開始前の処理"""
+        await self.bot.wait_until_ready()
+        self.logger.info("Bot is ready, preparing startup auto-join check")
+    
+    async def check_startup_auto_join(self):
+        """起動時の自動VC参加処理"""
+        self.logger.info("VoiceCog.check_startup_auto_join() called")
+        
+        auto_join_enabled = self.config.get("bot", {}).get("auto_join", True)
+        self.logger.info(f"Auto-join setting: {auto_join_enabled}")
+        
+        if not auto_join_enabled:
+            self.logger.info("Auto-join disabled in config, skipping startup check")
             return
         
-        # 少し待ってからチェック（他のCogの初期化完了を待つ）
-        await asyncio.sleep(3)
+        self.logger.info("Starting voice channel check on startup...")
         
-        self.logger.info("Checking for voice channels with users on startup...")
+        guild_count = len(self.bot.guilds)
+        self.logger.info(f"Found {guild_count} guilds to check")
         
         for guild in self.bot.guilds:
+            self.logger.info(f"Checking guild: {guild.name} (ID: {guild.id})")
+            
             try:
                 # 既に接続している場合はスキップ
                 if guild.voice_client:
+                    self.logger.info(f"Already connected to voice in {guild.name}, skipping")
                     continue
+                
+                # ボイスチャンネル数をログ
+                vc_count = len(guild.voice_channels)
+                self.logger.info(f"Guild {guild.name} has {vc_count} voice channels")
                 
                 # 各ボイスチャンネルをチェック
                 for channel in guild.voice_channels:
-                    # ボット以外のユーザーがいるかチェック
-                    non_bot_members = [m for m in channel.members if not m.bot]
+                    # チャンネル内のメンバーをチェック
+                    all_members = channel.members
+                    non_bot_members = [m for m in all_members if not m.bot]
+                    
+                    self.logger.info(f"Channel {channel.name}: {len(all_members)} total members, {len(non_bot_members)} non-bot members")
                     
                     if len(non_bot_members) > 0:
-                        self.logger.info(f"Found {len(non_bot_members)} users in {channel.name} ({guild.name}), joining...")
+                        # ユーザー名をログ出力
+                        user_names = [m.display_name for m in non_bot_members]
+                        self.logger.info(f"Found users in {channel.name} ({guild.name}): {', '.join(user_names)}")
                         
                         try:
+                            self.logger.info(f"Attempting to join {channel.name}...")
+                            
                             # カスタムVoiceClientで接続
                             await self.bot.connect_to_voice(channel)
-                            self.logger.info(f"Auto-joined on startup: {channel.name} in {guild.name}")
+                            self.logger.info(f"Successfully auto-joined on startup: {channel.name} in {guild.name}")
                             
                             # 他のCogに参加を通知
+                            self.logger.info(f"Notifying other Cogs about join to {channel.name}")
                             await self.notify_bot_joined_channel(guild, channel)
                             
                             # セッションを保存
@@ -145,11 +186,15 @@ class VoiceCog(commands.Cog):
                             break
                             
                         except Exception as e:
-                            self.logger.error(f"Failed to auto-join {channel.name} on startup: {e}")
+                            self.logger.error(f"Failed to auto-join {channel.name} on startup: {e}", exc_info=True)
                             continue
+                    else:
+                        self.logger.debug(f"Channel {channel.name} is empty, skipping")
                             
             except Exception as e:
-                self.logger.error(f"Failed to check guild {guild.name} on startup: {e}")
+                self.logger.error(f"Failed to check guild {guild.name} on startup: {e}", exc_info=True)
+        
+        self.logger.info("Startup voice channel check completed")
     
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
