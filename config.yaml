@@ -7,13 +7,13 @@ bot:
   rate_limit_delay: [0.5, 1.0]  # API呼び出し時のランダム遅延（秒）
 
 tts:
-  api_url: "http://192.168.0.99:5000"  # Style-Bert-VITS2 APIサーバーのURL
+  api_url: "http://192.168.0.99:8000"  # Style-Bert-VITS2 APIサーバーのURL
   timeout: 10                       # TTS生成のタイムアウト（秒）
   cache_size: 5                     # キャッシュする音声の数
   cache_hours: 24                   # キャッシュの有効期限（時間）
   max_text_length: 100              # 1回のTTSで処理する最大文字数
   greeting:
-    enabled: false                   # 挨拶機能の有効/無効（自動挨拶を無効化）
+    enabled: true                    # 挨拶機能の有効/無効
     join_message: "さん、こんちゃ！"     # 参加時の挨拶
     leave_message: "さん、またね！"      # 退出時の挨拶
     model_id: 0                      # 挨拶用のモデルID
