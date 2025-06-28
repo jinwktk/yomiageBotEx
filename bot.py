@@ -228,6 +228,22 @@ class YomiageBot(discord.Bot):
         """エラーハンドリング"""
         logger.error(f"Error in {event_method}", exc_info=True)
     
+    async def close(self):
+        """Bot終了時のクリーンアップ"""
+        logger.info("Bot is shutting down, cleaning up resources...")
+        
+        # TTSセッションのクリーンアップ
+        tts_cog = self.get_cog("TTSCog")
+        if tts_cog and hasattr(tts_cog, 'tts_manager'):
+            try:
+                await tts_cog.tts_manager.cleanup()
+                logger.info("TTS session cleanup completed")
+            except Exception as e:
+                logger.error(f"Failed to cleanup TTS session: {e}")
+        
+        # 親クラスのクリーンアップを呼び出し
+        await super().close()
+    
     async def connect_to_voice(self, channel: discord.VoiceChannel) -> discord.VoiceClient:
         """カスタムVoiceClientで接続"""
         # 既存の接続をチェック
@@ -248,6 +264,11 @@ bot = YomiageBot()
 # Cogの初期読み込み
 bot.setup_cogs()
 
+async def shutdown_handler():
+    """シャットダウン時のクリーンアップハンドラ"""
+    logger.info("Shutdown signal received, cleaning up...")
+    await bot.close()
+
 def main():
     """メイン実行関数"""
     # トークンの確認
@@ -257,6 +278,16 @@ def main():
         print("エラー: .envファイルにDISCORD_TOKENを設定してください。")
         sys.exit(1)
     
+    # シグナルハンドラーの設定
+    import signal
+    
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, initiating shutdown...")
+        asyncio.create_task(shutdown_handler())
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     # Botの起動
     try:
         logger.info("Starting bot...")
@@ -265,8 +296,17 @@ def main():
         logger.error("Invalid token")
         print("エラー: 無効なトークンです。")
         sys.exit(1)
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+        # シャットダウン処理を実行
+        asyncio.run(shutdown_handler())
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
+        # 例外発生時もクリーンアップを実行
+        try:
+            asyncio.run(shutdown_handler())
+        except:
+            pass
         sys.exit(1)
 
 if __name__ == "__main__":

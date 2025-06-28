@@ -13,7 +13,7 @@ tts:
   cache_hours: 24                   # キャッシュの有効期限（時間）
   max_text_length: 100              # 1回のTTSで処理する最大文字数
   greeting:
-    enabled: true                    # 挨拶機能の有効/無効
+    enabled: false                   # 挨拶機能の有効/無効（自動挨拶を無効化）
     join_message: "さん、こんちゃ！"     # 参加時の挨拶
     leave_message: "さん、またね！"      # 退出時の挨拶
     model_id: 0                      # 挨拶用のモデルID

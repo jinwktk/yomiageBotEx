@@ -154,31 +154,53 @@ class TTSManager:
             cache_hours=config.get("tts", {}).get("cache_hours", 24)
         )
         self.session: Optional[aiohttp.ClientSession] = None
+        self._session_initialized = False
         
         # 利用可能なモデル情報（キャッシュ）
         self.available_models: Optional[Dict[str, Any]] = None
         self.models_cache_time: Optional[datetime] = None
     
+    async def __aenter__(self):
+        """非同期コンテキストマネージャーの開始"""
+        await self.init_session()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """非同期コンテキストマネージャーの終了"""
+        await self.close_session()
+    
     async def init_session(self):
         """HTTP セッションを初期化"""
-        if self.session is None:
-            connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)
-            # TTSリクエスト用のタイムアウト設定
-            timeout = aiohttp.ClientTimeout(
-                total=self.timeout,
-                connect=10,  # 接続タイムアウト
-                sock_read=self.timeout  # 読み取りタイムアウト
-            )
-            self.session = aiohttp.ClientSession(
-                connector=connector,
-                timeout=timeout
-            )
+        if self.session is None and not self._session_initialized:
+            try:
+                connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)
+                # TTSリクエスト用のタイムアウト設定
+                timeout = aiohttp.ClientTimeout(
+                    total=self.timeout,
+                    connect=10,  # 接続タイムアウト
+                    sock_read=self.timeout  # 読み取りタイムアウト
+                )
+                self.session = aiohttp.ClientSession(
+                    connector=connector,
+                    timeout=timeout
+                )
+                self._session_initialized = True
+                logger.debug("HTTP session initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize HTTP session: {e}")
+                self._session_initialized = False
     
     async def close_session(self):
         """HTTP セッションを閉じる"""
         if self.session:
-            await self.session.close()
-            self.session = None
+            try:
+                await self.session.close()
+                logger.debug("HTTP session closed successfully")
+            except Exception as e:
+                logger.warning(f"Error closing HTTP session: {e}")
+            finally:
+                self.session = None
+                self._session_initialized = False
     
     async def is_api_available(self) -> bool:
         """TTSAPIサーバーが利用可能かチェック（高速化）"""

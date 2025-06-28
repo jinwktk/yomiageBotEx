@@ -466,6 +466,16 @@ yomiageBotEx/
   - ✅ プルダウン式設定UI
   - ✅ タイムアウト問題の解決
 
+### 2024-06-28 バグ修正・改善（第10回）
+- **aiohttp セッション適切なクリーンアップ実装**: Bot終了時にTTSManagerのHTTPセッションが確実に閉じられるように修正
+- **シャットダウンハンドリング強化**: SIGINT、SIGTERM、KeyboardInterrupt時の適切なリソースクリーンアップを実装
+- **TTSManagerの非同期コンテキストマネージャー対応**: `async with`構文でのセッション管理をサポート
+- **自動挨拶機能の無効化**: config.yamlでgreeting.enabledをfalseに設定してボイスチャンネル参加時の自動挨拶を停止
+- **問題解決**:
+  - ❌ **aiohttp client session not closed properly**: bot.py終了時クリーンアップで解決
+  - ✅ **/replayコマンド未実装**: 既に完全実装済み（ユーザー指定録音・全員音声マージ対応）
+  - ❌ **自動挨拶機能**: config.yamlでgreeting.enabled=falseに変更済み
+
 ### 今後の改善案
 - Web管理画面の追加
 - 複数言語サポート
