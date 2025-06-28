@@ -41,6 +41,9 @@ class RealTimeAudioRecorder:
         self.buffer_file = Path("data/audio_buffers.json")
         self.buffer_file.parent.mkdir(parents=True, exist_ok=True)
         
+        # ファイル書き込みロック
+        self._file_write_lock = asyncio.Lock()
+        
         # 起動時にバッファを復元
         self.load_buffers()
         
@@ -336,29 +339,45 @@ class RealTimeAudioRecorder:
     
     def _write_buffer_file(self, data):
         """ファイルへの書き込み（ブロッキングI/O）"""
-        try:
-            # 一時ファイルに書き込んでから置き換える（アトミック操作）
-            temp_file = self.buffer_file.with_suffix('.tmp')
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, separators=(',', ':'))  # indent削除でサイズ削減
-            
-            # アトミックに置き換え
-            temp_file.replace(self.buffer_file)
-            
-            total_buffers = sum(len(users) for users in data.values())
-            logger.info(f"RealTimeRecorder: Saved {total_buffers} user buffers to {self.buffer_file}")
-        except Exception as e:
-            logger.error(f"RealTimeRecorder: Failed to write buffer file: {e}")
+        import time
+        
+        # Windows ファイルロック問題に対するリトライ機構
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 一時ファイルに書き込んでから置き換える（アトミック操作）
+                temp_file = self.buffer_file.with_suffix('.tmp')
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, separators=(',', ':'))  # indent削除でサイズ削減
+                
+                # アトミックに置き換え
+                temp_file.replace(self.buffer_file)
+                
+                total_buffers = sum(len(users) for users in data.values())
+                logger.info(f"RealTimeRecorder: Saved {total_buffers} user buffers to {self.buffer_file}")
+                return  # 成功したら終了
+                
+            except (PermissionError, OSError) as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"RealTimeRecorder: File write failed (attempt {attempt+1}/{max_retries}), retrying: {e}")
+                    time.sleep(0.1 * (attempt + 1))  # 指数バックオフ
+                else:
+                    logger.error(f"RealTimeRecorder: Failed to write buffer file after {max_retries} attempts: {e}")
+            except Exception as e:
+                logger.error(f"RealTimeRecorder: Unexpected error writing buffer file: {e}")
+                break
     
     async def _save_buffers_async(self):
         """非同期でバッファを保存（メインループをブロックしない）"""
         try:
-            # CPU集約的な処理（Base64エンコード）を別スレッドで実行
-            loop = asyncio.get_event_loop()
-            buffer_data = await loop.run_in_executor(None, self._prepare_buffer_data)
-            
-            # I/O処理も別スレッドで実行
-            await loop.run_in_executor(None, self._write_buffer_file, buffer_data)
+            # ファイル書き込みロックを取得
+            async with self._file_write_lock:
+                # CPU集約的な処理（Base64エンコード）を別スレッドで実行
+                loop = asyncio.get_event_loop()
+                buffer_data = await loop.run_in_executor(None, self._prepare_buffer_data)
+                
+                # I/O処理も別スレッドで実行
+                await loop.run_in_executor(None, self._write_buffer_file, buffer_data)
             
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to save buffers async: {e}")
