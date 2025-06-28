@@ -147,7 +147,7 @@ class TTSManager:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.api_url = config.get("tts", {}).get("api_url", "http://127.0.0.1:5000")
-        self.timeout = config.get("tts", {}).get("timeout", 30)  # タイムアウトを30秒に延長
+        self.timeout = config.get("tts", {}).get("timeout", 60)  # タイムアウトを60秒に延長
         self.cache = TTSCache(
             cache_dir=Path("cache/tts"),
             max_size=config.get("tts", {}).get("cache_size", 5),

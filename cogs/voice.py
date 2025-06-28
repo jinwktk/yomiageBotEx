@@ -106,6 +106,52 @@ class VoiceCog(commands.Cog):
         self.save_sessions()
     
     @commands.Cog.listener()
+    async def on_ready(self):
+        """Bot起動時の自動VC参加処理"""
+        if not self.config.get("bot", {}).get("auto_join", True):
+            return
+        
+        # 少し待ってからチェック（他のCogの初期化完了を待つ）
+        await asyncio.sleep(3)
+        
+        self.logger.info("Checking for voice channels with users on startup...")
+        
+        for guild in self.bot.guilds:
+            try:
+                # 既に接続している場合はスキップ
+                if guild.voice_client:
+                    continue
+                
+                # 各ボイスチャンネルをチェック
+                for channel in guild.voice_channels:
+                    # ボット以外のユーザーがいるかチェック
+                    non_bot_members = [m for m in channel.members if not m.bot]
+                    
+                    if len(non_bot_members) > 0:
+                        self.logger.info(f"Found {len(non_bot_members)} users in {channel.name} ({guild.name}), joining...")
+                        
+                        try:
+                            # カスタムVoiceClientで接続
+                            await self.bot.connect_to_voice(channel)
+                            self.logger.info(f"Auto-joined on startup: {channel.name} in {guild.name}")
+                            
+                            # 他のCogに参加を通知
+                            await self.notify_bot_joined_channel(guild, channel)
+                            
+                            # セッションを保存
+                            self.save_sessions()
+                            
+                            # 1つのギルドで1つのチャンネルのみ
+                            break
+                            
+                        except Exception as e:
+                            self.logger.error(f"Failed to auto-join {channel.name} on startup: {e}")
+                            continue
+                            
+            except Exception as e:
+                self.logger.error(f"Failed to check guild {guild.name} on startup: {e}")
+    
+    @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         """ボイスステート変更時の自動参加・退出処理"""
         if member.bot:  # ボット自身の変更は無視

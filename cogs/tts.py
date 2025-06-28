@@ -74,27 +74,56 @@ class TTSCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Failed to play audio: {e}")
     
-    async def speak_greeting(self, voice_client: discord.VoiceClient, member_name: str, greeting_type: str):
-        """挨拶音声を生成・再生"""
+    async def speak_greeting(self, voice_client: discord.VoiceClient, member: discord.Member, greeting_type: str):
+        """挨拶音声を生成・再生（ユーザー個別設定対応）"""
         if not self.greeting_enabled:
             return
         
         try:
             greeting_config = self.config.get("tts", {}).get("greeting", {})
             
-            if greeting_type == "join":
-                message = f"{member_name}{greeting_config.get('join_message', 'さん、こんちゃ！')}"
-            elif greeting_type == "leave":
-                message = f"{member_name}{greeting_config.get('leave_message', 'さん、またね！')}"
+            # ユーザー個別の挨拶設定を取得
+            user_settings_cog = self.bot.get_cog("UserSettingsCog")
+            if user_settings_cog:
+                user_greeting_settings = user_settings_cog.get_user_greeting_settings(member.id)
+                user_tts_settings = user_settings_cog.get_user_tts_settings(member.id)
+                
+                # ユーザーが挨拶を無効にしている場合はスキップ
+                if not user_greeting_settings.get("enabled", True):
+                    return
+                
+                # カスタム挨拶メッセージの取得
+                if greeting_type == "join":
+                    custom_message = user_greeting_settings.get("custom_join")
+                    default_message = greeting_config.get('join_message', 'さん、こんちゃ！')
+                    message = custom_message if custom_message else f"{member.display_name}{default_message}"
+                elif greeting_type == "leave":
+                    custom_message = user_greeting_settings.get("custom_leave")
+                    default_message = greeting_config.get('leave_message', 'さん、またね！')
+                    message = custom_message if custom_message else f"{member.display_name}{default_message}"
+                else:
+                    return
             else:
-                return
+                # フォールバック：デフォルト設定
+                if greeting_type == "join":
+                    message = f"{member.display_name}{greeting_config.get('join_message', 'さん、こんちゃ！')}"
+                elif greeting_type == "leave":
+                    message = f"{member.display_name}{greeting_config.get('leave_message', 'さん、またね！')}"
+                else:
+                    return
+                
+                user_tts_settings = {
+                    "model_id": greeting_config.get("model_id", 0),
+                    "speaker_id": greeting_config.get("speaker_id", 0),
+                    "style": greeting_config.get("style", "Neutral")
+                }
             
-            # 音声生成
+            # ユーザー個別のTTS設定で音声生成
             audio_data = await self.tts_manager.generate_speech(
                 text=message,
-                model_id=greeting_config.get("model_id", "default"),
-                speaker_id=greeting_config.get("speaker_id", 0),
-                style=greeting_config.get("style", "Neutral")
+                model_id=user_tts_settings.get("model_id", 0),
+                speaker_id=user_tts_settings.get("speaker_id", 0),
+                style=user_tts_settings.get("style", "Neutral")
             )
             
             if audio_data:
@@ -133,12 +162,12 @@ class TTSCog(commands.Cog):
         if before.channel != bot_channel and after.channel == bot_channel:
             self.logger.info(f"TTS: User {member.display_name} joined bot channel {bot_channel.name}")
             await asyncio.sleep(1)  # 接続安定化のため少し待機
-            await self.speak_greeting(voice_client, member.display_name, "join")
+            await self.speak_greeting(voice_client, member, "join")
         
         # ユーザーがボットのいるチャンネルから退出した場合
         elif before.channel == bot_channel and after.channel != bot_channel:
             self.logger.info(f"TTS: User {member.display_name} left bot channel {bot_channel.name}")
-            await self.speak_greeting(voice_client, member.display_name, "leave")
+            await self.speak_greeting(voice_client, member, "leave")
     
     async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
         """ボットがVCに参加した際、既にいるユーザーに対する処理"""
@@ -146,7 +175,7 @@ class TTSCog(commands.Cog):
             voice_client = guild.voice_client
             if voice_client and voice_client.is_connected():
                 self.logger.info(f"TTS: Bot joined, greeting user {member.display_name}")
-                await self.speak_greeting(voice_client, member.display_name, "join")
+                await self.speak_greeting(voice_client, member, "join")
             else:
                 self.logger.warning(f"TTS: No voice client when trying to greet {member.display_name}")
         except Exception as e:
