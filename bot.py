@@ -18,21 +18,15 @@ from cogwatch import watch
 
 from utils.logger import setup_logging, start_log_cleanup_task
 
-# 音声受信クライアントのインポート（py-cord優先、フォールバック付き）
+# 音声受信クライアントのインポート（py-cord統合版のみ使用）
 try:
     from utils.real_audio_recorder import RealEnhancedVoiceClient as EnhancedVoiceClient
     print("✅ Using py-cord real audio recording")
     VOICE_CLIENT_TYPE = "py-cord"
 except Exception as e:
-    print(f"⚠️ Could not import RealEnhancedVoiceClient: {e}, trying fallback")
-    try:
-        from utils.voice_receiver import EnhancedVoiceClient
-        print("✅ Using discord.py fallback audio simulation")
-        VOICE_CLIENT_TYPE = "discord.py"
-    except Exception as e2:
-        print(f"⚠️ Could not import EnhancedVoiceClient: {e2}, using simple recorder")
-        from utils.simple_recorder import SimpleEnhancedVoiceClient as EnhancedVoiceClient
-        VOICE_CLIENT_TYPE = "simple"
+    print(f"❌ Could not import RealEnhancedVoiceClient: {e}")
+    print("   Please ensure py-cord[voice] and required dependencies are installed")
+    sys.exit(1)
 
 # 環境変数の読み込み
 load_dotenv()
@@ -173,7 +167,6 @@ class YomiageBot(discord.Bot):
             "cogs.message_reader",
             "cogs.dictionary",
             "cogs.user_settings",
-            "cogs.reload",
         ]
         
         for cog in cogs:

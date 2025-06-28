@@ -570,6 +570,52 @@ yomiageBotEx/
   - メインループのブロッキング解消
   - 全体的なパフォーマンス向上
 
+### 2024-06-29 大規模コマンド削除実施（第15回）
+- **削除されたコマンド（16個）**:
+  - **開発・デバッグ用（4個）**: debug_recording, test_recording, reload_cog, reload_all, clear_buffer
+  - **エクスポート・インポート機能（3個）**: dict_export, dict_import, export_settings
+  - **情報系コマンド（4個）**: dict_list, tts_models, tts_speakers, dict_search
+  - **テスト機能（1個）**: tts_test
+  - **管理系コマンド（2個）**: set_greeting, reset_settings
+  - **システム情報（1個）**: list_cogs（reload.pyと共に削除）
+- **削除されたファイル**: cogs/reload.py（リロード機能全体）
+- **効果**: 31コマンド → 15コマンド（52%削減）
+- **残存コマンド**:
+  - **コア機能（5個）**: join, leave, replay, recordings, reading
+  - **辞書機能（2個）**: dict_add, dict_remove
+  - **ユーザー設定（3個）**: my_settings, set_tts, set_reading
+
+**削減による効果**:
+- **ユーザビリティ向上**: コマンド数半減により認知負荷軽減
+- **保守性向上**: 管理するコマンド数大幅減少
+- **コードサイズ削減**: 約800行削減（reload.py全体 + 各コマンド）
+- **機能の厳選**: 実際に使用される核心機能のみ残存
+
+### 2024-06-29 プロジェクト軽量化実施（第14回）
+- **Phase 1: 即座のクリーンアップ完了**:
+  - tmpwavディレクトリの古い録音ファイル削除（4.1MB削減）
+  - Pythonキャッシュファイル削除（__pycache__、*.pyc）
+  - 重複するbot_simple.py削除（416行削除）
+  - .gitignoreにtmpwav/追加
+- **Phase 2: 依存関係最適化完了**:
+  - pyproject.tomlから未使用のffmpeg-python>=0.2.0削除
+  - cogwatch>=3.2.0を開発用依存関係に移動
+  - 重複するrequirements.txt削除（pyproject.tomlに統一）
+- **Phase 3: コード構造最適化完了**:
+  - 未使用の音声受信実装3ファイル削除（約500行削減）:
+    - utils/audio_sink.py（重複機能）
+    - utils/voice_receiver.py（理論的実装、複雑すぎ）
+    - utils/simple_recorder.py（シミュレーション実装）
+  - bot.pyのフォールバック実装をreal_audio_recorder統一
+  - tmpwavディレクトリ自体を削除（古い実装の残骸）
+
+**軽量化効果**:
+- **ファイルサイズ削減**: 約4.5MB（録音ファイル4.1MB + キャッシュファイル）
+- **コード行数削減**: 約1000行（bot_simple.py 416行 + 音声実装500行 + その他）
+- **依存関係削減**: ffmpeg-pythonライブラリ削除、cogwatchを開発用に移動
+- **保守性向上**: 単一の音声録音実装に統一、重複コード削除
+- **構造簡素化**: pyproject.tomlに依存関係統一、不要なフォールバック削除
+
 ### 今後の改善案
 - Web管理画面の追加
 - 複数言語サポート
