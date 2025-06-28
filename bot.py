@@ -177,6 +177,11 @@ class YomiageBot(discord.Bot):
         
         for cog in cogs:
             try:
+                # 既に読み込まれているかチェック
+                if cog in self.extensions:
+                    logger.debug(f"Cog {cog} already loaded, skipping")
+                    continue
+                
                 # py-cordの推奨方法でCogを読み込み
                 self.load_extension(cog)
                 logger.info(f"Loaded cog: {cog}")
@@ -196,10 +201,11 @@ class YomiageBot(discord.Bot):
         logger.info("🔄 Cogwatch enabled - Cogs will auto-reload on file changes")
         
         # Cogが読み込まれていない場合は手動で読み込み
-        if len(self.cogs) == 0 and not self._cogs_loaded:
+        if len(self.cogs) == 0:
             logger.warning("No cogs loaded, attempting manual load...")
             await self.load_cogs()
-            self._cogs_loaded = True
+        elif not self._cogs_loaded:
+            logger.info("Cogs already loaded by cogwatch preload")
         
         # デバッグ用にギルドIDをログ出力
         if self.guilds:
