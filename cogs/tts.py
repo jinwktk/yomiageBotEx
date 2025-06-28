@@ -8,6 +8,7 @@ TTS（Text-to-Speech）機能Cog
 import asyncio
 import logging
 import io
+import random
 from typing import Dict, Any, Optional
 
 import discord
@@ -30,6 +31,11 @@ class TTSCog(commands.Cog):
         # 初期化時の設定値をログ出力
         self.logger.info(f"TTS: Initializing with greeting_enabled: {self.greeting_enabled}")
         self.logger.info(f"TTS: Config tts section: {config.get('tts', {})}")
+    
+    async def rate_limit_delay(self):
+        """レート制限対策の遅延"""
+        delay = random.uniform(*self.config["bot"]["rate_limit_delay"])
+        await asyncio.sleep(delay)
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
@@ -157,6 +163,128 @@ class TTSCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Failed to generate and play TTS: {e}")
             return False
+    
+    @discord.slash_command(name="tts_models", description="利用可能なTTSモデル一覧を表示します")
+    async def tts_models_command(self, ctx: discord.ApplicationContext):
+        """利用可能なTTSモデル一覧を表示"""
+        await self.rate_limit_delay()
+        
+        try:
+            models = await self.tts_manager.get_available_models()
+            
+            if models:
+                model_text = self.tts_manager.format_models_for_display(models)
+                
+                embed = discord.Embed(
+                    title="🎤 TTS モデル一覧",
+                    description=model_text,
+                    color=discord.Color.blue()
+                )
+                embed.set_footer(text="詳細は /tts_speakers <model_id> で確認できます")
+                
+                await ctx.respond(embed=embed, ephemeral=True)
+            else:
+                await ctx.respond(
+                    "❌ TTSモデル情報を取得できませんでした。APIサーバーが起動していることを確認してください。",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get TTS models: {e}")
+            await ctx.respond(
+                "❌ モデル一覧の取得中にエラーが発生しました。",
+                ephemeral=True
+            )
+    
+    @discord.slash_command(name="tts_speakers", description="指定モデルの話者一覧を表示します")
+    async def tts_speakers_command(
+        self, 
+        ctx: discord.ApplicationContext,
+        model_id: discord.Option(int, "モデルID", min_value=0)
+    ):
+        """指定モデルの話者一覧を表示"""
+        await self.rate_limit_delay()
+        
+        try:
+            speakers = await self.tts_manager.get_model_speakers(model_id)
+            
+            if speakers:
+                speaker_text = self.tts_manager.format_speakers_for_display(model_id, speakers)
+                
+                embed = discord.Embed(
+                    title=f"🗣️ モデル {model_id} の話者一覧",
+                    description=speaker_text,
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text="話者IDとスタイルは読み上げ設定で使用できます")
+                
+                await ctx.respond(embed=embed, ephemeral=True)
+            else:
+                await ctx.respond(
+                    f"❌ モデル {model_id} の話者情報を取得できませんでした。",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get TTS speakers: {e}")
+            await ctx.respond(
+                "❌ 話者一覧の取得中にエラーが発生しました。",
+                ephemeral=True
+            )
+    
+    @discord.slash_command(name="tts_test", description="指定設定でTTSをテストします")
+    async def tts_test_command(
+        self, 
+        ctx: discord.ApplicationContext,
+        text: discord.Option(str, "テスト用テキスト", max_length=50, default="こんにちは、これはテストです"),
+        model_id: discord.Option(int, "モデルID", min_value=0, default=0),
+        speaker_id: discord.Option(int, "話者ID", min_value=0, default=0),
+        style: discord.Option(str, "スタイル", default="Neutral")
+    ):
+        """指定設定でTTSをテスト"""
+        await self.rate_limit_delay()
+        
+        # ボットがVCに接続しているか確認
+        if not ctx.guild.voice_client:
+            await ctx.respond(
+                "❌ ボットがボイスチャンネルに接続していません。先に /join コマンドで参加してください。",
+                ephemeral=True
+            )
+            return
+        
+        try:
+            await ctx.response.defer(ephemeral=True)
+            
+            # TTS生成・再生
+            success = await self.generate_and_play_tts(
+                ctx.guild.voice_client,
+                text,
+                model_id=model_id,
+                speaker_id=speaker_id,
+                style=style
+            )
+            
+            if success:
+                await ctx.followup.send(
+                    f"✅ TTSテスト完了\n"
+                    f"**テキスト**: {text}\n"
+                    f"**モデルID**: {model_id}\n"
+                    f"**話者ID**: {speaker_id}\n"
+                    f"**スタイル**: {style}",
+                    ephemeral=True
+                )
+            else:
+                await ctx.followup.send(
+                    "❌ TTSの生成または再生に失敗しました。",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Failed to test TTS: {e}")
+            await ctx.followup.send(
+                "❌ TTSテスト中にエラーが発生しました。",
+                ephemeral=True
+            )
 
 
 def setup(bot):

@@ -129,6 +129,8 @@ class YomiageBot(discord.Bot):
             "cogs.tts", 
             "cogs.recording",
             "cogs.message_reader",
+            "cogs.dictionary",
+            "cogs.user_settings",
         ]
         
         for cog in cogs:

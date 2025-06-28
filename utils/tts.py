@@ -154,6 +154,10 @@ class TTSManager:
             cache_hours=config.get("tts", {}).get("cache_hours", 24)
         )
         self.session: Optional[aiohttp.ClientSession] = None
+        
+        # 利用可能なモデル情報（キャッシュ）
+        self.available_models: Optional[Dict[str, Any]] = None
+        self.models_cache_time: Optional[datetime] = None
     
     async def init_session(self):
         """HTTP セッションを初期化"""
@@ -200,7 +204,7 @@ class TTSManager:
             logger.warning(f"Text truncated to {max_length} characters")
         
         # キャッシュから取得を試行
-        cached_audio = await self.cache.get(text, model_id)
+        cached_audio = await self.cache.get(text, str(model_id))
         if cached_audio:
             return cached_audio
         
@@ -233,7 +237,7 @@ class TTSManager:
                     audio_data = await response.read()
                     
                     # キャッシュに保存
-                    await self.cache.set(text, model_id, audio_data)
+                    await self.cache.set(text, str(model_id), audio_data)
                     
                     logger.info(f"Generated speech: {text[:30]}...")
                     return audio_data
@@ -277,6 +281,82 @@ class TTSManager:
         except Exception as e:
             logger.error(f"Failed to generate fallback speech: {e}")
             return None
+    
+    async def get_available_models(self, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+        """利用可能なモデル一覧を取得"""
+        # キャッシュの有効期限チェック（5分）
+        if (not force_refresh and 
+            self.available_models is not None and 
+            self.models_cache_time is not None and
+            datetime.now() - self.models_cache_time < timedelta(minutes=5)):
+            return self.available_models
+        
+        try:
+            await self.init_session()
+            
+            # Style-Bert-VITS2のモデル一覧API
+            async with self.session.get(f"{self.api_url}/models") as response:
+                if response.status == 200:
+                    models_data = await response.json()
+                    self.available_models = models_data
+                    self.models_cache_time = datetime.now()
+                    logger.info(f"Retrieved {len(models_data)} available models")
+                    return models_data
+                else:
+                    logger.error(f"Failed to get models: {response.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Failed to get available models: {e}")
+            return None
+    
+    async def get_model_speakers(self, model_id: int) -> Optional[Dict[str, Any]]:
+        """指定モデルの話者一覧を取得"""
+        try:
+            await self.init_session()
+            
+            # Style-Bert-VITS2の話者一覧API
+            async with self.session.get(f"{self.api_url}/models/{model_id}/speakers") as response:
+                if response.status == 200:
+                    speakers_data = await response.json()
+                    logger.debug(f"Retrieved speakers for model {model_id}")
+                    return speakers_data
+                else:
+                    logger.error(f"Failed to get speakers for model {model_id}: {response.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Failed to get speakers for model {model_id}: {e}")
+            return None
+    
+    def format_models_for_display(self, models: Dict[str, Any]) -> str:
+        """モデル一覧を表示用にフォーマット"""
+        if not models:
+            return "利用可能なモデルがありません"
+        
+        lines = ["🎤 **利用可能なモデル一覧**\n"]
+        
+        for i, (model_id, model_info) in enumerate(models.items()):
+            model_name = model_info.get("name", f"Model {model_id}")
+            speaker_count = len(model_info.get("speakers", []))
+            lines.append(f"**{model_id}**: {model_name} ({speaker_count}話者)")
+        
+        return "\n".join(lines)
+    
+    def format_speakers_for_display(self, model_id: int, speakers: Dict[str, Any]) -> str:
+        """話者一覧を表示用にフォーマット"""
+        if not speakers:
+            return f"モデル {model_id} の話者情報が取得できません"
+        
+        lines = [f"🗣️ **モデル {model_id} の話者一覧**\n"]
+        
+        for speaker_id, speaker_info in speakers.items():
+            speaker_name = speaker_info.get("name", f"Speaker {speaker_id}")
+            styles = speaker_info.get("styles", ["Neutral"])
+            style_text = ", ".join(styles) if len(styles) <= 3 else f"{', '.join(styles[:3])}..."
+            lines.append(f"**{speaker_id}**: {speaker_name} ({style_text})")
+        
+        return "\n".join(lines)
     
     async def cleanup(self):
         """リソースのクリーンアップ"""

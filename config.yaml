@@ -20,10 +20,12 @@ tts:
     speaker_id: 0                    # 挨拶用のスピーカーID
     style: "Neutral"                 # 挨拶用のスタイル
 
-audio:
-  buffer_minutes: 10  # 音声バッファの保持時間（分）
-  format: "mp3"       # 音声フォーマット
-  normalize: true     # 音量正規化
+audio_processing:
+  normalize: true           # 音声ノーマライズ機能の有効/無効
+  target_level: -16.0       # ターゲットレベル（dBFS）
+  filters:                  # 適用するフィルター
+    - "highpass=f=80"       # ローカットフィルター
+    - "lowpass=f=8000"      # ハイカットフィルター
 
 recording:
   enabled: true       # 録音機能の有効/無効
@@ -44,5 +46,17 @@ message_reading:
 logging:
   level: "INFO"
   file: "logs/yomiage.log"
-  cleanup_days: 1     # ログファイルの自動削除日数
-  max_size_mb: 10     # ログファイルの最大サイズ
+  rotation:                    # ログローテーション設定
+    max_bytes: 10485760        # ファイルサイズ上限（10MB）
+    backup_count: 5            # 保持するバックアップ数
+    compression: true          # gzip圧縮の有効/無効
+  cleanup:                     # 古いログファイルのクリーンアップ
+    enabled: true              # クリーンアップ機能の有効/無効
+    max_days: 30               # ログファイルの保持日数
+
+# 辞書機能（読み上げ時の単語置換）
+dictionary:
+  enabled: true                # 辞書機能の有効/無効
+  max_words_per_guild: 1000    # ギルドあたりの最大単語数
+  max_word_length: 50          # 単語の最大文字数
+  max_reading_length: 100      # 読み方の最大文字数

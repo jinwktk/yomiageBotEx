@@ -1,12 +1,13 @@
 """
-py-cordのdiscord.sinksを使った実際の音声録音実装
+リアルな音声録音システム（py-cord + WaveSink統合版）
+bot_simple.pyの動作する録音機能をutils/に移植
 """
 
 import asyncio
 import logging
 import time
 import io
-from typing import Dict, Callable, Optional
+from typing import Dict, Callable, Optional, Any
 
 try:
     import discord
@@ -19,110 +20,113 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class RealAudioRecorder:
-    """py-cordのWaveSinkを使った実際の音声録音"""
+class RealTimeAudioRecorder:
+    """リアルタイム音声録音管理クラス（bot_simple.py統合版）"""
     
-    def __init__(self, audio_callback: Callable[[int, bytes], None]):
-        """
-        Args:
-            audio_callback: 音声データ受信時のコールバック (user_id, pcm_data)
-        """
-        self.audio_callback = audio_callback
-        self.recording_connections: Dict[int, discord.VoiceClient] = {}
+    def __init__(self, recording_manager):
+        self.recording_manager = recording_manager
+        self.connections: Dict[int, discord.VoiceClient] = {}
+        self.user_audio_buffers: Dict[int, list] = {}
+        self.active_recordings: Dict[int, asyncio.Task] = {}
+        self.BUFFER_EXPIRATION = 900  # 15分
         self.is_available = PYCORD_AVAILABLE
         
-    def start_recording(self, guild_id: int, voice_client: discord.VoiceClient) -> bool:
-        """実際の音声録音を開始"""
+    async def start_recording(self, guild_id: int, voice_client: discord.VoiceClient):
+        """録音開始"""
         if not self.is_available:
             logger.warning("py-cord not available, cannot start real recording")
-            return False
+            return
             
         try:
-            # WaveSinkを作成
+            # 既存の録音タスクがあれば停止
+            if guild_id in self.active_recordings:
+                self.active_recordings[guild_id].cancel()
+            
+            # WaveSinkを使用した録音開始
             sink = WaveSink()
-            
-            # 録音開始
-            voice_client.start_recording(
-                sink, 
-                self._finished_callback,
-                guild_id
-            )
-            
-            self.recording_connections[guild_id] = voice_client
-            logger.info(f"RealAudioRecorder: Started recording for guild {guild_id}")
-            return True
-            
+            self.connections[guild_id] = voice_client
+            voice_client.start_recording(sink, self._finished_callback, guild_id)
+            logger.info(f"RealTimeRecorder: Started recording for guild {guild_id}")
+                
         except Exception as e:
-            logger.error(f"RealAudioRecorder: Failed to start recording: {e}")
-            return False
+            logger.error(f"RealTimeRecorder: Failed to start recording: {e}")
     
-    def stop_recording(self, guild_id: int, voice_client: discord.VoiceClient):
-        """音声録音を停止"""
+    async def stop_recording(self, guild_id: int, voice_client: Optional[discord.VoiceClient] = None):
+        """録音停止"""
         try:
-            if guild_id in self.recording_connections:
-                voice_client.stop_recording()
-                del self.recording_connections[guild_id]
-                logger.info(f"RealAudioRecorder: Stopped recording for guild {guild_id}")
+            if guild_id in self.connections:
+                vc = self.connections[guild_id]
+                if hasattr(vc, 'recording') and vc.recording:
+                    vc.stop_recording()
+                del self.connections[guild_id]
+                logger.info(f"RealTimeRecorder: Stopped recording for guild {guild_id}")
         except Exception as e:
-            logger.error(f"RealAudioRecorder: Failed to stop recording: {e}")
+            logger.error(f"RealTimeRecorder: Failed to stop recording: {e}")
     
     async def _finished_callback(self, sink: WaveSink, guild_id: int):
-        """録音完了時のコールバック"""
+        """録音完了時のコールバック（bot_simple.pyから移植）"""
         try:
-            logger.debug(f"RealAudioRecorder: Processing audio data for {len(sink.audio_data)} users")
-            
             for user_id, audio in sink.audio_data.items():
                 if audio.file:
-                    # 音声データを読み取り
                     audio.file.seek(0)
                     audio_data = audio.file.read()
                     
                     if audio_data:
-                        # コールバックに音声データを渡す
-                        self.audio_callback(user_id, audio_data)
-                        logger.debug(f"RealAudioRecorder: Processed {len(audio_data)} bytes for user {user_id}")
-                    else:
-                        logger.debug(f"RealAudioRecorder: No audio data for user {user_id}")
+                        user_audio_buffer = io.BytesIO(audio_data)
+                        
+                        # バッファに追加
+                        if user_id not in self.user_audio_buffers:
+                            self.user_audio_buffers[user_id] = []
+                        self.user_audio_buffers[user_id].append((user_audio_buffer, time.time()))
+                        
+                        # RecordingManagerにも追加
+                        if self.recording_manager:
+                            self.recording_manager.add_audio_data(guild_id, audio_data, user_id)
+                        
+                        logger.debug(f"RealTimeRecorder: Added audio buffer for user {user_id}")
                         
         except Exception as e:
-            logger.error(f"RealAudioRecorder: Error in finished callback: {e}")
+            logger.error(f"RealTimeRecorder: Error in finished_callback: {e}")
+
+
+    async def clean_old_buffers(self):
+        """古いバッファを削除（bot_simple.pyから移植）"""
+        current_time = time.time()
+        for user_id in list(self.user_audio_buffers.keys()):
+            self.user_audio_buffers[user_id] = [
+                (buffer, timestamp) for buffer, timestamp in self.user_audio_buffers[user_id]
+                if current_time - timestamp <= self.BUFFER_EXPIRATION
+            ]
+            
+            if not self.user_audio_buffers[user_id]:
+                del self.user_audio_buffers[user_id]
+    
+    def get_user_audio_buffers(self, user_id: Optional[int] = None) -> Dict[int, list]:
+        """ユーザーの音声バッファを取得"""
+        if user_id:
+            return {user_id: self.user_audio_buffers.get(user_id, [])}
+        return self.user_audio_buffers.copy()
+    
+    def cleanup(self):
+        """クリーンアップ"""
+        # 全ての録音タスクを停止
+        for task in self.active_recordings.values():
+            task.cancel()
+        self.active_recordings.clear()
+        
+        # 接続をクリア
+        self.connections.clear()
+        self.user_audio_buffers.clear()
 
 
 class RealEnhancedVoiceClient(discord.VoiceClient):
-    """実際の音声録音機能を追加したVoiceClient（py-cord版）"""
+    """py-cord の WaveSink を使用したリアル音声録音クライアント"""
     
-    def __init__(self, client, channel):
+    def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
         super().__init__(client, channel)
-        self.recorder: Optional[RealAudioRecorder] = None
+        self.recording_manager = None
+        self.guild_id = channel.guild.id
         
-    def start_recording(self, callback: Callable[[int, bytes], None]) -> bool:
-        """録音開始"""
-        if not self.is_connected():
-            raise RuntimeError("Not connected to voice channel")
-            
-        if self.recorder:
-            self.recorder.stop_recording(self.guild.id, self)
-            
-        self.recorder = RealAudioRecorder(callback)
-        success = self.recorder.start_recording(self.guild.id, self)
-        
-        if success:
-            logger.info("RealEnhancedVoiceClient: Started recording")
-        else:
-            logger.warning("RealEnhancedVoiceClient: Failed to start recording, falling back")
-            
-        return success
-        
-    def stop_recording(self):
-        """録音停止"""
-        if self.recorder:
-            self.recorder.stop_recording(self.guild.id, self)
-            self.recorder = None
-            logger.info("RealEnhancedVoiceClient: Stopped recording")
-            
-    async def disconnect(self, *, force: bool = False):
-        """切断時にレコーダーも停止"""
-        if self.recorder:
-            self.recorder.stop_recording(self.guild.id, self)
-            
-        await super().disconnect(force=force)
+    def set_recording_manager(self, recording_manager):
+        """録音マネージャーを設定"""
+        self.recording_manager = recording_manager

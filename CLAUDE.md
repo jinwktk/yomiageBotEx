@@ -18,12 +18,22 @@ yomiageBotEx/
 │   ├── __init__.py    # Cogパッケージ初期化
 │   ├── voice.py       # ボイスチャンネル管理Cog
 │   ├── tts.py         # TTS機能Cog
-│   └── recording.py   # 録音・リプレイ機能Cog
+│   ├── recording.py   # 録音・リプレイ機能Cog
+│   ├── message_reader.py # チャット読み上げ機能Cog
+│   ├── dictionary.py  # 辞書機能Cog
+│   └── user_settings.py # ユーザー設定機能Cog
 ├── utils/             # ユーティリティモジュール
 │   ├── __init__.py    # ユーティリティパッケージ初期化
-│   ├── logger.py      # ロギング設定ユーティリティ
-│   ├── tts.py         # TTS機能ユーティリティ
-│   └── recording.py   # 録音・リプレイ機能ユーティリティ
+│   ├── logger.py      # ロギング設定ユーティリティ（ローテーション付き）
+│   ├── tts.py         # TTS機能ユーティリティ（モデル選択付き）
+│   ├── recording.py   # 録音・リプレイ機能ユーティリティ
+│   ├── audio_processor.py # 音声処理（ノーマライズ、フィルタリング）
+│   ├── dictionary.py  # 辞書管理システム
+│   ├── user_settings.py # ユーザー別設定管理
+│   ├── real_audio_recorder.py # 統合版音声録音（bot_simple.py移植）
+│   ├── audio_sink.py  # Discord音声受信用AudioSink
+│   ├── voice_receiver.py # カスタム音声受信システム
+│   └── simple_recorder.py # シンプル音声録音（フォールバック）
 ├── scripts/           # 起動スクリプト
 │   ├── start.sh       # Linux/macOS用起動スクリプト
 │   └── start.bat      # Windows用起動スクリプト
@@ -34,8 +44,13 @@ yomiageBotEx/
 │   └── tts/          # TTS音声キャッシュ
 ├── recordings/        # 録音ファイルディレクトリ（自動生成）
 │   └── *.wav         # 録音ファイル（1時間後自動削除）
+├── data/              # データディレクトリ（自動生成）
+│   ├── dictionary.json # 辞書データ
+│   └── user_settings.json # ユーザー設定データ
 └── logs/              # ログディレクトリ（自動生成）
-    └── yomiage.log    # ボットのログ
+    ├── yomiage.log    # 現在のログ
+    ├── yomiage.log.1.gz # ローテーション済みログ（圧縮）
+    └── yomiage.log.*.gz # 過去のログファイル
 ```
 
 ## 実装フェーズ
@@ -337,12 +352,69 @@ yomiageBotEx/
   - ユーザー未指定時：全ユーザーの音声をマージ
   - ファイル名にユーザー情報を含める（_user{id}、_all_{count}users）
 
+### 2024-06-28 Phase 5: 機能拡張完了
+- **bot_simple.pyの録音機能統合**: utils/real_audio_recorder.pyでpy-cordのWaveSink機能を完全統合
+- **FFmpegノーマライズ処理**: utils/audio_processor.pyで音声正規化、フィルタリング機能を実装
+- **辞書登録機能**: utils/dictionary.py、cogs/dictionary.pyで単語・読み方の管理システム
+- **Style-Bert-VITS2モデル選択**: utils/tts.pyでモデル・話者一覧取得、/tts_models、/tts_speakers、/tts_testコマンド
+- **ログRotate機能**: utils/logger.pyでCompressedRotatingFileHandlerによる圧縮付きローテーション
+- **ユーザー別設定機能**: utils/user_settings.py、cogs/user_settings.pyで個人別TTS・読み上げ設定
+
+### 実装完了機能（完全版）
+- ✅ Phase 1: 基本機能（VC参加・退出）
+- ✅ Phase 2: 自動参加・退出機能  
+- ✅ Phase 3: TTS統合（Style-Bert-VITS2）
+- ✅ Phase 4: 録音・リプレイ機能
+- ✅ Phase 5: 全機能拡張
+  - ✅ bot_simple.py統合
+  - ✅ 自動VC参加（既存）
+  - ✅ FFmpegノーマライズ処理
+  - ✅ 辞書登録機能
+  - ✅ Style-Bert-VITS2モデル選択
+  - ✅ ログRotate機能
+  - ✅ ユーザー別設定機能
+
+### 新規追加ファイル
+- `utils/audio_processor.py`: 音声処理（ノーマライズ、フィルタリング）
+- `utils/dictionary.py`: 辞書管理システム
+- `utils/user_settings.py`: ユーザー別設定管理
+- `utils/real_audio_recorder.py`: 統合版音声録音システム（bot_simple.py移植）
+- `cogs/dictionary.py`: 辞書機能Cog（/dict_add、/dict_search等）
+- `cogs/user_settings.py`: ユーザー設定Cog（/my_settings、/set_tts等）
+
+### 追加コマンド一覧
+**辞書機能**:
+- `/dict_add` - 辞書に単語追加
+- `/dict_remove` - 辞書から単語削除
+- `/dict_search` - 辞書で単語検索
+- `/dict_list` - 辞書統計表示
+- `/dict_export` - 辞書エクスポート
+- `/dict_import` - 辞書インポート
+
+**TTSモデル管理**:
+- `/tts_models` - 利用可能モデル一覧
+- `/tts_speakers` - 指定モデルの話者一覧
+- `/tts_test` - TTS設定テスト
+
+**ユーザー設定**:
+- `/my_settings` - 個人設定表示
+- `/set_tts` - TTS設定変更
+- `/set_reading` - 読み上げ設定変更
+- `/set_greeting` - 挨拶設定変更
+- `/reset_settings` - 設定リセット
+- `/export_settings` - 設定エクスポート
+
+### 軽量化対策
+- キャッシュ機能：TTS音声、辞書検索、モデル情報
+- 圧縮ログローテーション：自動圧縮でディスク使用量削減
+- 設定ファイル最適化：必要最小限の設定項目
+- エラーハンドリング：フォールバック機能で安定動作
+- メモリ効率：適切なデータ構造とクリーンアップ
+
 ### 今後の改善案
-- 音声品質の最適化とパフォーマンス向上
-- ユーザーごとの読み上げ設定（声質、速度等）
-- 音声フィルタリング機能（ノイズ除去等）
-- 複数言語サポート
 - Web管理画面の追加
+- 複数言語サポート
+- 高度な音声エフェクト
 
 ## トラブルシューティング
 

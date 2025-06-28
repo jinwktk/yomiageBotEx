@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from utils.tts import TTSManager
+from utils.dictionary import DictionaryManager
 
 
 class MessageReaderCog(commands.Cog):
@@ -24,6 +25,7 @@ class MessageReaderCog(commands.Cog):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.tts_manager = TTSManager(config)
+        self.dictionary_manager = DictionaryManager(config)
         
         # 読み上げ設定
         self.reading_enabled = config.get("message_reading", {}).get("enabled", True)
@@ -110,14 +112,39 @@ class MessageReaderCog(commands.Cog):
             if not processed_content:
                 return
             
+            # 辞書を適用
+            processed_content = self.dictionary_manager.apply_dictionary(processed_content, message.guild.id)
+            
             self.logger.info(f"MessageReader: Reading message from {message.author.display_name}: {processed_content[:50]}...")
+            
+            # ユーザー個別設定を取得
+            user_settings_cog = self.bot.get_cog("UserSettingsCog")
+            if user_settings_cog:
+                tts_settings = user_settings_cog.get_user_tts_settings(message.author.id)
+                reading_settings = user_settings_cog.get_user_reading_settings(message.author.id)
+                
+                # ユーザーが読み上げを無効にしている場合はスキップ
+                if not reading_settings.get("enabled", True):
+                    return
+                
+                # ユーザー個別の文字数制限を適用
+                user_max_length = reading_settings.get("max_length", self.max_length)
+                if len(processed_content) > user_max_length:
+                    processed_content = processed_content[:user_max_length] + "以下省略"
+            else:
+                # フォールバック：デフォルト設定
+                tts_settings = {
+                    "model_id": self.config.get("message_reading", {}).get("model_id", 0),
+                    "speaker_id": self.config.get("message_reading", {}).get("speaker_id", 0),
+                    "style": self.config.get("message_reading", {}).get("style", "Neutral")
+                }
             
             # 音声生成と再生
             audio_data = await self.tts_manager.generate_speech(
                 text=processed_content,
-                model_id=self.config.get("message_reading", {}).get("model_id", "default"),
-                speaker_id=self.config.get("message_reading", {}).get("speaker_id", 0),
-                style=self.config.get("message_reading", {}).get("style", "Neutral")
+                model_id=tts_settings.get("model_id", 0),
+                speaker_id=tts_settings.get("speaker_id", 0),
+                style=tts_settings.get("style", "Neutral")
             )
             
             if audio_data:

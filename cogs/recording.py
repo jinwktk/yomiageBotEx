@@ -14,7 +14,8 @@ import discord
 from discord.ext import commands
 
 from utils.recording import RecordingManager, SimpleRecordingSink
-from utils.audio_sink import RealTimeAudioRecorder
+from utils.real_audio_recorder import RealTimeAudioRecorder
+from utils.audio_processor import AudioProcessor
 
 
 class RecordingCog(commands.Cog):
@@ -36,6 +37,9 @@ class RecordingCog(commands.Cog):
         
         # リアルタイム音声録音管理
         self.real_time_recorder = RealTimeAudioRecorder(self.recording_manager)
+        
+        # 音声処理
+        self.audio_processor = AudioProcessor(config)
         
         # クリーンアップタスクは後で開始
         self.cleanup_task_started = False
@@ -157,101 +161,121 @@ class RecordingCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
     
-    @discord.slash_command(name="replay", description="最近の音声を録音してチャットに投稿します")
+    @discord.slash_command(name="replay", description="最近の音声を録音ファイルとして投稿します")
     async def replay_command(
         self, 
         ctx: discord.ApplicationContext, 
-        duration: discord.Option(int, "録音する時間（秒）。最大300秒まで", default=30),
-        user: discord.Option(discord.Member, "対象ユーザー（省略時は全員の音声をマージ）", default=None)
+        duration: discord.Option(float, "録音する時間（秒）", default=30.0, min_value=5.0, max_value=300.0) = 30.0,
+        user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None
     ):
-        """最近の音声を録音・再生するコマンド"""
-        await self.rate_limit_delay()
+        """録音をリプレイ（bot_simple.pyの実装を統合）"""
+        await ctx.defer()
         
-        # 機能が無効の場合
         if not self.recording_enabled:
-            await ctx.respond(
-                "❌ 録音機能は現在無効になっています。",
-                ephemeral=True
-            )
+            await ctx.respond("⚠️ 録音機能が無効です。", ephemeral=True)
             return
         
-        # ボットがVCに接続しているか確認
         if not ctx.guild.voice_client:
-            await ctx.respond(
-                "❌ ボットがボイスチャンネルに接続していません。",
-                ephemeral=True
-            )
+            await ctx.respond("⚠️ 現在録音中ではありません。", ephemeral=True)
             return
-        
-        # パラメータ検証
-        max_duration = self.config.get("recording", {}).get("max_duration", 300)
-        if duration > max_duration or duration < 1:
-            await ctx.respond(
-                f"❌ 録音時間は1〜{max_duration}秒で指定してください。",
-                ephemeral=True
-            )
-            return
-        
-        # 応答を遅延（処理時間確保）
-        await ctx.response.defer(ephemeral=True)
         
         try:
-            # 録音を保存
-            recording_id = await self.recording_manager.save_recent_audio(
-                guild_id=ctx.guild.id,
-                duration_seconds=float(duration),
-                requester_id=ctx.user.id,
-                target_user_id=user.id if user else None
-            )
+            import io
+            from datetime import datetime
             
-            if not recording_id:
-                if user:
-                    await ctx.followup.send(
-                        f"❌ {user.mention} の録音データが見つかりません。",
-                        ephemeral=True
-                    )
-                else:
-                    await ctx.followup.send(
-                        "❌ 録音データが見つかりません。しばらく音声がない可能性があります。",
-                        ephemeral=True
-                    )
-                return
+            # リアルタイム録音データから直接バッファを取得
+            user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(user.id if user else None)
             
-            # 録音ファイルのパスを取得
-            recording_path = await self.recording_manager.get_recording_path(recording_id)
-            if not recording_path:
-                await ctx.followup.send(
-                    "❌ 録音ファイルの読み込みに失敗しました。",
-                    ephemeral=True
-                )
-                return
+            # バッファクリーンアップ
+            await self.real_time_recorder.clean_old_buffers()
             
-            # 録音ファイルをチャットに投稿
-            with open(recording_path, "rb") as audio_file:
-                file = discord.File(
-                    audio_file,
-                    filename=f"recording_{recording_id[:8]}.wav"
+            if user:
+                # 特定ユーザーの音声
+                if user.id not in user_audio_buffers or not user_audio_buffers[user.id]:
+                    await ctx.respond(f"⚠️ {user.mention} の音声データが見つかりません。", ephemeral=True)
+                    return
+                
+                # 最新のバッファを取得
+                sorted_buffers = sorted(user_audio_buffers[user.id], key=lambda x: x[1])
+                if not sorted_buffers:
+                    await ctx.respond(f"⚠️ {user.mention} の音声データがありません。", ephemeral=True)
+                    return
+                
+                # 最新のバッファを結合
+                audio_buffer = io.BytesIO()
+                for buffer, timestamp in sorted_buffers[-5:]:  # 最新5個
+                    buffer.seek(0)
+                    audio_buffer.write(buffer.read())
+                
+                audio_buffer.seek(0)
+                
+                # 一時ファイルに保存してノーマライズ処理
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"recording_user{user.id}_{timestamp}.wav"
+                
+                processed_buffer = await self._process_audio_buffer(audio_buffer)
+                
+                await ctx.respond(
+                    f"🎵 {user.mention} の録音です（{duration}秒分、ノーマライズ済み）",
+                    file=discord.File(processed_buffer, filename=filename)
                 )
                 
-                if user:
-                    await ctx.followup.send(
-                        f"🎵 {user.mention} の過去{duration}秒間の録音です",
-                        file=file
-                    )
-                else:
-                    await ctx.followup.send(
-                        f"🎵 全員の過去{duration}秒間の録音です",
-                        file=file
-                    )
+            else:
+                # 全員の音声をマージ
+                if not user_audio_buffers:
+                    await ctx.respond("⚠️ 録音データがありません。", ephemeral=True)
+                    return
+                
+                # 全ユーザーの音声データを収集・マージ
+                all_audio_data = []
+                user_count = 0
+                
+                for user_id, buffers in user_audio_buffers.items():
+                    if not buffers:
+                        continue
+                        
+                    # 最新5個のバッファを取得
+                    sorted_buffers = sorted(buffers, key=lambda x: x[1])[-5:]
+                    user_count += 1
+                    
+                    # ユーザーごとの音声データを結合
+                    user_audio = io.BytesIO()
+                    for buffer, timestamp in sorted_buffers:
+                        buffer.seek(0)
+                        user_audio.write(buffer.read())
+                    
+                    if user_audio.tell() > 0:  # データがある場合のみ追加
+                        user_audio.seek(0)
+                        all_audio_data.append(user_audio)
+                
+                if not all_audio_data:
+                    await ctx.respond("⚠️ 有効な録音データがありません。", ephemeral=True)
+                    return
+                
+                # 全員の音声を1つのファイルに結合
+                merged_audio = io.BytesIO()
+                for audio in all_audio_data:
+                    audio.seek(0)
+                    merged_audio.write(audio.read())
+                
+                merged_audio.seek(0)
+                
+                # マージした音声をノーマライズ処理
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"recording_all_{user_count}users_{timestamp}.wav"
+                
+                processed_buffer = await self._process_audio_buffer(merged_audio)
+                
+                await ctx.respond(
+                    f"🎵 全員の録音です（{user_count}人分、{duration}秒分、ノーマライズ済み）",
+                    file=discord.File(processed_buffer, filename=filename)
+                )
             
             self.logger.info(f"Replaying {duration}s audio (user: {user}) for {ctx.user} in {ctx.guild.name}")
             
         except Exception as e:
             self.logger.error(f"Failed to replay audio: {e}")
-            await ctx.followup.send(
-                "❌ 音声の再生に失敗しました。",
-                ephemeral=True
-            )
+            await ctx.respond(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
     
     @discord.slash_command(name="recordings", description="最近の録音リストを表示します")
     async def recordings_command(self, ctx: discord.ApplicationContext):
@@ -340,6 +364,46 @@ class RecordingCog(commands.Cog):
                 "❌ バッファのクリアに失敗しました。",
                 ephemeral=True
             )
+    
+    async def _process_audio_buffer(self, audio_buffer):
+        """音声バッファをノーマライズ処理"""
+        try:
+            import tempfile
+            import os
+            
+            # 一時ファイルに保存
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
+                audio_buffer.seek(0)
+                temp_input.write(audio_buffer.read())
+                temp_input_path = temp_input.name
+            
+            # ノーマライズ処理
+            normalized_path = await self.audio_processor.normalize_audio(temp_input_path)
+            
+            if normalized_path and normalized_path != temp_input_path:
+                # ノーマライズされたファイルを読み込み
+                with open(normalized_path, 'rb') as f:
+                    processed_data = f.read()
+                
+                # 処理済みファイルをクリーンアップ
+                self.audio_processor.cleanup_temp_files(normalized_path)
+            else:
+                # ノーマライズに失敗した場合は元のデータを使用
+                with open(temp_input_path, 'rb') as f:
+                    processed_data = f.read()
+            
+            # 入力ファイルをクリーンアップ
+            self.audio_processor.cleanup_temp_files(temp_input_path)
+            
+            # 処理済みデータをBytesIOで返す
+            import io
+            return io.BytesIO(processed_data)
+            
+        except Exception as e:
+            self.logger.error(f"Audio processing failed: {e}")
+            # エラー時は元のバッファを返す
+            audio_buffer.seek(0)
+            return audio_buffer
 
 
 def setup(bot):
