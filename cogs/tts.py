@@ -172,6 +172,10 @@ class TTSCog(commands.Cog):
     async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
         """ボットがVCに参加した際、既にいるユーザーに対する処理"""
         try:
+            if not self.greeting_enabled:
+                self.logger.debug(f"TTS: Greeting disabled, skipping user {member.display_name}")
+                return
+                
             voice_client = guild.voice_client
             if voice_client and voice_client.is_connected():
                 self.logger.info(f"TTS: Bot joined, greeting user {member.display_name}")

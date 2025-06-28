@@ -251,6 +251,25 @@ yomiageBotEx/
 - **録音機能の仕様変更**: /replayコマンドでボット再生→チャットにファイル投稿に変更
 - **パラメータ整理**: 不要になったvolumeパラメータを削除
 
+### 2024-06-28 Guild別録音機能修正（第10回）
+- **Guild別録音バッファの実装**: 複数のGuildで同時に録音する際に音声データが混在する問題を修正
+- **RealTimeAudioRecorderの改良**:
+  - `guild_user_buffers`による階層化されたバッファ管理: `{guild_id: {user_id: [(buffer, timestamp), ...]}}`
+  - `get_user_audio_buffers(guild_id, user_id)`メソッドでGuild別データ取得
+  - `clean_old_buffers(guild_id)`でGuild別クリーンアップ
+- **RecordingCogの修正**:
+  - `/replay`コマンドでGuild IDを指定してバッファ取得
+  - `/debug_recording`と`/test_recording`でもGuild別対応
+- **TTSCogの改良**: 挨拶無効時のログ出力を抑制
+- **問題**:
+  - ユーザーがGuild Aで/replayを実行すると、Guild Bの録音データが再生される問題
+  - 音声バッファがGuild間で共有されていた
+- **修正内容**:
+  - 音声バッファをGuild単位で完全分離
+  - 各録音操作でguild_idを必須パラメータに変更
+  - デバッグログでGuild IDを表示するように改善
+  - 挨拶機能無効時の不要なログを削減
+
 ### 2024-06-28 録音機能の本格実装
 - **カスタムVoiceClient実装**: EnhancedVoiceClientでdiscord.pyの音声受信制限を回避
 - **音声パケット処理**: RTPヘッダー解析とOpusデコード処理を実装

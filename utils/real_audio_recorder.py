@@ -26,7 +26,8 @@ class RealTimeAudioRecorder:
     def __init__(self, recording_manager):
         self.recording_manager = recording_manager
         self.connections: Dict[int, discord.VoiceClient] = {}
-        self.user_audio_buffers: Dict[int, list] = {}
+        # Guild別のユーザー音声バッファ: {guild_id: {user_id: [(buffer, timestamp), ...]}}
+        self.guild_user_buffers: Dict[int, Dict[int, list]] = {}
         self.active_recordings: Dict[int, asyncio.Task] = {}
         self.BUFFER_EXPIRATION = 900  # 15分
         self.is_available = PYCORD_AVAILABLE
@@ -93,16 +94,18 @@ class RealTimeAudioRecorder:
                     if audio_data and len(audio_data) > 44:  # WAVヘッダー以上のサイズ
                         user_audio_buffer = io.BytesIO(audio_data)
                         
-                        # バッファに追加
-                        if user_id not in self.user_audio_buffers:
-                            self.user_audio_buffers[user_id] = []
-                        self.user_audio_buffers[user_id].append((user_audio_buffer, time.time()))
+                        # Guild別バッファに追加
+                        if guild_id not in self.guild_user_buffers:
+                            self.guild_user_buffers[guild_id] = {}
+                        if user_id not in self.guild_user_buffers[guild_id]:
+                            self.guild_user_buffers[guild_id][user_id] = []
+                        self.guild_user_buffers[guild_id][user_id].append((user_audio_buffer, time.time()))
                         
                         # RecordingManagerにも追加
                         if self.recording_manager:
                             self.recording_manager.add_audio_data(guild_id, audio_data, user_id)
                         
-                        logger.info(f"RealTimeRecorder: Added audio buffer for user {user_id} ({len(audio_data)} bytes)")
+                        logger.info(f"RealTimeRecorder: Added audio buffer for guild {guild_id}, user {user_id} ({len(audio_data)} bytes)")
                         audio_count += 1
                     else:
                         logger.warning(f"RealTimeRecorder: Audio data too small for user {user_id}: {len(audio_data)} bytes")
@@ -115,31 +118,58 @@ class RealTimeAudioRecorder:
             logger.error(f"RealTimeRecorder: Error in finished_callback: {e}", exc_info=True)
 
 
-    async def clean_old_buffers(self):
-        """古いバッファを削除（bot_simple.pyから移植）"""
+    async def clean_old_buffers(self, guild_id: Optional[int] = None):
+        """古いバッファを削除（Guild別対応）"""
         current_time = time.time()
-        for user_id in list(self.user_audio_buffers.keys()):
-            self.user_audio_buffers[user_id] = [
-                (buffer, timestamp) for buffer, timestamp in self.user_audio_buffers[user_id]
-                if current_time - timestamp <= self.BUFFER_EXPIRATION
-            ]
-            
-            if not self.user_audio_buffers[user_id]:
-                del self.user_audio_buffers[user_id]
-    
-    def get_user_audio_buffers(self, user_id: Optional[int] = None) -> Dict[int, list]:
-        """ユーザーの音声バッファを取得"""
-        logger.info(f"RealTimeRecorder: Getting buffers for user {user_id}")
-        logger.info(f"RealTimeRecorder: Available users in buffers: {list(self.user_audio_buffers.keys())}")
         
-        for uid, buffers in self.user_audio_buffers.items():
-            logger.info(f"RealTimeRecorder: User {uid} has {len(buffers)} buffers")
+        if guild_id:
+            # 特定のGuildのみクリーンアップ
+            if guild_id in self.guild_user_buffers:
+                for user_id in list(self.guild_user_buffers[guild_id].keys()):
+                    self.guild_user_buffers[guild_id][user_id] = [
+                        (buffer, timestamp) for buffer, timestamp in self.guild_user_buffers[guild_id][user_id]
+                        if current_time - timestamp <= self.BUFFER_EXPIRATION
+                    ]
+                    
+                    if not self.guild_user_buffers[guild_id][user_id]:
+                        del self.guild_user_buffers[guild_id][user_id]
+                
+                if not self.guild_user_buffers[guild_id]:
+                    del self.guild_user_buffers[guild_id]
+        else:
+            # 全Guildをクリーンアップ
+            for gid in list(self.guild_user_buffers.keys()):
+                for user_id in list(self.guild_user_buffers[gid].keys()):
+                    self.guild_user_buffers[gid][user_id] = [
+                        (buffer, timestamp) for buffer, timestamp in self.guild_user_buffers[gid][user_id]
+                        if current_time - timestamp <= self.BUFFER_EXPIRATION
+                    ]
+                    
+                    if not self.guild_user_buffers[gid][user_id]:
+                        del self.guild_user_buffers[gid][user_id]
+                
+                if not self.guild_user_buffers[gid]:
+                    del self.guild_user_buffers[gid]
+    
+    def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
+        """ユーザーの音声バッファを取得（Guild別対応）"""
+        logger.info(f"RealTimeRecorder: Getting buffers for guild {guild_id}, user {user_id}")
+        
+        if guild_id not in self.guild_user_buffers:
+            logger.info(f"RealTimeRecorder: No buffers for guild {guild_id}")
+            return {}
+        
+        guild_buffers = self.guild_user_buffers[guild_id]
+        logger.info(f"RealTimeRecorder: Available users in guild {guild_id}: {list(guild_buffers.keys())}")
+        
+        for uid, buffers in guild_buffers.items():
+            logger.info(f"RealTimeRecorder: Guild {guild_id}, User {uid} has {len(buffers)} buffers")
         
         if user_id:
-            result = {user_id: self.user_audio_buffers.get(user_id, [])}
-            logger.info(f"RealTimeRecorder: Returning buffers for user {user_id}: {len(result[user_id])} items")
+            result = {user_id: guild_buffers.get(user_id, [])}
+            logger.info(f"RealTimeRecorder: Returning buffers for guild {guild_id}, user {user_id}: {len(result[user_id])} items")
             return result
-        return self.user_audio_buffers.copy()
+        return guild_buffers.copy()
     
     def debug_recording_status(self, guild_id: int):
         """録音状況のデバッグ情報を出力"""
@@ -166,7 +196,7 @@ class RealTimeAudioRecorder:
         
         # 接続をクリア
         self.connections.clear()
-        self.user_audio_buffers.clear()
+        self.guild_user_buffers.clear()
 
 
 class RealEnhancedVoiceClient(discord.VoiceClient):

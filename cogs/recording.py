@@ -208,11 +208,12 @@ class RecordingCog(commands.Cog):
             import io
             from datetime import datetime
             
-            # リアルタイム録音データから直接バッファを取得
-            user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(user.id if user else None)
+            # リアルタイム録音データから直接バッファを取得（Guild別）
+            guild_id = ctx.guild.id
+            user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(guild_id, user.id if user else None)
             
-            # バッファクリーンアップ
-            await self.real_time_recorder.clean_old_buffers()
+            # バッファクリーンアップ（Guild別）
+            await self.real_time_recorder.clean_old_buffers(guild_id)
             
             if user:
                 # 特定ユーザーの音声
@@ -407,8 +408,8 @@ class RecordingCog(commands.Cog):
             # 録音状況のデバッグ
             self.real_time_recorder.debug_recording_status(ctx.guild.id)
             
-            # バッファ状況の確認
-            buffers = self.real_time_recorder.get_user_audio_buffers()
+            # バッファ状況の確認（Guild別）
+            buffers = self.real_time_recorder.get_user_audio_buffers(ctx.guild.id)
             
             debug_text = f"📊 **録音デバッグ情報**\n"
             debug_text += f"録音機能有効: {self.recording_enabled}\n"
@@ -464,8 +465,8 @@ class RecordingCog(commands.Cog):
             
             await asyncio.sleep(2)  # コールバック処理を待つ
             
-            # バッファ確認
-            buffers = self.real_time_recorder.get_user_audio_buffers()
+            # バッファ確認（Guild別）
+            buffers = self.real_time_recorder.get_user_audio_buffers(guild_id)
             
             # 録音再開
             self.logger.info(f"Test: Restarting recording")
