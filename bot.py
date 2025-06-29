@@ -40,7 +40,20 @@ def load_config():
     if config_path.exists():
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
-            print(f"DEBUG: TTS API URL: {config.get('tts', {}).get('api_url', 'NOT_FOUND')}")
+            
+            # TTS設定は data/tts_config.json から取得
+            try:
+                tts_config_path = Path("data/tts_config.json")
+                if tts_config_path.exists():
+                    import json
+                    with open(tts_config_path, "r", encoding="utf-8") as tts_f:
+                        tts_config = json.load(tts_f)
+                        print(f"DEBUG: TTS API URL: {tts_config.get('api_url', 'NOT_FOUND')}")
+                else:
+                    print("DEBUG: TTS API URL: data/tts_config.json NOT_FOUND")
+            except Exception as e:
+                print(f"DEBUG: TTS API URL: ERROR - {e}")
+            
             return config
     else:
         # デフォルト設定

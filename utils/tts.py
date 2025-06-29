@@ -236,6 +236,7 @@ class TTSManager:
                 
                 # 設定を更新
                 self.config.update(new_config)
+                # 旧config.yamlからの読み込み（廃止予定）
                 self.api_url = self.config.get("tts", {}).get("api_url", "http://127.0.0.1:5000")
                 self.timeout = self.config.get("tts", {}).get("timeout", 60)
                 
