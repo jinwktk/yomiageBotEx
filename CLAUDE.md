@@ -721,6 +721,35 @@ yomiageBotEx/
   - cogs/user_settings.py: _update_global_tts_config()で JSON保存
   - config.yaml: TTSセクション削除、コメントで移動先を明記
 
+### 2024-06-29 replay機能の時間指定精度向上（第22回）
+- **精密な時間指定replay機能の実装**: 従来の「最新5個のバッファ結合」から「指定時間分の連続音声」に改善
+- **連続音声バッファシステム**:
+  - `continuous_buffers`でGuild別・ユーザー別に5分間の連続音声を保持
+  - 音声チャンクごとに開始時刻・終了時刻を記録
+  - WAVデータから実際の音声時間を推定（44100Hz、16bit、ステレオ前提）
+- **時間範囲ベース音声抽出**:
+  - `get_audio_for_time_range()`で現在時刻から過去N秒分の音声を抽出
+  - `_extract_audio_range()`で時間範囲と重複するチャンクを結合
+  - WAVヘッダーの適切な処理（最初のチャンクのみヘッダー保持）
+- **replayコマンドの大幅改善**:
+  - `/replay duration:30.0`で正確に30秒分の音声を出力
+  - 従来の1分38秒 → 指定した通りの30秒に改善
+  - ファイル名に時間情報を含める（`_30s_`等）
+  - フォールバック機能：新機能が動作しない場合は従来方式を使用
+- **FFmpeg時間切り出し機能**:
+  - `AudioProcessor.extract_time_range()`で正確な時間切り出し
+  - `-ss`（開始時刻）と`-t`（切り出し時間）による高精度処理
+  - `-c copy`で再エンコードなしの高速処理
+- **期待される効果**:
+  - **正確な時間指定**: 30秒指定で30秒の音声が確実に出力
+  - **5分前まで遡及可能**: 最大300秒（5分）前までの任意の時間範囲を指定可能
+  - **リアルタイム性**: 現在時刻基準での直近音声データ取得
+  - **パフォーマンス向上**: 不要な音声データの結合を回避
+- **技術的実装**:
+  - utils/real_audio_recorder.py: continuous_buffers、get_audio_for_time_range()、_extract_audio_range()追加
+  - cogs/recording.py: 時間範囲ベース処理の優先実行、フォールバック対応
+  - utils/audio_processor.py: extract_time_range()でFFmpeg時間切り出し機能
+
 ### 今後の改善案
 - Web管理画面の追加
 - 複数言語サポート

@@ -31,10 +31,13 @@ class RealTimeAudioRecorder:
         self.connections: Dict[int, discord.VoiceClient] = {}
         # Guild別のユーザー音声バッファ: {guild_id: {user_id: [(buffer, timestamp), ...]}}
         self.guild_user_buffers: Dict[int, Dict[int, list]] = {}
+        # Guild別の連続音声バッファ: {guild_id: {user_id: [(audio_chunk, start_time, end_time), ...]}}
+        self.continuous_buffers: Dict[int, Dict[int, list]] = {}
         self.active_recordings: Dict[int, asyncio.Task] = {}
         # 録音状態管理（Guild別）
         self.recording_status: Dict[int, bool] = {}
-        self.BUFFER_EXPIRATION = 300  # 5分（短縮）
+        self.BUFFER_EXPIRATION = 300  # 5分
+        self.CONTINUOUS_BUFFER_DURATION = 300  # 5分間の連続バッファ
         self.is_available = PYCORD_AVAILABLE
         
         # 永続化設定
@@ -171,7 +174,11 @@ class RealTimeAudioRecorder:
                             self.guild_user_buffers[guild_id][user_id].pop(0)
                             logger.info(f"RealTimeRecorder: Removed old buffer for user {user_id} (limit: {MAX_BUFFERS_PER_USER})")
                         
-                        self.guild_user_buffers[guild_id][user_id].append((user_audio_buffer, time.time()))
+                        current_time = time.time()
+                        self.guild_user_buffers[guild_id][user_id].append((user_audio_buffer, current_time))
+                        
+                        # 連続バッファにも追加（時間情報付き）
+                        self._add_to_continuous_buffer(guild_id, user_id, audio_data, current_time)
                         
                         # RecordingManagerにも追加
                         if self.recording_manager:
@@ -235,6 +242,89 @@ class RealTimeAudioRecorder:
         
         # バッファが変更された場合は保存（save_buffers内で非同期化される）
         self.save_buffers()
+    
+    def _add_to_continuous_buffer(self, guild_id: int, user_id: int, audio_data: bytes, timestamp: float):
+        """連続音声バッファに音声データを追加"""
+        if guild_id not in self.continuous_buffers:
+            self.continuous_buffers[guild_id] = {}
+        if user_id not in self.continuous_buffers[guild_id]:
+            self.continuous_buffers[guild_id][user_id] = []
+        
+        # WAVファイルから実際の音声データ時間を推定（サンプリングレート44100Hz、16bit、ステレオと仮定）
+        wav_data_size = len(audio_data) - 44  # WAVヘッダーを除く
+        estimated_duration = wav_data_size / (44100 * 2 * 2)  # サンプリングレート * チャンネル数 * バイト/サンプル
+        
+        # 音声チャンクを連続バッファに追加
+        start_time = timestamp - estimated_duration  # 録音開始時刻を推定
+        end_time = timestamp
+        
+        self.continuous_buffers[guild_id][user_id].append((audio_data, start_time, end_time))
+        
+        # 5分より古いデータを削除
+        current_time = time.time()
+        self.continuous_buffers[guild_id][user_id] = [
+            (chunk, s_time, e_time) for chunk, s_time, e_time in self.continuous_buffers[guild_id][user_id]
+            if current_time - e_time <= self.CONTINUOUS_BUFFER_DURATION
+        ]
+        
+        logger.debug(f"RealTimeRecorder: Added audio chunk for guild {guild_id}, user {user_id} ({estimated_duration:.1f}s, {len(audio_data)} bytes)")
+    
+    def get_audio_for_time_range(self, guild_id: int, duration_seconds: float, user_id: Optional[int] = None) -> Dict[int, bytes]:
+        """指定した時間範囲の音声データを取得（現在時刻から過去N秒分）"""
+        current_time = time.time()
+        start_time = current_time - duration_seconds
+        
+        result = {}
+        
+        if guild_id not in self.continuous_buffers:
+            logger.warning(f"RealTimeRecorder: No continuous buffers for guild {guild_id}")
+            return result
+        
+        guild_buffers = self.continuous_buffers[guild_id]
+        
+        if user_id:
+            # 特定ユーザーのみ
+            if user_id in guild_buffers:
+                result[user_id] = self._extract_audio_range(guild_buffers[user_id], start_time, current_time)
+        else:
+            # 全ユーザー
+            for uid, chunks in guild_buffers.items():
+                audio_data = self._extract_audio_range(chunks, start_time, current_time)
+                if audio_data:
+                    result[uid] = audio_data
+        
+        logger.info(f"RealTimeRecorder: Extracted {duration_seconds}s audio for guild {guild_id}, {len(result)} users")
+        return result
+    
+    def _extract_audio_range(self, chunks: list, start_time: float, end_time: float) -> bytes:
+        """指定した時間範囲の音声チャンクを結合"""
+        matching_chunks = []
+        
+        for audio_data, chunk_start, chunk_end in chunks:
+            # 時間範囲と重複するチャンクを選択
+            if chunk_end >= start_time and chunk_start <= end_time:
+                matching_chunks.append((audio_data, chunk_start, chunk_end))
+        
+        if not matching_chunks:
+            return b""
+        
+        # 時系列順にソート
+        matching_chunks.sort(key=lambda x: x[1])
+        
+        # WAVヘッダーと音声データを結合
+        combined_audio = io.BytesIO()
+        first_chunk = True
+        
+        for audio_data, _, _ in matching_chunks:
+            if first_chunk:
+                # 最初のチャンクはヘッダー込みで追加
+                combined_audio.write(audio_data)
+                first_chunk = False
+            else:
+                # 2番目以降はヘッダーを除いて音声データのみ追加
+                combined_audio.write(audio_data[44:])
+        
+        return combined_audio.getvalue()
     
     def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
         """ユーザーの音声バッファを取得（Guild別対応）"""

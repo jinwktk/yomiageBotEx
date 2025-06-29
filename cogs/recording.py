@@ -239,6 +239,77 @@ class RecordingCog(commands.Cog):
                     else:
                         self.logger.warning(f"Failed to create checkpoint, using existing buffers")
             
+            # 新しい時間範囲ベースの音声データ取得を試行
+            if hasattr(self.real_time_recorder, 'get_audio_for_time_range'):
+                # 連続バッファから指定時間分の音声を取得
+                time_range_audio = self.real_time_recorder.get_audio_for_time_range(guild_id, duration, user.id if user else None)
+                
+                if user:
+                    # 特定ユーザーの音声
+                    if user.id not in time_range_audio or not time_range_audio[user.id]:
+                        await ctx.followup.send(f"⚠️ {user.mention} の過去{duration}秒間の音声データが見つかりません。", ephemeral=True)
+                        return
+                    
+                    audio_data = time_range_audio[user.id]
+                    audio_buffer = io.BytesIO(audio_data)
+                    
+                    # 一時ファイルに保存してノーマライズ処理
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"recording_user{user.id}_{duration}s_{timestamp}.wav"
+                    
+                    processed_buffer = await self._process_audio_buffer(audio_buffer)
+                    
+                    await ctx.followup.send(
+                        f"🎵 {user.mention} の録音です（過去{duration}秒分、ノーマライズ済み）",
+                        file=discord.File(processed_buffer, filename=filename),
+                        ephemeral=True
+                    )
+                    return
+                
+                else:
+                    # 全員の音声をマージ
+                    if not time_range_audio:
+                        await ctx.followup.send(f"⚠️ 過去{duration}秒間の録音データがありません。", ephemeral=True)
+                        return
+                    
+                    # 全ユーザーの音声データを1つのWAVファイルに結合
+                    combined_audio = io.BytesIO()
+                    user_count = len(time_range_audio)
+                    first_user = True
+                    
+                    for user_id, audio_data in time_range_audio.items():
+                        if not audio_data:
+                            continue
+                        
+                        if first_user:
+                            # 最初のユーザーはヘッダー込みで追加
+                            combined_audio.write(audio_data)
+                            first_user = False
+                        else:
+                            # 2番目以降はヘッダーを除いて音声データのみ追加
+                            if len(audio_data) > 44:
+                                combined_audio.write(audio_data[44:])
+                    
+                    if combined_audio.tell() == 0:
+                        await ctx.followup.send(f"⚠️ 過去{duration}秒間の有効な音声データがありません。", ephemeral=True)
+                        return
+                    
+                    combined_audio.seek(0)
+                    
+                    # 一時ファイルに保存してノーマライズ処理
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"recording_all_{user_count}users_{duration}s_{timestamp}.wav"
+                    
+                    processed_buffer = await self._process_audio_buffer(combined_audio)
+                    
+                    await ctx.followup.send(
+                        f"🎵 全員の録音です（過去{duration}秒分、{user_count}人、ノーマライズ済み）",
+                        file=discord.File(processed_buffer, filename=filename),
+                        ephemeral=True
+                    )
+                    return
+            
+            # フォールバック：従来の方式
             user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(guild_id, user.id if user else None)
             
             # バッファクリーンアップ（Guild別）
@@ -271,7 +342,7 @@ class RecordingCog(commands.Cog):
                 processed_buffer = await self._process_audio_buffer(audio_buffer)
                 
                 await ctx.followup.send(
-                    f"🎵 {user.mention} の録音です（{duration}秒分、ノーマライズ済み）",
+                    f"🎵 {user.mention} の録音です（約{duration}秒分、ノーマライズ済み）",
                     file=discord.File(processed_buffer, filename=filename),
                     ephemeral=True
                 )
