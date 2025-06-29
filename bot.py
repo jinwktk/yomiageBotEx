@@ -275,14 +275,25 @@ class YomiageBot(discord.Bot):
         """Bot終了時のクリーンアップ"""
         logger.info("Bot is shutting down, cleaning up resources...")
         
-        # TTSセッションのクリーンアップ
+        # TTSセッションのクリーンアップ（全Cog）
         tts_cog = self.get_cog("TTSCog")
         if tts_cog and hasattr(tts_cog, 'tts_manager'):
             try:
                 await tts_cog.tts_manager.cleanup()
-                logger.info("TTS session cleanup completed")
+                logger.info("TTSCog session cleanup completed")
             except Exception as e:
-                logger.error(f"Failed to cleanup TTS session: {e}")
+                logger.error(f"Failed to cleanup TTSCog session: {e}")
+        
+        # MessageReaderCogのTTSManagerもクリーンアップ
+        message_reader_cog = self.get_cog("MessageReaderCog")
+        if message_reader_cog and hasattr(message_reader_cog, 'tts_manager'):
+            try:
+                await message_reader_cog.tts_manager.cleanup()
+                logger.info("MessageReaderCog session cleanup completed")
+            except Exception as e:
+                logger.error(f"Failed to cleanup MessageReaderCog session: {e}")
+        
+        logger.info("TTS session cleanup completed")
         
         # 親クラスのクリーンアップを呼び出し
         await super().close()
