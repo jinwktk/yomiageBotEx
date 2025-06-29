@@ -132,8 +132,8 @@ class MessageReaderCog(commands.Cog):
             
             self.logger.info(f"MessageReader: Reading message from {message.author.display_name}: {processed_content[:50]}...")
             
-            # 統一されたTTS設定を使用
-            tts_config = self.config.get("tts", {})
+            # 統一されたTTS設定を使用（data/tts_config.jsonから）
+            tts_config = self.tts_manager.tts_config
             tts_settings = {
                 "model_id": tts_config.get("model_id", 5),
                 "speaker_id": tts_config.get("speaker_id", 0),

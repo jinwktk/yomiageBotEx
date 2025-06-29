@@ -213,7 +213,18 @@ class TTSManager:
         self.models_cache_time: Optional[datetime] = None
     
     def reload_config(self):
-        """設定を再読み込み"""
+        """設定を再読み込み（data/tts_config.jsonから）"""
+        try:
+            # TTS設定をファイルから再読み込み
+            self.tts_config = self.load_tts_config()
+            self.api_url = self.tts_config.get("api_url", "http://127.0.0.1:5000")
+            self.timeout = self.tts_config.get("timeout", 60)
+            logger.info("TTSManager: Configuration reloaded")
+        except Exception as e:
+            logger.error(f"Failed to reload TTS config: {e}")
+            
+    def reload_config_old(self):
+        """設定を再読み込み（旧config.yaml用）"""
         try:
             import yaml
             from pathlib import Path

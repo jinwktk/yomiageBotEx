@@ -249,12 +249,15 @@ class UserSettingsCog(commands.Cog):
             with open(config_file, "w", encoding="utf-8") as f:
                 json.dump(tts_config, f, indent=2, ensure_ascii=False)
             
-            # TTSManagerにも反映
+            # TTSManagerにも反映（全Cogで共有されているTTSManagerを更新）
             tts_cog = self.bot.get_cog("TTSCog")
             if tts_cog and hasattr(tts_cog, 'tts_manager'):
-                tts_cog.tts_manager.tts_config = tts_config
-                tts_cog.tts_manager.api_url = tts_config.get("api_url", "http://127.0.0.1:5000")
-                tts_cog.tts_manager.timeout = tts_config.get("timeout", 30)
+                tts_cog.tts_manager.reload_config()
+            
+            # MessageReaderCogのTTSManagerも更新
+            message_reader_cog = self.bot.get_cog("MessageReaderCog")
+            if message_reader_cog and hasattr(message_reader_cog, 'tts_manager'):
+                message_reader_cog.tts_manager.reload_config()
                 
         except Exception as e:
             self.logger.error(f"Failed to update TTS config: {e}")
