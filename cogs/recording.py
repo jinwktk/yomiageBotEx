@@ -390,15 +390,35 @@ class RecordingCog(commands.Cog):
     
     
     async def _process_audio_buffer(self, audio_buffer):
-        """音声バッファをノーマライズ処理"""
+        """音声バッファをノーマライズ処理（ファイルサイズ制限付き）"""
         try:
             import tempfile
             import os
             
+            # ファイルサイズ制限（Discordの上限: 25MB、余裕を持って20MB）
+            MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+            
             # 一時ファイルに保存
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
                 audio_buffer.seek(0)
-                temp_input.write(audio_buffer.read())
+                original_data = audio_buffer.read()
+                
+                # ファイルサイズチェック
+                if len(original_data) > MAX_FILE_SIZE:
+                    self.logger.warning(f"Audio file too large: {len(original_data)/1024/1024:.1f}MB > 20MB limit")
+                    
+                    # 音声データを圧縮/切り取り
+                    compression_ratio = MAX_FILE_SIZE / len(original_data)
+                    compressed_size = int(len(original_data) * compression_ratio * 0.9)  # 90%まで圧縮
+                    
+                    # 単純に先頭部分を切り取り（より高度な処理も可能）
+                    compressed_data = original_data[:compressed_size]
+                    self.logger.info(f"Compressed audio from {len(original_data)/1024/1024:.1f}MB to {len(compressed_data)/1024/1024:.1f}MB")
+                    
+                    temp_input.write(compressed_data)
+                else:
+                    temp_input.write(original_data)
+                
                 temp_input_path = temp_input.name
             
             # ノーマライズ処理
@@ -409,15 +429,38 @@ class RecordingCog(commands.Cog):
                 with open(normalized_path, 'rb') as f:
                     processed_data = f.read()
                 
+                # 再度サイズチェック
+                if len(processed_data) > MAX_FILE_SIZE:
+                    self.logger.warning(f"Normalized file still too large: {len(processed_data)/1024/1024:.1f}MB")
+                    # 圧縮比率を再計算
+                    compression_ratio = MAX_FILE_SIZE / len(processed_data)
+                    compressed_size = int(len(processed_data) * compression_ratio * 0.9)
+                    processed_data = processed_data[:compressed_size]
+                    self.logger.info(f"Re-compressed to {len(processed_data)/1024/1024:.1f}MB")
+                
                 # 処理済みファイルをクリーンアップ
                 self.audio_processor.cleanup_temp_files(normalized_path)
             else:
                 # ノーマライズに失敗した場合は元のデータを使用
                 with open(temp_input_path, 'rb') as f:
                     processed_data = f.read()
+                
+                # サイズチェック
+                if len(processed_data) > MAX_FILE_SIZE:
+                    compression_ratio = MAX_FILE_SIZE / len(processed_data)
+                    compressed_size = int(len(processed_data) * compression_ratio * 0.9)
+                    processed_data = processed_data[:compressed_size]
+                    self.logger.info(f"Final compression to {len(processed_data)/1024/1024:.1f}MB")
             
             # 入力ファイルをクリーンアップ
             self.audio_processor.cleanup_temp_files(temp_input_path)
+            
+            # 最終サイズ確認
+            final_size_mb = len(processed_data) / 1024 / 1024
+            self.logger.info(f"Final audio file size: {final_size_mb:.1f}MB")
+            
+            if len(processed_data) > MAX_FILE_SIZE:
+                raise Exception(f"Audio file still too large after compression: {final_size_mb:.1f}MB")
             
             # 処理済みデータをBytesIOで返す
             import io
@@ -425,9 +468,20 @@ class RecordingCog(commands.Cog):
             
         except Exception as e:
             self.logger.error(f"Audio processing failed: {e}")
-            # エラー時は元のバッファを返す
+            # エラー時は元のバッファを返す（但しサイズ制限適用）
             audio_buffer.seek(0)
-            return audio_buffer
+            original_data = audio_buffer.read()
+            
+            MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+            if len(original_data) > MAX_FILE_SIZE:
+                # 緊急時の圧縮
+                compression_ratio = MAX_FILE_SIZE / len(original_data)
+                compressed_size = int(len(original_data) * compression_ratio * 0.8)
+                compressed_data = original_data[:compressed_size]
+                self.logger.warning(f"Emergency compression: {len(original_data)/1024/1024:.1f}MB -> {len(compressed_data)/1024/1024:.1f}MB")
+                return io.BytesIO(compressed_data)
+            
+            return io.BytesIO(original_data)
 
 
 def setup(bot):
