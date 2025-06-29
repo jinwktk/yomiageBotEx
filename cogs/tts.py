@@ -26,11 +26,11 @@ class TTSCog(commands.Cog):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.tts_manager = TTSManager(config)
-        self.greeting_enabled = config.get("tts", {}).get("greeting", {}).get("enabled", False)
+        self.greeting_enabled = self.tts_manager.tts_config.get("greeting", {}).get("enabled", False)
         
         # 初期化時の設定値をログ出力
         self.logger.info(f"TTS: Initializing with greeting_enabled: {self.greeting_enabled}")
-        self.logger.info(f"TTS: Config tts section: {config.get('tts', {})}")
+        self.logger.info(f"TTS: Config tts section: {self.tts_manager.tts_config}")
     
     async def rate_limit_delay(self):
         """レート制限対策の遅延"""
@@ -80,8 +80,8 @@ class TTSCog(commands.Cog):
             return
         
         try:
-            greeting_config = self.config.get("tts", {}).get("greeting", {})
-            tts_config = self.config.get("tts", {})
+            greeting_config = self.tts_manager.tts_config.get("greeting", {})
+            tts_config = self.tts_manager.tts_config
             
             # メッセージ生成
             if greeting_type == "join":
@@ -158,7 +158,7 @@ class TTSCog(commands.Cog):
             
             # 起動時の挨拶スキップ設定をチェック
             if is_startup:
-                skip_on_startup = self.config.get("tts", {}).get("greeting", {}).get("skip_on_startup", True)
+                skip_on_startup = self.tts_manager.tts_config.get("greeting", {}).get("skip_on_startup", True)
                 if skip_on_startup:
                     self.logger.info(f"TTS: Skipping startup greeting for existing user {member.display_name}")
                     return

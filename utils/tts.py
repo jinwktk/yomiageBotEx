@@ -146,16 +146,64 @@ class TTSManager:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.api_url = config.get("tts", {}).get("api_url", "http://127.0.0.1:5000")
-        self.timeout = config.get("tts", {}).get("timeout", 60)  # タイムアウトを60秒に延長
+        # TTS設定をdata/tts_config.jsonから読み込み
+        self.tts_config = self.load_tts_config()
+        self.api_url = self.tts_config.get("api_url", "http://127.0.0.1:5000")
+        self.timeout = self.tts_config.get("timeout", 60)
         self.cache = TTSCache(
             cache_dir=Path("cache/tts"),
-            max_size=config.get("tts", {}).get("cache_size", 5),
-            cache_hours=config.get("tts", {}).get("cache_hours", 24)
+            max_size=self.tts_config.get("cache_size", 5),
+            cache_hours=self.tts_config.get("cache_hours", 24)
         )
         self.session: Optional[aiohttp.ClientSession] = None
         self._session_initialized = False
         
+    def load_tts_config(self) -> Dict[str, Any]:
+        """TTS設定をdata/tts_config.jsonから読み込み"""
+        config_path = Path("data/tts_config.json")
+        default_config = {
+            "api_url": "http://127.0.0.1:5000",
+            "timeout": 30,
+            "cache_size": 5,
+            "cache_hours": 24,
+            "max_text_length": 100,
+            "model_id": 5,
+            "speaker_id": 0,
+            "style": "01",
+            "greeting": {
+                "enabled": true,
+                "skip_on_startup": true,
+                "join_message": "さん、こんちゃ！",
+                "leave_message": "さん、またね！"
+            }
+        }
+        
+        try:
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            else:
+                # デフォルト設定でファイルを作成
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(default_config, f, indent=2, ensure_ascii=False)
+                logger.info(f"Created default TTS config: {config_path}")
+                return default_config
+        except Exception as e:
+            logger.error(f"Failed to load TTS config: {e}, using defaults")
+            return default_config
+
+    def save_tts_config(self):
+        """TTS設定をdata/tts_config.jsonに保存"""
+        config_path = Path("data/tts_config.json")
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(self.tts_config, f, indent=2, ensure_ascii=False)
+            logger.info(f"Saved TTS config: {config_path}")
+        except Exception as e:
+            logger.error(f"Failed to save TTS config: {e}")
+
         # 利用可能なモデル情報（キャッシュ）
         self.available_models: Optional[Dict[str, Any]] = None
         self.models_cache_time: Optional[datetime] = None

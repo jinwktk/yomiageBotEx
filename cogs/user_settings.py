@@ -121,8 +121,27 @@ class UserSettingsCog(commands.Cog):
             return
         
         try:
-            # 現在の設定を取得
-            tts_config = self.config.get("tts", {})
+            # 現在の設定をdata/tts_config.jsonから取得
+            from pathlib import Path
+            import json
+            
+            config_file = Path("data/tts_config.json")
+            if config_file.exists():
+                with open(config_file, "r", encoding="utf-8") as f:
+                    tts_config = json.load(f)
+            else:
+                # デフォルト設定
+                tts_config = {
+                    "model_id": 5,
+                    "speaker_id": 0,
+                    "style": "01",
+                    "greeting": {
+                        "enabled": True,
+                        "skip_on_startup": True,
+                        "join_message": "さん、こんちゃ！",
+                        "leave_message": "さん、またね！"
+                    }
+                }
             
             # TTSManagerからモデル情報を取得
             available_models = None
@@ -184,47 +203,61 @@ class UserSettingsCog(commands.Cog):
                 ephemeral=True
             )
     
-    async def _update_global_config(self, *keys_and_value):
-        """config.yamlを動的に更新"""
+    async def _update_global_tts_config(self, **updates):
+        """data/tts_config.jsonを動的に更新"""
         try:
-            import yaml
             from pathlib import Path
+            import json
             
-            config_file = Path("config.yaml")
-            if not config_file.exists():
-                self.logger.error("config.yaml not found")
-                return
-                
-            # 現在のconfig.yamlを読み込み
-            with open(config_file, "r", encoding="utf-8") as f:
-                config_data = yaml.safe_load(f)
+            config_file = Path("data/tts_config.json")
             
-            # ネストされた辞書を更新
-            current = config_data
-            keys = keys_and_value[:-1]
-            value = keys_and_value[-1]
+            # 現在のTTS設定を読み込み
+            if config_file.exists():
+                with open(config_file, "r", encoding="utf-8") as f:
+                    tts_config = json.load(f)
+            else:
+                # デフォルト設定
+                tts_config = {
+                    "api_url": "http://127.0.0.1:5000",
+                    "timeout": 30,
+                    "cache_size": 5,
+                    "cache_hours": 24,
+                    "max_text_length": 100,
+                    "model_id": 5,
+                    "speaker_id": 0,
+                    "style": "01",
+                    "greeting": {
+                        "enabled": True,
+                        "skip_on_startup": True,
+                        "join_message": "さん、こんちゃ！",
+                        "leave_message": "さん、またね！"
+                    }
+                }
             
-            for key in keys[:-1]:
-                if key not in current:
-                    current[key] = {}
-                current = current[key]
-                
-            current[keys[-1]] = value
+            # 設定を更新
+            for key, value in updates.items():
+                if key in ["model_id", "speaker_id", "style"]:
+                    tts_config[key] = value
+                elif key.startswith("greeting_"):
+                    greeting_key = key.replace("greeting_", "")
+                    if "greeting" not in tts_config:
+                        tts_config["greeting"] = {}
+                    tts_config["greeting"][greeting_key] = value
             
-            # config.yamlに書き戻し
+            # ファイルに保存
+            config_file.parent.mkdir(parents=True, exist_ok=True)
             with open(config_file, "w", encoding="utf-8") as f:
-                yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True, indent=2)
+                json.dump(tts_config, f, indent=2, ensure_ascii=False)
             
-            # メモリ上のconfigも更新
-            current = self.config
-            for key in keys[:-1]:
-                if key not in current:
-                    current[key] = {}
-                current = current[key]
-            current[keys[-1]] = value
+            # TTSManagerにも反映
+            tts_cog = self.bot.get_cog("TTSCog")
+            if tts_cog and hasattr(tts_cog, 'tts_manager'):
+                tts_cog.tts_manager.tts_config = tts_config
+                tts_cog.tts_manager.api_url = tts_config.get("api_url", "http://127.0.0.1:5000")
+                tts_cog.tts_manager.timeout = tts_config.get("timeout", 30)
                 
         except Exception as e:
-            self.logger.error(f"Failed to update config: {e}")
+            self.logger.error(f"Failed to update TTS config: {e}")
     
     def get_user_reading_settings(self, user_id: int) -> Dict[str, Any]:
         """外部からユーザーの読み上げ設定を取得"""
@@ -449,7 +482,7 @@ class TTSModelSelect(discord.ui.Select):
             view: GlobalTTSSettingsView = self.view
             
             # 設定を更新
-            await view.cog._update_global_config("tts", "model_id", new_model_id)
+            await view.cog._update_global_tts_config(model_id=new_model_id)
             view.current_model = new_model_id
             
             # TTSManagerの設定を更新
@@ -516,7 +549,7 @@ class TTSStyleSelect(discord.ui.Select):
             view: GlobalTTSSettingsView = self.view
             
             # 設定を更新
-            await view.cog._update_global_config("tts", "style", new_style)
+            await view.cog._update_global_tts_config(style=new_style)
             view.current_style = new_style
             
             # TTSManagerの設定を更新

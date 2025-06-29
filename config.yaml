@@ -7,20 +7,8 @@ bot:
   rate_limit_delay: [0.5, 1.0]  # API呼び出し時のランダム遅延（秒）
   admin_user_id: 372768430149074954  # 管理者ユーザーID
 
-tts:
-  api_url: "http://192.168.0.99:5000"  # Style-Bert-VITS2 APIサーバーのURL
-  timeout: 30                       # TTS生成のタイムアウト（秒）
-  cache_size: 5                     # キャッシュする音声の数
-  cache_hours: 24                   # キャッシュの有効期限（時間）
-  max_text_length: 100              # 1回のTTSで処理する最大文字数
-  model_id: 5                       # TTSモデルID（全機能共通）
-  speaker_id: 0                     # スピーカーID（全機能共通）
-  style: "01"                       # スタイル（全機能共通）
-  greeting:
-    enabled: true                    # 挨拶機能の有効/無効
-    skip_on_startup: true            # ボット起動時に既存ユーザーへの挨拶をスキップ
-    join_message: "さん、こんちゃ！"     # 参加時の挨拶
-    leave_message: "さん、またね！"      # 退出時の挨拶
+# TTS設定は data/tts_config.json に移動しました
+# /set_global_tts コマンドで動的に変更されるため、Git管理下から除外
 
 audio_processing:
   normalize: true           # 音声ノーマライズ機能の有効/無効
