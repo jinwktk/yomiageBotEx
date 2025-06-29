@@ -213,6 +213,15 @@ class VoiceCog(commands.Cog):
                     user_names = [m.display_name for m in non_bot_members]
                     self.logger.info(f"Found users in {channel.name} ({guild.name}): {', '.join(user_names)}")
                     
+                    # 既に接続中かチェック
+                    if guild.voice_client:
+                        self.logger.info(f"Already connected to {guild.voice_client.channel.name} in {guild.name}, skipping join")
+                        # 接続チャンネルが異なる場合は移動
+                        if guild.voice_client.channel != channel:
+                            self.logger.info(f"Moving from {guild.voice_client.channel.name} to {channel.name}")
+                            await guild.voice_client.move_to(channel)
+                        continue
+                    
                     try:
                         self.logger.info(f"Attempting to join {channel.name}...")
                         
@@ -313,8 +322,8 @@ class VoiceCog(commands.Cog):
             self.logger.info("Waiting for voice connection to stabilize...")
             
             stable_connection = False
-            for attempt in range(15):  # 最大15回試行（7.5秒間）
-                await asyncio.sleep(0.5)
+            for attempt in range(10):  # 最大10回試行（3秒間）に短縮
+                await asyncio.sleep(0.3)
                 
                 voice_client = guild.voice_client
                 if voice_client and voice_client.is_connected():
@@ -322,19 +331,19 @@ class VoiceCog(commands.Cog):
                     try:
                         # ボイスクライアントの内部状態をチェック
                         if hasattr(voice_client, '_connected') and voice_client._connected:
-                            self.logger.info(f"Voice connection confirmed after {(attempt + 1) * 0.5}s")
+                            self.logger.info(f"Voice connection confirmed after {(attempt + 1) * 0.3}s")
                             stable_connection = True
                             break
                         elif hasattr(voice_client, 'is_connected') and voice_client.is_connected():
-                            self.logger.info(f"Voice connection stable after {(attempt + 1) * 0.5}s")
+                            self.logger.info(f"Voice connection stable after {(attempt + 1) * 0.3}s")
                             stable_connection = True
                             break
                     except Exception as e:
                         self.logger.debug(f"Connection stability check failed: {e}")
                         continue
                 
-                if attempt >= 14:
-                    self.logger.warning("Voice connection not stable after 7.5s, aborting")
+                if attempt >= 9:
+                    self.logger.warning("Voice connection not stable after 3s, aborting")
                     return
             
             if not stable_connection:
