@@ -180,10 +180,14 @@ class TTSManager:
         
         try:
             if config_path.exists():
+                logger.info(f"Loading TTS config from: {config_path}")
                 with open(config_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    loaded_config = json.load(f)
+                logger.info(f"Loaded TTS config: {loaded_config}")
+                return loaded_config
             else:
                 # デフォルト設定でファイルを作成
+                logger.info(f"TTS config not found, creating default: {config_path}")
                 config_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(config_path, "w", encoding="utf-8") as f:
                     json.dump(default_config, f, indent=2, ensure_ascii=False)
