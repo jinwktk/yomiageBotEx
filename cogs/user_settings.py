@@ -218,7 +218,7 @@ class UserSettingsCog(commands.Cog):
             else:
                 # デフォルト設定
                 tts_config = {
-                    "api_url": "http://127.0.0.1:5000",
+                    "api_url": "http://192.168.0.99:5000",
                     "timeout": 30,
                     "cache_size": 5,
                     "cache_hours": 24,

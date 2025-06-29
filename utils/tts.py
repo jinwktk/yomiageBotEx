@@ -162,7 +162,7 @@ class TTSManager:
         """TTS設定をdata/tts_config.jsonから読み込み"""
         config_path = Path("data/tts_config.json")
         default_config = {
-            "api_url": "http://127.0.0.1:5000",
+            "api_url": "http://192.168.0.99:5000",
             "timeout": 30,
             "cache_size": 5,
             "cache_hours": 24,

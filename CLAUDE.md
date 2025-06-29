@@ -698,6 +698,29 @@ yomiageBotEx/
   - ❌ **Shard stopped responding to gateway**: Discord接続不安定性
   - ❌ **TTS APIタイムアウト**: タイムアウト設定問題
 
+### 2024-06-29 TTS設定のGit管理分離（第21回）
+- **Git pull問題の解決**: /set_global_ttsでconfig.yamlが書き換わりgit pullできない問題を修正
+- **TTS設定の分離**:
+  - config.yamlのTTS設定セクションを削除
+  - data/tts_config.jsonに設定を移動（Git ignore対象）
+  - TTSManagerをdata/tts_config.json読み込みに対応
+- **動的設定更新システム**:
+  - _update_global_tts_config()メソッドでJSONファイル更新
+  - /set_global_ttsコマンドがdata/tts_config.jsonに保存
+  - TTSManagerの設定もリアルタイム更新
+- **Git管理の最適化**:
+  - .gitignoreで既にdata/*が除外済み
+  - 頻繁に変更される設定をGit管理下から除外
+  - メインPCとサブPCで設定の独立性確保
+- **解決された問題**:
+  - ❌ **Git pull conflicts**: TTS設定変更でconfig.yamlが競合
+  - ❌ **設定の一元管理不可**: 複数環境での設定同期問題
+- **技術的変更**:
+  - utils/tts.py: load_tts_config()、save_tts_config()メソッド追加
+  - cogs/tts.py: self.tts_manager.tts_config参照に変更
+  - cogs/user_settings.py: _update_global_tts_config()で JSON保存
+  - config.yaml: TTSセクション削除、コメントで移動先を明記
+
 ### 今後の改善案
 - Web管理画面の追加
 - 複数言語サポート
