@@ -152,7 +152,7 @@ class TTSManager:
         self.timeout = self.tts_config.get("timeout", 60)
         self.cache = TTSCache(
             cache_dir=Path("cache/tts"),
-            max_size=self.tts_config.get("cache_size", 5),
+            max_size=self.tts_config.get("cache_size", 20),  # キャッシュサイズ増加（5→20）
             cache_hours=self.tts_config.get("cache_hours", 24)
         )
         self.session: Optional[aiohttp.ClientSession] = None
@@ -164,7 +164,7 @@ class TTSManager:
         default_config = {
             "api_url": "http://192.168.0.99:5000",
             "timeout": 30,
-            "cache_size": 5,
+            "cache_size": 20,
             "cache_hours": 24,
             "max_text_length": 100,
             "model_id": 5,
@@ -260,11 +260,17 @@ class TTSManager:
         """HTTP セッションを初期化"""
         if self.session is None and not self._session_initialized:
             try:
-                connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)
-                # TTSリクエスト用のタイムアウト設定
+                # 高速化：コネクション数増加、Keep-Alive有効
+                connector = aiohttp.TCPConnector(
+                    limit=20,           # 最大コネクション数増加（10→20）
+                    limit_per_host=10,  # ホスト別制限増加（5→10）
+                    keepalive_timeout=60,  # Keep-Alive有効
+                    enable_cleanup_closed=True  # 閉じたコネクションの自動クリーンアップ
+                )
+                # TTSリクエスト用のタイムアウト設定（高速化）
                 timeout = aiohttp.ClientTimeout(
                     total=self.timeout,
-                    connect=10,  # 接続タイムアウト
+                    connect=3,   # 接続タイムアウト短縮（10→3秒）
                     sock_read=self.timeout  # 読み取りタイムアウト
                 )
                 self.session = aiohttp.ClientSession(
@@ -294,7 +300,7 @@ class TTSManager:
         try:
             # 高速なヘルスチェック用の短いタイムアウト
             connector = aiohttp.TCPConnector(limit=1)
-            timeout = aiohttp.ClientTimeout(total=10, connect=5)  # ヘルスチェック用
+            timeout = aiohttp.ClientTimeout(total=5, connect=2)  # さらに短縮（10→5秒、5→2秒）
             
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.get(f"{self.api_url}/status") as response:
