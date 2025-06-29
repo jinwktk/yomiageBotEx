@@ -34,7 +34,7 @@ class RealTimeAudioRecorder:
         self.active_recordings: Dict[int, asyncio.Task] = {}
         # 録音状態管理（Guild別）
         self.recording_status: Dict[int, bool] = {}
-        self.BUFFER_EXPIRATION = 900  # 15分
+        self.BUFFER_EXPIRATION = 300  # 5分（短縮）
         self.is_available = PYCORD_AVAILABLE
         
         # 永続化設定
@@ -44,8 +44,8 @@ class RealTimeAudioRecorder:
         # ファイル書き込みロック
         self._file_write_lock = asyncio.Lock()
         
-        # 起動時にバッファを復元
-        self.load_buffers()
+        # 起動時にバッファを復元（サイズチェック付き）
+        self.load_buffers_safe()
         
     async def start_recording(self, guild_id: int, voice_client: discord.VoiceClient):
         """録音開始"""
@@ -144,7 +144,16 @@ class RealTimeAudioRecorder:
                     audio.file.seek(0)
                     audio_data = audio.file.read()
                     
-                    logger.info(f"RealTimeRecorder: Audio data size for user {user_id}: {len(audio_data)} bytes")
+                    # 音声データサイズ制限（100MB上限）
+                    MAX_AUDIO_SIZE = 100 * 1024 * 1024  # 100MB
+                    
+                    if len(audio_data) > MAX_AUDIO_SIZE:
+                        logger.warning(f"RealTimeRecorder: Audio data too large for user {user_id}: {len(audio_data)/1024/1024:.1f}MB > 100MB limit")
+                        # 先頭100MBのみ保持（WAVヘッダーを保持）
+                        audio_data = audio_data[:MAX_AUDIO_SIZE]
+                        logger.info(f"RealTimeRecorder: Truncated audio to {len(audio_data)/1024/1024:.1f}MB")
+                    
+                    logger.info(f"RealTimeRecorder: Audio data size for user {user_id}: {len(audio_data)/1024/1024:.1f}MB")
                     
                     if audio_data and len(audio_data) > 44:  # WAVヘッダー以上のサイズ
                         user_audio_buffer = io.BytesIO(audio_data)
@@ -154,6 +163,14 @@ class RealTimeAudioRecorder:
                             self.guild_user_buffers[guild_id] = {}
                         if user_id not in self.guild_user_buffers[guild_id]:
                             self.guild_user_buffers[guild_id][user_id] = []
+                        
+                        # バッファ数制限（最大3個まで保持）
+                        MAX_BUFFERS_PER_USER = 3
+                        if len(self.guild_user_buffers[guild_id][user_id]) >= MAX_BUFFERS_PER_USER:
+                            # 古いバッファを削除
+                            self.guild_user_buffers[guild_id][user_id].pop(0)
+                            logger.info(f"RealTimeRecorder: Removed old buffer for user {user_id} (limit: {MAX_BUFFERS_PER_USER})")
+                        
                         self.guild_user_buffers[guild_id][user_id].append((user_audio_buffer, time.time()))
                         
                         # RecordingManagerにも追加
@@ -381,6 +398,94 @@ class RealTimeAudioRecorder:
             
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to save buffers async: {e}")
+    
+    def load_buffers_safe(self):
+        """音声バッファを安全に復元（サイズチェック付き）"""
+        try:
+            if not self.buffer_file.exists():
+                logger.info("RealTimeRecorder: No buffer file found, starting fresh")
+                return
+            
+            # ファイルサイズチェック（1GB制限）
+            file_size = self.buffer_file.stat().st_size
+            MAX_BUFFER_FILE_SIZE = 1024 * 1024 * 1024  # 1GB
+            
+            if file_size > MAX_BUFFER_FILE_SIZE:
+                logger.error(f"RealTimeRecorder: Buffer file too large ({file_size/1024/1024:.1f}MB > 1GB), removing corrupted file")
+                self.buffer_file.unlink()
+                return
+            
+            logger.info(f"RealTimeRecorder: Buffer file size: {file_size/1024:.1f} KB")
+            
+            with open(self.buffer_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            self.guild_user_buffers = {}
+            total_restored = 0
+            
+            for guild_str, users in data.items():
+                guild_id = int(guild_str)
+                self.guild_user_buffers[guild_id] = {}
+                
+                for user_str, buffers in users.items():
+                    user_id = int(user_str)
+                    self.guild_user_buffers[guild_id][user_id] = []
+                    
+                    # 最大3件まで復元（メモリ使用量制限）
+                    for buffer_data in buffers[-3:]:
+                        try:
+                            # サイズチェック（50MB制限）
+                            buffer_size = buffer_data.get('size', 0)
+                            if buffer_size > 50 * 1024 * 1024:  # 50MB
+                                logger.warning(f"RealTimeRecorder: Skipping large buffer for user {user_id}: {buffer_size/1024/1024:.1f}MB")
+                                continue
+                            
+                            # Base64デコード
+                            audio_data = base64.b64decode(buffer_data['data'])
+                            buffer = io.BytesIO(audio_data)
+                            timestamp = buffer_data['timestamp']
+                            
+                            self.guild_user_buffers[guild_id][user_id].append((buffer, timestamp))
+                            total_restored += 1
+                            
+                        except Exception as e:
+                            logger.warning(f"RealTimeRecorder: Failed to restore buffer for user {user_id}: {e}")
+                            continue
+                    
+                    # 空のユーザーは削除
+                    if not self.guild_user_buffers[guild_id][user_id]:
+                        del self.guild_user_buffers[guild_id][user_id]
+                
+                # 空のギルドは削除
+                if not self.guild_user_buffers[guild_id]:
+                    del self.guild_user_buffers[guild_id]
+            
+            logger.info(f"RealTimeRecorder: Restored {total_restored} audio buffers from disk")
+            logger.info(f"RealTimeRecorder: Buffer file size: {file_size/1024:.1f} KB")
+            
+            # 古いバッファをクリーンアップ
+            current_time = time.time()
+            for guild_id in list(self.guild_user_buffers.keys()):
+                for user_id in list(self.guild_user_buffers[guild_id].keys()):
+                    self.guild_user_buffers[guild_id][user_id] = [
+                        (buffer, timestamp) for buffer, timestamp in self.guild_user_buffers[guild_id][user_id]
+                        if current_time - timestamp <= self.BUFFER_EXPIRATION
+                    ]
+                    if not self.guild_user_buffers[guild_id][user_id]:
+                        del self.guild_user_buffers[guild_id][user_id]
+                if not self.guild_user_buffers[guild_id]:
+                    del self.guild_user_buffers[guild_id]
+            
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Failed to load buffers, starting fresh: {e}")
+            self.guild_user_buffers = {}
+            # 破損したファイルを削除
+            try:
+                if self.buffer_file.exists():
+                    self.buffer_file.unlink()
+                    logger.info("RealTimeRecorder: Removed corrupted buffer file")
+            except:
+                pass
     
     def load_buffers(self):
         """永続化された音声バッファを復元"""
