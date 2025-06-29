@@ -680,6 +680,24 @@ yomiageBotEx/
   - エラーログノイズの削減
   - Windows環境での安定性向上
 
+### 2024-06-29 音声接続エラー修正（第20回）
+- **音声接続重複エラーの根本解決**: 起動時の「Already connected to a voice channel」エラーを修正
+- **重複接続チェック機能実装**:
+  - voice.py L217-223に既接続チェックロジック追加
+  - 同一ギルドで既に接続中の場合は接続をスキップ
+  - 接続チャンネルが異なる場合は`move_to()`でチャンネル移動
+- **Discord接続安定性向上**:
+  - 接続安定化の待機時間を7.5秒→3秒に短縮（パフォーマンス向上）
+  - gateway timeout問題の軽減
+- **TTS API設定最適化**:
+  - タイムアウト10秒→30秒に延長（接続安定性向上）
+  - ポート設定は5000のまま維持（Style-Bert-VITS2サーバー仕様）
+- **解決された問題**:
+  - ❌ **IndexError: list index out of range**: 音声接続時の暗号化モード選択エラー
+  - ❌ **Already connected to a voice channel**: 重複接続エラー
+  - ❌ **Shard stopped responding to gateway**: Discord接続不安定性
+  - ❌ **TTS APIタイムアウト**: タイムアウト設定問題
+
 ### 今後の改善案
 - Web管理画面の追加
 - 複数言語サポート
