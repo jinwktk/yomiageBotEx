@@ -171,8 +171,8 @@ class TTSManager:
             "speaker_id": 0,
             "style": "01",
             "greeting": {
-                "enabled": true,
-                "skip_on_startup": true,
+                "enabled": True,
+                "skip_on_startup": True,
                 "join_message": "さん、こんちゃ！",
                 "leave_message": "さん、またね！"
             }
