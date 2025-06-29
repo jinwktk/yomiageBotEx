@@ -8,7 +8,7 @@ bot:
   admin_user_id: 372768430149074954  # 管理者ユーザーID
 
 tts:
-  api_url: "http://192.168.0.99:8000"  # Style-Bert-VITS2 APIサーバーのURL
+  api_url: "http://192.168.0.99:5000"  # Style-Bert-VITS2 APIサーバーのURL
   timeout: 30                       # TTS生成のタイムアウト（秒）
   cache_size: 5                     # キャッシュする音声の数
   cache_hours: 24                   # キャッシュの有効期限（時間）
