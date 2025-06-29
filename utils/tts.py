@@ -303,7 +303,7 @@ class TTSManager:
             return None
         
         # 文字数制限
-        max_length = self.config.get("tts", {}).get("max_text_length", 100)
+        max_length = self.tts_config.get("max_text_length", 100)
         if len(text) > max_length:
             text = text[:max_length] + "..."
             logger.warning(f"Text truncated to {max_length} characters")
@@ -315,7 +315,7 @@ class TTSManager:
         
         # APIサーバーが利用できない場合はスキップ
         if not await self.is_api_available():
-            logger.warning("TTS API not available, skipping audio")
+            logger.warning(f"TTS API not available at {self.api_url}, skipping audio")
             return None
         
         try:
@@ -330,7 +330,7 @@ class TTSManager:
                 "language": "JP"
             }
             
-            logger.debug(f"TTS API request: {self.api_url}/voice with params: {params}")
+            logger.info(f"TTS API request: {self.api_url}/voice with params: {params}")
             
             # asyncio.wait_forでタイムアウト制御を強化
             async def make_request():
@@ -343,7 +343,7 @@ class TTSManager:
                         return audio_data
                     else:
                         error_text = await response.text()
-                        logger.warning(f"TTS API error: {response.status} - {error_text}")
+                        logger.error(f"TTS API error: {response.status} - {error_text}")
                         return None
             
             # タイムアウト付きでリクエスト実行
