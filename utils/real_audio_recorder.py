@@ -36,6 +36,8 @@ class RealTimeAudioRecorder:
         self.active_recordings: Dict[int, asyncio.Task] = {}
         # 録音状態管理（Guild別）
         self.recording_status: Dict[int, bool] = {}
+        # 録音開始時刻記録（Guild別）
+        self.recording_start_times: Dict[int, float] = {}
         self.BUFFER_EXPIRATION = 300  # 5分
         self.CONTINUOUS_BUFFER_DURATION = 300  # 5分間の連続バッファ
         self.is_available = PYCORD_AVAILABLE
@@ -91,10 +93,15 @@ class RealTimeAudioRecorder:
             async def callback(sink_obj):
                 await self._finished_callback(sink_obj, guild_id)
             
+            # 録音開始時刻を記録
+            recording_start_time = time.time()
+            self.recording_start_times[guild_id] = recording_start_time
+            
             voice_client.start_recording(sink, callback)
             # 録音状態を設定
             self.recording_status[guild_id] = True
             logger.info(f"RealTimeRecorder: Started recording for guild {guild_id} with channel {voice_client.channel.name}")
+            logger.info(f"RealTimeRecorder: Recording start time: {recording_start_time}")
             logger.info(f"RealTimeRecorder: Voice client recording status: {voice_client.recording}")
             
             # 録音開始のデバッグ情報
@@ -254,9 +261,17 @@ class RealTimeAudioRecorder:
         wav_data_size = len(audio_data) - 44  # WAVヘッダーを除く
         estimated_duration = wav_data_size / (44100 * 2 * 2)  # サンプリングレート * チャンネル数 * バイト/サンプル
         
-        # 音声チャンクを連続バッファに追加
-        start_time = timestamp - estimated_duration  # 録音開始時刻を推定
-        end_time = timestamp
+        # 録音開始時刻を使用して正確な時間範囲を計算
+        if guild_id in self.recording_start_times:
+            recording_start_time = self.recording_start_times[guild_id]
+            # timestampは録音完了時刻、recording_start_timeは録音開始時刻
+            end_time = timestamp
+            start_time = recording_start_time
+        else:
+            # フォールバック：録音開始時刻が不明な場合は推定
+            end_time = timestamp
+            start_time = timestamp - estimated_duration
+            logger.warning(f"RealTimeRecorder: No recording start time for guild {guild_id}, using estimated duration")
         
         self.continuous_buffers[guild_id][user_id].append((audio_data, start_time, end_time))
         
@@ -267,12 +282,21 @@ class RealTimeAudioRecorder:
             if current_time - e_time <= self.CONTINUOUS_BUFFER_DURATION
         ]
         
-        logger.debug(f"RealTimeRecorder: Added audio chunk for guild {guild_id}, user {user_id} ({estimated_duration:.1f}s, {len(audio_data)} bytes)")
+        actual_duration = end_time - start_time
+        logger.info(f"RealTimeRecorder: Added audio chunk for guild {guild_id}, user {user_id}")
+        logger.info(f"  - Duration: {actual_duration:.1f}s (estimated: {estimated_duration:.1f}s)")
+        logger.info(f"  - Time range: {current_time - end_time:.1f}s ago to {current_time - start_time:.1f}s ago")
+        logger.info(f"  - Start: {start_time:.1f}, End: {end_time:.1f}, Now: {current_time:.1f}")
     
     def get_audio_for_time_range(self, guild_id: int, duration_seconds: float, user_id: Optional[int] = None) -> Dict[int, bytes]:
         """指定した時間範囲の音声データを取得（現在時刻から過去N秒分）"""
         current_time = time.time()
         start_time = current_time - duration_seconds
+        
+        logger.info(f"RealTimeRecorder: Extracting audio for guild {guild_id}")
+        logger.info(f"  - Requested duration: {duration_seconds}s")
+        logger.info(f"  - Time range: {start_time:.1f} to {current_time:.1f}")
+        logger.info(f"  - From {duration_seconds:.1f}s ago to now")
         
         result = {}
         
@@ -281,31 +305,51 @@ class RealTimeAudioRecorder:
             return result
         
         guild_buffers = self.continuous_buffers[guild_id]
+        logger.info(f"  - Available users: {list(guild_buffers.keys())}")
         
         if user_id:
             # 特定ユーザーのみ
             if user_id in guild_buffers:
-                result[user_id] = self._extract_audio_range(guild_buffers[user_id], start_time, current_time)
+                audio_data = self._extract_audio_range(guild_buffers[user_id], start_time, current_time)
+                if audio_data:
+                    result[user_id] = audio_data
+                logger.info(f"  - User {user_id}: {len(audio_data) if audio_data else 0} bytes")
+            else:
+                logger.warning(f"  - User {user_id} not found in buffers")
         else:
             # 全ユーザー
             for uid, chunks in guild_buffers.items():
                 audio_data = self._extract_audio_range(chunks, start_time, current_time)
                 if audio_data:
                     result[uid] = audio_data
+                    logger.info(f"  - User {uid}: {len(audio_data)} bytes")
+                else:
+                    logger.info(f"  - User {uid}: no data in time range")
         
-        logger.info(f"RealTimeRecorder: Extracted {duration_seconds}s audio for guild {guild_id}, {len(result)} users")
+        logger.info(f"RealTimeRecorder: Extracted {duration_seconds}s audio for guild {guild_id}, {len(result)} users with data")
         return result
     
     def _extract_audio_range(self, chunks: list, start_time: float, end_time: float) -> bytes:
         """指定した時間範囲の音声チャンクを結合"""
+        logger.debug(f"RealTimeRecorder: _extract_audio_range called")
+        logger.debug(f"  - Target time range: {start_time:.1f} to {end_time:.1f}")
+        logger.debug(f"  - Available chunks: {len(chunks)}")
+        
         matching_chunks = []
         
-        for audio_data, chunk_start, chunk_end in chunks:
+        for i, (audio_data, chunk_start, chunk_end) in enumerate(chunks):
+            logger.debug(f"  - Chunk {i}: {chunk_start:.1f} to {chunk_end:.1f}")
             # 時間範囲と重複するチャンクを選択
             if chunk_end >= start_time and chunk_start <= end_time:
                 matching_chunks.append((audio_data, chunk_start, chunk_end))
+                logger.debug(f"    -> MATCHED (overlaps with target range)")
+            else:
+                logger.debug(f"    -> SKIPPED (no overlap)")
+        
+        logger.debug(f"  - Matching chunks: {len(matching_chunks)}")
         
         if not matching_chunks:
+            logger.warning(f"RealTimeRecorder: No matching chunks found for time range {start_time:.1f} to {end_time:.1f}")
             return b""
         
         # 時系列順にソート
@@ -314,17 +358,29 @@ class RealTimeAudioRecorder:
         # WAVヘッダーと音声データを結合
         combined_audio = io.BytesIO()
         first_chunk = True
+        total_data_size = 0
         
-        for audio_data, _, _ in matching_chunks:
+        for i, (audio_data, chunk_start, chunk_end) in enumerate(matching_chunks):
+            logger.debug(f"  - Processing chunk {i}: {len(audio_data)} bytes, {chunk_start:.1f} to {chunk_end:.1f}")
             if first_chunk:
                 # 最初のチャンクはヘッダー込みで追加
                 combined_audio.write(audio_data)
+                total_data_size += len(audio_data)
                 first_chunk = False
+                logger.debug(f"    -> Added with header: {len(audio_data)} bytes")
             else:
                 # 2番目以降はヘッダーを除いて音声データのみ追加
-                combined_audio.write(audio_data[44:])
+                if len(audio_data) > 44:
+                    data_only = audio_data[44:]
+                    combined_audio.write(data_only)
+                    total_data_size += len(data_only)
+                    logger.debug(f"    -> Added data only: {len(data_only)} bytes")
+                else:
+                    logger.warning(f"    -> Chunk too small: {len(audio_data)} bytes")
         
-        return combined_audio.getvalue()
+        result = combined_audio.getvalue()
+        logger.info(f"RealTimeRecorder: Combined {len(matching_chunks)} chunks into {len(result)} bytes")
+        return result
     
     def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
         """ユーザーの音声バッファを取得（Guild別対応）"""
