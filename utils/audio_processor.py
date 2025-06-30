@@ -33,6 +33,66 @@ class AudioProcessor:
             logger.warning("FFmpeg not available, audio processing will be disabled")
             return False
     
+    async def extract_time_range(self, input_path: str, start_seconds: float, duration_seconds: float, output_path: Optional[str] = None) -> Optional[str]:
+        """
+        音声ファイルから指定した時間範囲を切り出し
+        
+        Args:
+            input_path: 入力音声ファイルパス
+            start_seconds: 開始時刻（秒）
+            duration_seconds: 切り出し時間（秒）
+            output_path: 出力パス（省略時は一時ファイル）
+            
+        Returns:
+            処理済みファイルパス（失敗時はNone）
+        """
+        if not self.ffmpeg_available:
+            logger.warning("FFmpeg not available, cannot extract time range")
+            return input_path
+            
+        if not os.path.exists(input_path):
+            logger.error(f"Input file not found: {input_path}")
+            return None
+            
+        try:
+            if output_path is None:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                    output_path = tmp_file.name
+            
+            # FFmpegで時間範囲を切り出し
+            cmd = [
+                "ffmpeg", "-y",  # 出力ファイルを上書き
+                "-i", input_path,
+                "-ss", str(start_seconds),  # 開始時刻
+                "-t", str(duration_seconds),  # 切り出し時間
+                "-c", "copy",  # 再エンコードなし（高速処理）
+                output_path
+            ]
+            
+            logger.debug(f"Running FFmpeg time extraction: {' '.join(cmd)}")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30.0)
+            
+            if process.returncode == 0:
+                logger.info(f"Successfully extracted {duration_seconds}s from {start_seconds}s: {output_path}")
+                return output_path
+            else:
+                logger.error(f"FFmpeg time extraction failed: {stderr.decode()}")
+                return None
+                
+        except asyncio.TimeoutError:
+            logger.error("FFmpeg time extraction timed out")
+            return None
+        except Exception as e:
+            logger.error(f"Error during time extraction: {e}")
+            return None
+
     async def normalize_audio(self, input_path: str, output_path: Optional[str] = None) -> Optional[str]:
         """
         音声ファイルをノーマライズ処理
