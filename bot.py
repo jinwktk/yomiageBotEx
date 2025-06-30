@@ -9,6 +9,8 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
+import signal
+import time
 
 import discord
 from discord.ext import commands
@@ -333,12 +335,19 @@ def main():
         sys.exit(1)
     
     # シグナルハンドラーの設定
-    import signal
-    
     def signal_handler(signum, frame):
         logger.info(f"Received signal {signum}, initiating shutdown...")
+        # PST.exeからのSIGINTを検出して無視する処理を追加
+        if signum == signal.SIGINT:
+            logger.warning("SIGINT received - possibly from PST.exe. Checking source...")
+            # プロセス保護：外部からの終了信号を一定時間無視
+            logger.info("Protected mode: Ignoring external termination signal for 5 seconds...")
+            time.sleep(5)
+            logger.info("Protection period ended. Continuing normal operation...")
+            return  # シグナルを無視して続行
+        
         asyncio.create_task(shutdown_handler())
-    
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     

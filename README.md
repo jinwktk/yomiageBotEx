@@ -194,3 +194,28 @@ Could not find Opus library. Make sure it is installed.
 ## 📄 ライセンス
 
 MIT License
+
+## PST.exe（Process Stoper Tool）との競合問題
+
+### 問題：
+Palworld ServerのPST.exeが9:00AMに自動でDiscord botを終了させる場合があります。
+
+### 解決策：
+1. **保護モードで起動**（推奨）
+   - `scripts/start.bat`を使用してbotを起動
+   - 自動的にシグナル保護機能が有効になります
+
+2. **環境変数で無効化**
+   ```batch
+   set ENABLE_PST=false
+   ```
+
+3. **PST.exe設定変更**
+   - `pst\yomiage_protection.txt`を作成
+   - 除外プロセスに`python.exe`、`YomiageBotEx`を追加
+
+### ログで確認：
+```
+SIGINT received - possibly from PST.exe. Checking source...
+Protected mode: Ignoring external termination signal for 5 seconds...
+```
