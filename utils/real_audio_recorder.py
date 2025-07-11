@@ -287,6 +287,10 @@ class RealTimeAudioRecorder:
         logger.info(f"  - Duration: {actual_duration:.1f}s (estimated: {estimated_duration:.1f}s)")
         logger.info(f"  - Time range: {current_time - end_time:.1f}s ago to {current_time - start_time:.1f}s ago")
         logger.info(f"  - Start: {start_time:.1f}, End: {end_time:.1f}, Now: {current_time:.1f}")
+        
+        # 録音開始時刻をクリア（次回の録音のため）
+        if guild_id in self.recording_start_times:
+            del self.recording_start_times[guild_id]
     
     def get_audio_for_time_range(self, guild_id: int, duration_seconds: float, user_id: Optional[int] = None) -> Dict[int, bytes]:
         """指定した時間範囲の音声データを取得（現在時刻から過去N秒分）"""
@@ -331,25 +335,36 @@ class RealTimeAudioRecorder:
     
     def _extract_audio_range(self, chunks: list, start_time: float, end_time: float) -> bytes:
         """指定した時間範囲の音声チャンクを結合"""
-        logger.debug(f"RealTimeRecorder: _extract_audio_range called")
-        logger.debug(f"  - Target time range: {start_time:.1f} to {end_time:.1f}")
-        logger.debug(f"  - Available chunks: {len(chunks)}")
+        current_time = time.time()
+        logger.info(f"RealTimeRecorder: _extract_audio_range called")
+        logger.info(f"  - Target time range: {start_time:.1f} to {end_time:.1f}")
+        logger.info(f"  - Current time: {current_time:.1f}")
+        logger.info(f"  - Available chunks: {len(chunks)}")
         
         matching_chunks = []
         
         for i, (audio_data, chunk_start, chunk_end) in enumerate(chunks):
-            logger.debug(f"  - Chunk {i}: {chunk_start:.1f} to {chunk_end:.1f}")
-            # 時間範囲と重複するチャンクを選択
-            if chunk_end >= start_time and chunk_start <= end_time:
-                matching_chunks.append((audio_data, chunk_start, chunk_end))
-                logger.debug(f"    -> MATCHED (overlaps with target range)")
+            # 録音中のチャンクは現在時刻まで延長して扱う（軽量な解決策）
+            effective_end = chunk_end
+            if chunk_end < current_time and current_time - chunk_end < 2.0:  # 2秒以内なら録音中と判断
+                effective_end = current_time
+                logger.info(f"  - Chunk {i}: {chunk_start:.1f} to {chunk_end:.1f} (extended to {effective_end:.1f} - likely recording)")
             else:
-                logger.debug(f"    -> SKIPPED (no overlap)")
+                logger.info(f"  - Chunk {i}: {chunk_start:.1f} to {chunk_end:.1f}")
+            
+            # 時間範囲と重複するチャンクを選択
+            if effective_end >= start_time and chunk_start <= end_time:
+                matching_chunks.append((audio_data, chunk_start, effective_end))
+                logger.info(f"    -> MATCHED (overlaps with target range)")
+            else:
+                logger.info(f"    -> SKIPPED (no overlap: chunk {chunk_start:.1f}-{effective_end:.1f} vs target {start_time:.1f}-{end_time:.1f})")
         
-        logger.debug(f"  - Matching chunks: {len(matching_chunks)}")
+        logger.info(f"  - Matching chunks: {len(matching_chunks)}")
         
         if not matching_chunks:
             logger.warning(f"RealTimeRecorder: No matching chunks found for time range {start_time:.1f} to {end_time:.1f}")
+            logger.warning(f"  - Searched {len(chunks)} chunks, none overlapped with target range")
+            logger.warning(f"  - Target range spans {end_time - start_time:.1f} seconds")
             return b""
         
         # 時系列順にソート
@@ -446,6 +461,46 @@ class RealTimeAudioRecorder:
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to create checkpoint: {e}")
             return False
+    
+    async def handle_connection_lost(self, guild_id: int):
+        """音声接続が切断された際の処理"""
+        try:
+            logger.warning(f"RealTimeRecorder: Connection lost for guild {guild_id}")
+            
+            # 接続状態をクリーンアップ
+            if guild_id in self.connections:
+                del self.connections[guild_id]
+            
+            # 録音状態をクリア
+            if guild_id in self.recording_status:
+                self.recording_status[guild_id] = False
+                
+            # 録音開始時刻をクリア
+            if guild_id in self.recording_start_times:
+                del self.recording_start_times[guild_id]
+                
+            logger.info(f"RealTimeRecorder: Cleaned up connection state for guild {guild_id}")
+            
+            # 自動再接続を試行（5秒後）
+            await asyncio.sleep(5.0)
+            await self._attempt_reconnection(guild_id)
+            
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Error handling connection loss: {e}")
+    
+    async def _attempt_reconnection(self, guild_id: int):
+        """自動再接続を試行"""
+        try:
+            # VoiceCogから再接続を試行
+            voice_cog = self.bot.get_cog("VoiceCog")
+            if voice_cog:
+                logger.info(f"RealTimeRecorder: Attempting automatic reconnection for guild {guild_id}")
+                await voice_cog.auto_reconnect_if_needed(guild_id)
+            else:
+                logger.warning(f"RealTimeRecorder: VoiceCog not found for reconnection")
+                
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Auto-reconnection failed: {e}")
     
     def debug_recording_status(self, guild_id: int):
         """録音状況のデバッグ情報を出力"""

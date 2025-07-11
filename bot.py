@@ -92,7 +92,8 @@ class YomiageBot(discord.Bot):
         # グローバルコマンド同期（すべてのギルドで利用可能）
         # debug_guildsを指定しないことで、すべてのギルドでコマンドが同期される
         super().__init__(
-            intents=intents
+            intents=intents,
+            heartbeat_timeout=60.0  # HeartBeatタイムアウトを60秒に延長
             # debug_guildsを削除してグローバル同期に変更
         )
         
@@ -113,12 +114,12 @@ class YomiageBot(discord.Bot):
                 
                 # タイムアウトとreconnectで接続の安定性を向上
                 vc = await channel.connect(
-                    timeout=45.0,  # タイムアウトを延長
+                    timeout=60.0,  # タイムアウトを延長（45秒→60秒）
                     reconnect=True
                 )
                 
-                # 接続成功後の安定化待機
-                await asyncio.sleep(1.0)
+                # 接続成功後の安定化待機を延長
+                await asyncio.sleep(2.0)
                 
                 # 接続状態の確認
                 if vc and vc.is_connected():
@@ -146,7 +147,7 @@ class YomiageBot(discord.Bot):
                 logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
                 
                 # WebSocket 4000 エラーの特別な処理
-                if "4000" in str(e) or "WebSocket" in str(e):
+                if "4000" in str(e) or "WebSocket" in str(e) or "ClientConnectionResetError" in str(e):
                     logger.warning(f"WebSocket error detected: {e}")
                     if attempt < max_retries - 1:
                         logger.info(f"Retrying after {retry_delay}s due to WebSocket error...")
