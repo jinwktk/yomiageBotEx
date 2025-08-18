@@ -193,6 +193,38 @@ class TTSManager:
         )
         self.session: Optional[aiohttp.ClientSession] = None
         self._session_initialized = False
+        # 設定ファイルの最終更新時刻を記録（ホットリロード用）
+        self._config_last_modified = self._get_config_mtime()
+    
+    def _get_config_mtime(self) -> float:
+        """設定ファイルの最終更新時刻を取得"""
+        try:
+            config_path = Path("data/tts_config.json")
+            if config_path.exists():
+                return config_path.stat().st_mtime
+        except Exception:
+            pass
+        return 0.0
+    
+    def reload_config_if_changed(self):
+        """設定ファイルが変更されていたら再読み込み"""
+        try:
+            current_mtime = self._get_config_mtime()
+            if current_mtime > self._config_last_modified:
+                logger.info("TTS config file changed, reloading...")
+                old_config = self.tts_config.copy()
+                self.tts_config = self.load_tts_config()
+                self._config_last_modified = current_mtime
+                
+                # 重要な設定変更をログ出力
+                old_greeting = old_config.get("greeting", {}).get("enabled", False)
+                new_greeting = self.tts_config.get("greeting", {}).get("enabled", False)
+                if old_greeting != new_greeting:
+                    logger.info(f"TTS greeting setting changed: {old_greeting} → {new_greeting}")
+                
+                logger.info("TTS config reloaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to reload TTS config: {e}")
         
     def load_tts_config(self) -> Dict[str, Any]:
         """TTS設定をdata/tts_config.jsonから読み込み"""

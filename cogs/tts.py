@@ -76,7 +76,13 @@ class TTSCog(commands.Cog):
     
     async def speak_greeting(self, voice_client: discord.VoiceClient, member: discord.Member, greeting_type: str):
         """挨拶音声を生成・再生（ユーザー個別設定対応）"""
-        if not self.greeting_enabled:
+        # 設定ファイルの変更をチェックして必要に応じて再読み込み
+        self.tts_manager.reload_config_if_changed()
+        
+        # 毎回リアルタイムで設定をチェック
+        current_greeting_enabled = self.tts_manager.tts_config.get("greeting", {}).get("enabled", False)
+        if not current_greeting_enabled:
+            self.logger.debug(f"TTS: Greeting disabled in config, skipping {greeting_type} for {member.display_name}")
             return
         
         try:
@@ -126,7 +132,11 @@ class TTSCog(commands.Cog):
         
         self.logger.info(f"TTS: Voice state update for {member.display_name} in {guild.name}")
         self.logger.info(f"TTS: Voice client connected: {voice_client is not None and voice_client.is_connected()}")
-        self.logger.info(f"TTS: Greeting enabled: {self.greeting_enabled}")
+        
+        # 設定ファイルの変更をチェック
+        self.tts_manager.reload_config_if_changed()
+        current_greeting_enabled = self.tts_manager.tts_config.get("greeting", {}).get("enabled", False)
+        self.logger.info(f"TTS: Greeting enabled: {current_greeting_enabled}")
         
         if not voice_client or not voice_client.is_connected():
             self.logger.warning(f"TTS: No voice client or not connected for {guild.name}")
@@ -141,18 +151,30 @@ class TTSCog(commands.Cog):
         # ユーザーがボットのいるチャンネルに参加した場合
         if before.channel != bot_channel and after.channel == bot_channel:
             self.logger.info(f"TTS: User {member.display_name} joined bot channel {bot_channel.name}")
-            await asyncio.sleep(1)  # 接続安定化のため少し待機
-            await self.speak_greeting(voice_client, member, "join")
+            # リアルタイムで挨拶設定をチェック
+            if current_greeting_enabled:
+                await asyncio.sleep(1)  # 接続安定化のため少し待機
+                await self.speak_greeting(voice_client, member, "join")
+            else:
+                self.logger.info(f"TTS: Greeting disabled, skipping join greeting for {member.display_name}")
         
         # ユーザーがボットのいるチャンネルから退出した場合
         elif before.channel == bot_channel and after.channel != bot_channel:
             self.logger.info(f"TTS: User {member.display_name} left bot channel {bot_channel.name}")
-            await self.speak_greeting(voice_client, member, "leave")
+            if current_greeting_enabled:
+                await self.speak_greeting(voice_client, member, "leave")
+            else:
+                self.logger.info(f"TTS: Greeting disabled, skipping leave greeting for {member.display_name}")
     
     async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member, is_startup: bool = False):
         """ボットがVCに参加した際、既にいるユーザーに対する処理"""
         try:
-            if not self.greeting_enabled:
+            # 設定ファイルの変更をチェック
+            self.tts_manager.reload_config_if_changed()
+            
+            # リアルタイムで挨拶設定をチェック
+            current_greeting_enabled = self.tts_manager.tts_config.get("greeting", {}).get("enabled", False)
+            if not current_greeting_enabled:
                 self.logger.debug(f"TTS: Greeting disabled, skipping user {member.display_name}")
                 return
             
