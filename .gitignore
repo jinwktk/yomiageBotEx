@@ -15,39 +15,45 @@ ENV/
 .venv/
 .uv-cache/
 
-# ログファイル
+# ログファイル（重複削除・統合）
 logs/
 *.log
+*.log.*
 
-# 録音ファイル
+# 録音関連（重複削除・統合）
 recordings/
+tmpwav/
+*.wav
+*.mp3
 
 # 一時ファイル
 temp/
 *.tmp
+*.temp
+*.bak
 
-# IDE
+# TTSキャッシュ
+cache/
+
+# データファイル
+data/*
+
+# セッションファイル
+sessions.json
+recordings_buffer.pkl
+audio_buffers.json
+
+# IDE設定
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
+# OS固有
 .DS_Store
 Thumbs.db
 
-# セッションファイル
-sessions.json
-recordings_buffer.pkl
-
-# TTSキャッシュ
-cache/
-
-# 録音ファイル
-recordings/
-
-# 一時録音ファイル
-tmpwav/
-
-# データファイル
-data/*
+# 開発用一時ファイル
+*_report.md
+debug_*.txt
+test_*.py
