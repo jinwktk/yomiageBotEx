@@ -5,7 +5,7 @@ Discordボイスチャンネルで読み上げ機能を提供するボット（P
 ## 🚀 クイックスタート
 
 ### 1. 必要なもの
-- Python 3.9以上（推奨: 3.11）
+- Python 3.10以上（推奨: 3.11）
 - [uv](https://docs.astral.sh/uv/) - Pythonパッケージマネージャー
 - Discord Bot Token
 - FFmpeg（音声処理用）※Phase 3以降で必要
