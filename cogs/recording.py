@@ -223,6 +223,7 @@ class RecordingCog(commands.Cog):
         """replayコマンドの重い処理を非同期で実行"""
         try:
             import io
+            import time
             from datetime import datetime, timedelta
             
             # リアルタイム録音データから直接バッファを取得（Guild別）
@@ -250,40 +251,42 @@ class RecordingCog(commands.Cog):
                     else:
                         self.logger.warning(f"Failed to create checkpoint, using existing buffers")
             
-            # 新しい時間範囲ベースの音声データ取得を試行
+            # 時間範囲ベースの音声データ取得（優先処理）
+            time_range_audio = None
             if hasattr(self.real_time_recorder, 'get_audio_for_time_range'):
                 # 連続バッファから指定時間分の音声を取得
                 time_range_audio = self.real_time_recorder.get_audio_for_time_range(guild_id, duration, user.id if user else None)
-                
+                self.logger.info(f"Time range audio result: {len(time_range_audio) if time_range_audio else 0} users")
+            
+            # 時間範囲ベースで音声データが取得できた場合
+            if time_range_audio:
                 if user:
                     # 特定ユーザーの音声
                     if user.id not in time_range_audio or not time_range_audio[user.id]:
-                        await ctx.followup.send(f"⚠️ {user.mention} の過去{duration}秒間の音声データが見つかりません。", ephemeral=True)
+                        # フォールバック前にエラーメッセージ
+                        self.logger.warning(f"No time-range audio for user {user.id}, checking if fallback should be used")
+                    else:
+                        audio_data = time_range_audio[user.id]
+                        audio_buffer = io.BytesIO(audio_data)
+                        
+                        # 一時ファイルに保存してノーマライズ処理
+                        filename = f"recording_user{user.id}_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
+                        
+                        processed_buffer = await self._process_audio_buffer(audio_buffer)
+                        
+                        # 時間精度を向上：指定した時間分のみ切り出し
+                        trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
+                        
+                        # 音声ファイルを投稿
+                        await ctx.followup.send(
+                            f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、{duration}秒分、ノーマライズ済み）",
+                            file=discord.File(trimmed_buffer, filename=filename),
+                            ephemeral=True
+                        )
                         return
-                    
-                    audio_data = time_range_audio[user.id]
-                    audio_buffer = io.BytesIO(audio_data)
-                    
-                    # 一時ファイルに保存してノーマライズ処理
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"recording_user{user.id}_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
-                    
-                    processed_buffer = await self._process_audio_buffer(audio_buffer)
-                    
-                    # 音声ファイルを投稿
-                    await ctx.followup.send(
-                        f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、{duration}秒分、ノーマライズ済み）",
-                        file=discord.File(processed_buffer, filename=filename),
-                        ephemeral=True
-                    )
-                    return
                 
                 else:
                     # 全員の音声をマージ
-                    if not time_range_audio:
-                        await ctx.followup.send(f"⚠️ 過去{duration}秒間の録音データがありません。", ephemeral=True)
-                        return
-                    
                     # 全ユーザーの音声データを1つのWAVファイルに結合
                     combined_audio = io.BytesIO()
                     user_count = len(time_range_audio)
@@ -302,27 +305,29 @@ class RecordingCog(commands.Cog):
                             if len(audio_data) > 44:
                                 combined_audio.write(audio_data[44:])
                     
-                    if combined_audio.tell() == 0:
-                        await ctx.followup.send(f"⚠️ 過去{duration}秒間の有効な音声データがありません。", ephemeral=True)
+                    if combined_audio.tell() > 0:
+                        combined_audio.seek(0)
+                        
+                        # 一時ファイルに保存してノーマライズ処理
+                        filename = f"recording_all_{user_count}users_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
+                        
+                        processed_buffer = await self._process_audio_buffer(combined_audio)
+                        
+                        # 時間精度を向上：指定した時間分のみ切り出し
+                        trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
+                        
+                        # 音声ファイルを投稿
+                        await ctx.followup.send(
+                            f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人、{duration}秒分、ノーマライズ済み）",
+                            file=discord.File(trimmed_buffer, filename=filename),
+                            ephemeral=True
+                        )
                         return
-                    
-                    combined_audio.seek(0)
-                    
-                    # 一時ファイルに保存してノーマライズ処理
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"recording_all_{user_count}users_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
-                    
-                    processed_buffer = await self._process_audio_buffer(combined_audio)
-                    
-                    # 音声ファイルを投稿
-                    await ctx.followup.send(
-                        f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人、{duration}秒分、ノーマライズ済み）",
-                        file=discord.File(processed_buffer, filename=filename),
-                        ephemeral=True
-                    )
-                    return
             
-            # フォールバック：従来の方式
+            # 時間範囲ベース処理が失敗した場合のみフォールバック
+            self.logger.warning(f"Time-range based audio extraction failed or returned empty, falling back to buffer-based method")
+            
+            # フォールバック：従来の方式（バッファベース）
             user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(guild_id, user.id if user else None)
             
             # バッファクリーンアップ（Guild別）
@@ -340,9 +345,25 @@ class RecordingCog(commands.Cog):
                     await ctx.followup.send(f"⚠️ {user.mention} の音声データがありません。", ephemeral=True)
                     return
                 
-                # 最新のバッファを結合
+                # 時間制限を考慮したバッファを結合
                 audio_buffer = io.BytesIO()
-                for buffer, timestamp in sorted_buffers[-5:]:  # 最新5個
+                current_time = time.time()
+                cutoff_time = current_time - duration  # duration秒前のカットオフ時刻
+                
+                # カットオフ時刻より新しいバッファのみ使用
+                filtered_buffers = [
+                    (buffer, timestamp) for buffer, timestamp in sorted_buffers
+                    if timestamp >= cutoff_time
+                ]
+                
+                if not filtered_buffers:
+                    # カットオフ時刻内にバッファがない場合は最新1個のみ使用
+                    filtered_buffers = sorted_buffers[-1:]
+                    self.logger.warning(f"No buffers within {duration}s timeframe for user {user.id}, using latest buffer only")
+                else:
+                    self.logger.info(f"Using {len(filtered_buffers)} buffers within {duration}s timeframe for user {user.id}")
+                
+                for buffer, timestamp in filtered_buffers:
                     buffer.seek(0)
                     audio_buffer.write(buffer.read())
                 
@@ -354,10 +375,13 @@ class RecordingCog(commands.Cog):
                 
                 processed_buffer = await self._process_audio_buffer(audio_buffer)
                 
+                # 時間精度を向上：指定した時間分のみ切り出し（フォールバック）
+                trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
+                
                 # 音声ファイルを投稿
                 await ctx.followup.send(
-                    f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、約{duration}秒分、ノーマライズ済み）",
-                    file=discord.File(processed_buffer, filename=filename),
+                    f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、{duration}秒分、ノーマライズ済み・フォールバック）",
+                    file=discord.File(trimmed_buffer, filename=filename),
                     ephemeral=True
                 )
                 
@@ -367,21 +391,37 @@ class RecordingCog(commands.Cog):
                     await ctx.followup.send("⚠️ 録音データがありません。", ephemeral=True)
                     return
                 
-                # 全ユーザーの音声データを収集・マージ
+                # 全ユーザーの音声データを収集・マージ（時間制限付き）
                 all_audio_data = []
                 user_count = 0
+                current_time = time.time()
+                cutoff_time = current_time - duration  # duration秒前のカットオフ時刻
                 
                 for user_id, buffers in user_audio_buffers.items():
                     if not buffers:
                         continue
-                        
-                    # 最新5個のバッファを取得
-                    sorted_buffers = sorted(buffers, key=lambda x: x[1])[-5:]
+                    
+                    # 時間制限を考慮したバッファを取得
+                    sorted_buffers = sorted(buffers, key=lambda x: x[1])
+                    
+                    # カットオフ時刻より新しいバッファのみ使用
+                    filtered_buffers = [
+                        (buffer, timestamp) for buffer, timestamp in sorted_buffers
+                        if timestamp >= cutoff_time
+                    ]
+                    
+                    if not filtered_buffers:
+                        # カットオフ時刻内にバッファがない場合は最新1個のみ使用
+                        filtered_buffers = sorted_buffers[-1:]
+                        self.logger.warning(f"No buffers within {duration}s timeframe for user {user_id}, using latest buffer only")
+                    else:
+                        self.logger.info(f"Using {len(filtered_buffers)} buffers within {duration}s timeframe for user {user_id}")
+                    
                     user_count += 1
                     
                     # ユーザーごとの音声データを結合
                     user_audio = io.BytesIO()
-                    for buffer, timestamp in sorted_buffers:
+                    for buffer, timestamp in filtered_buffers:
                         buffer.seek(0)
                         user_audio.write(buffer.read())
                     
@@ -407,10 +447,13 @@ class RecordingCog(commands.Cog):
                 
                 processed_buffer = await self._process_audio_buffer(merged_audio)
                 
+                # 時間精度を向上：指定した時間分のみ切り出し（フォールバック）
+                trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
+                
                 # 音声ファイルを投稿
                 await ctx.followup.send(
-                    f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人分、{duration}秒分、ノーマライズ済み）",
-                    file=discord.File(processed_buffer, filename=filename),
+                    f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人分、{duration}秒分、ノーマライズ済み・フォールバック）",
+                    file=discord.File(trimmed_buffer, filename=filename),
                     ephemeral=True
                 )
             
@@ -568,6 +611,53 @@ class RecordingCog(commands.Cog):
                 return io.BytesIO(compressed_data)
             
             return io.BytesIO(original_data)
+    
+    async def _trim_audio_to_duration(self, audio_buffer, duration_seconds: float):
+        """音声を指定した時間長に正確に切り出し"""
+        try:
+            import tempfile
+            import os
+            
+            # 一時ファイルに保存
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
+                audio_buffer.seek(0)
+                temp_input.write(audio_buffer.read())
+                temp_input_path = temp_input.name
+            
+            # AudioProcessorの時間切り出し機能を使用
+            if hasattr(self.audio_processor, 'extract_time_range'):
+                trimmed_path = await self.audio_processor.extract_time_range(temp_input_path, 0, duration_seconds)
+                
+                if trimmed_path and trimmed_path != temp_input_path:
+                    # 切り出された音声を読み込み
+                    with open(trimmed_path, 'rb') as f:
+                        trimmed_data = f.read()
+                    
+                    # 一時ファイルをクリーンアップ
+                    self.audio_processor.cleanup_temp_files(temp_input_path)
+                    self.audio_processor.cleanup_temp_files(trimmed_path)
+                    
+                    self.logger.info(f"Successfully trimmed audio to {duration_seconds} seconds")
+                    return io.BytesIO(trimmed_data)
+                else:
+                    self.logger.warning("Audio trimming failed, returning original audio")
+                    # 元の音声データを使用
+                    with open(temp_input_path, 'rb') as f:
+                        original_data = f.read()
+                    self.audio_processor.cleanup_temp_files(temp_input_path)
+                    return io.BytesIO(original_data)
+            else:
+                self.logger.warning("extract_time_range method not available, returning original audio")
+                # AudioProcessorに時間切り出し機能がない場合は元の音声を返す
+                with open(temp_input_path, 'rb') as f:
+                    original_data = f.read()
+                self.audio_processor.cleanup_temp_files(temp_input_path)
+                return io.BytesIO(original_data)
+                
+        except Exception as e:
+            self.logger.error(f"Audio trimming failed: {e}")
+            # エラー時は元の音声を返す
+            return audio_buffer
 
 
 def setup(bot):
