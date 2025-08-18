@@ -349,18 +349,38 @@ def main():
         print("エラー: .envファイルにDISCORD_TOKENを設定してください。")
         sys.exit(1)
     
-    # シグナルハンドラーの設定
+    # シグナルハンドラーの設定（PST.exe保護機能を改善）
+    sigint_count = 0
+    last_sigint_time = 0
+    
     def signal_handler(signum, frame):
+        nonlocal sigint_count, last_sigint_time
         logger.info(f"Received signal {signum}, initiating shutdown...")
-        # PST.exeからのSIGINTを検出して無視する処理を追加
-        if signum == signal.SIGINT:
-            logger.warning("SIGINT received - possibly from PST.exe. Checking source...")
-            # プロセス保護：外部からの終了信号を一定時間無視
-            logger.info("Protected mode: Ignoring external termination signal for 5 seconds...")
-            time.sleep(5)
-            logger.info("Protection period ended. Continuing normal operation...")
-            return  # シグナルを無視して続行
         
+        if signum == signal.SIGINT:
+            current_time = time.time()
+            
+            # 短時間での連続SIGINT（PST.exeの可能性）をチェック
+            if current_time - last_sigint_time < 2.0:  # 2秒以内の連続SIGINT
+                sigint_count += 1
+                logger.warning(f"SIGINT #{sigint_count} received within 2s - possibly from PST.exe")
+                
+                if sigint_count >= 3:  # 3回以上の連続SIGINT
+                    logger.info("Multiple rapid SIGINTs detected - likely PST.exe interference. Ignoring...")
+                    return  # PST.exeからの信号を無視
+            else:
+                # 単発のSIGINTまたは時間が空いている場合（ユーザーのCtrl+C）
+                sigint_count = 1
+                logger.info("Single SIGINT received - likely user Ctrl+C. Initiating shutdown...")
+            
+            last_sigint_time = current_time
+            
+            # 単発のSIGINTは正常な終了要求として処理
+            if sigint_count <= 2:
+                asyncio.create_task(shutdown_handler())
+            return
+        
+        # SIGTERM等は即座に処理
         asyncio.create_task(shutdown_handler())
 
     signal.signal(signal.SIGINT, signal_handler)
