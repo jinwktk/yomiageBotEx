@@ -183,12 +183,13 @@ class RealTimeAudioRecorder:
                         if user_id not in self.guild_user_buffers[guild_id]:
                             self.guild_user_buffers[guild_id][user_id] = []
                         
-                        # バッファ数制限（最大3個まで保持）
-                        MAX_BUFFERS_PER_USER = 3
+                        # バッファ数制限（最大5個まで保持）- パフォーマンスチューニング
+                        MAX_BUFFERS_PER_USER = 5
                         if len(self.guild_user_buffers[guild_id][user_id]) >= MAX_BUFFERS_PER_USER:
-                            # 古いバッファを削除
-                            self.guild_user_buffers[guild_id][user_id].pop(0)
-                            logger.info(f"RealTimeRecorder: Removed old buffer for user {user_id} (limit: {MAX_BUFFERS_PER_USER})")
+                            # 古いバッファを削除してメモリ使用量を制限
+                            old_buffer, old_timestamp = self.guild_user_buffers[guild_id][user_id].pop(0)
+                            del old_buffer  # 明示的にメモリ解放
+                            logger.debug(f"RealTimeRecorder: Removed old buffer for user {user_id} (limit: {MAX_BUFFERS_PER_USER})")
                         
                         current_time = time.time()
                         self.guild_user_buffers[guild_id][user_id].append((user_audio_buffer, current_time))
@@ -540,8 +541,8 @@ class RealTimeAudioRecorder:
             simplified_buffers[str(guild_id)] = {}
             
             for user_id, buffers in users.items():
-                # 最新3件のみ保存（I/O負荷を軽減）
-                recent_buffers = sorted(buffers, key=lambda x: x[1])[-3:]
+                # 最新5件のみ保存（パフォーマンス向上）
+                recent_buffers = sorted(buffers, key=lambda x: x[1])[-5:]
                 encoded_buffers = []
                 
                 for buffer, timestamp in recent_buffers:

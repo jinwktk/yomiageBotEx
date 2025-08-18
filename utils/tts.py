@@ -18,15 +18,20 @@ logger = logging.getLogger(__name__)
 
 
 class TTSCache:
-    """TTS音声のキャッシュ管理"""
+    """TTS音声のキャッシュ管理（高性能版）"""
     
-    def __init__(self, cache_dir: Path, max_size: int = 5, cache_hours: int = 24):
+    def __init__(self, cache_dir: Path, max_size: int = 50, cache_hours: int = 48):
         self.cache_dir = cache_dir
         self.max_size = max_size
         self.cache_hours = cache_hours
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_info_file = self.cache_dir / "cache_info.json"
         self.cache_info = self.load_cache_info()
+        
+        # インメモリキャッシュ（小さなファイル用）
+        self.memory_cache = {}
+        self.memory_cache_limit = 10 * 1024 * 1024  # 10MB
+        self.memory_cache_size = 0
     
     def load_cache_info(self) -> Dict[str, Any]:
         """キャッシュ情報を読み込み"""
@@ -56,8 +61,14 @@ class TTSCache:
         return self.cache_dir / f"{cache_key}.wav"
     
     async def get(self, text: str, model_id: str = "default") -> Optional[bytes]:
-        """キャッシュから音声データを取得"""
+        """キャッシュから音声データを取得（高速化版）"""
         cache_key = self.get_cache_key(text, model_id)
+        
+        # インメモリキャッシュから先にチェック
+        if cache_key in self.memory_cache:
+            logger.debug(f"Memory cache hit: {text[:20]}...")
+            return self.memory_cache[cache_key]
+        
         cache_path = self.get_cache_path(cache_key)
         
         if not cache_path.exists():
@@ -74,11 +85,16 @@ class TTSCache:
             async with aiofiles.open(cache_path, "rb") as f:
                 data = await f.read()
             
+            # 小さなファイルはインメモリキャッシュに追加
+            if len(data) < 1024 * 1024 and self.memory_cache_size + len(data) < self.memory_cache_limit:  # 1MB未満
+                self.memory_cache[cache_key] = data
+                self.memory_cache_size += len(data)
+            
             # アクセス時刻を更新
             self.cache_info[cache_key]["accessed_at"] = datetime.now().isoformat()
             self.save_cache_info()
             
-            logger.debug(f"Cache hit: {text[:20]}...")
+            logger.debug(f"File cache hit: {text[:20]}...")
             return data
             
         except Exception as e:
@@ -86,7 +102,7 @@ class TTSCache:
             return None
     
     async def set(self, text: str, model_id: str, audio_data: bytes):
-        """音声データをキャッシュに保存"""
+        """音声データをキャッシュに保存（高速化版）"""
         cache_key = self.get_cache_key(text, model_id)
         cache_path = self.get_cache_path(cache_key)
         
@@ -94,8 +110,21 @@ class TTSCache:
         await self.cleanup_if_needed()
         
         try:
-            async with aiofiles.open(cache_path, "wb") as f:
-                await f.write(audio_data)
+            # 並列でファイル保存とメモリキャッシュ更新
+            import asyncio
+            
+            async def save_to_file():
+                async with aiofiles.open(cache_path, "wb") as f:
+                    await f.write(audio_data)
+            
+            async def update_memory_cache():
+                # 小さなファイルはインメモリキャッシュに追加
+                if len(audio_data) < 1024 * 1024 and self.memory_cache_size + len(audio_data) < self.memory_cache_limit:  # 1MB未満
+                    self.memory_cache[cache_key] = audio_data
+                    self.memory_cache_size += len(audio_data)
+            
+            # 並列実行
+            await asyncio.gather(save_to_file(), update_memory_cache())
             
             # キャッシュ情報を更新
             self.cache_info[cache_key] = {
@@ -113,11 +142,18 @@ class TTSCache:
             logger.error(f"Failed to save cache: {e}")
     
     async def remove(self, cache_key: str):
-        """キャッシュエントリを削除"""
+        """キャッシュエントリを削除（高速化版）"""
         cache_path = self.get_cache_path(cache_key)
         try:
             if cache_path.exists():
                 cache_path.unlink()
+            
+            # メモリキャッシュからも削除
+            if cache_key in self.memory_cache:
+                cache_size = len(self.memory_cache[cache_key])
+                del self.memory_cache[cache_key]
+                self.memory_cache_size -= cache_size
+            
             if cache_key in self.cache_info:
                 del self.cache_info[cache_key]
             self.save_cache_info()
@@ -261,11 +297,18 @@ class TTSManager:
         if self.session is None and not self._session_initialized:
             try:
                 # 高速化：コネクション数増加、Keep-Alive有効
+                connection_pool_size = self.tts_config.get("connection_pool_size", 30)
+                connection_pool_per_host = self.tts_config.get("connection_pool_per_host", 15)
+                keepalive_timeout = self.tts_config.get("keepalive_timeout", 120)
+                
                 connector = aiohttp.TCPConnector(
-                    limit=20,           # 最大コネクション数増加（10→20）
-                    limit_per_host=10,  # ホスト別制限増加（5→10）
-                    keepalive_timeout=60,  # Keep-Alive有効
-                    enable_cleanup_closed=True  # 閉じたコネクションの自動クリーンアップ
+                    limit=connection_pool_size,           # 最大コネクション数（設定可能）
+                    limit_per_host=connection_pool_per_host,  # ホスト別制限（設定可能）
+                    keepalive_timeout=keepalive_timeout,  # Keep-Alive有効（設定可能）
+                    enable_cleanup_closed=True,  # 閉じたコネクションの自動クリーンアップ
+                    force_close=False,  # 接続の再利用を促進
+                    ttl_dns_cache=300,  # DNSキャッシュ（5分）
+                    use_dns_cache=True  # DNSキャッシュを有効化
                 )
                 # TTSリクエスト用のタイムアウト設定（高速化）
                 timeout = aiohttp.ClientTimeout(

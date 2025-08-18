@@ -15,13 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 class AudioProcessor:
-    """音声処理クラス（軽量化重視）"""
+    """音声処理クラス（高性能・並列処理対応）"""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.ffmpeg_available = self._check_ffmpeg()
         self.normalize_enabled = config.get("audio_processing", {}).get("normalize", True)
         self.target_level = config.get("audio_processing", {}).get("target_level", -16.0)  # dBFS
+        
+        # 並列処理制限（CPU コア数を考慮）
+        import os
+        self.max_concurrent_processes = min(os.cpu_count() or 4, 6)  # 最大6並列
+        self._process_semaphore = asyncio.Semaphore(self.max_concurrent_processes)
         
     def _check_ffmpeg(self) -> bool:
         """FFmpegの利用可能性をチェック"""
@@ -95,7 +100,7 @@ class AudioProcessor:
 
     async def normalize_audio(self, input_path: str, output_path: Optional[str] = None) -> Optional[str]:
         """
-        音声ファイルをノーマライズ処理
+        音声ファイルをノーマライズ処理（並列処理対応）
         
         Args:
             input_path: 入力音声ファイルパス
@@ -110,47 +115,51 @@ class AudioProcessor:
         if not os.path.exists(input_path):
             logger.error(f"Input file not found: {input_path}")
             return None
-            
-        try:
-            # 出力パスが指定されていない場合は一時ファイルを作成
-            if not output_path:
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-                    output_path = temp_file.name
-            
-            # FFmpegコマンドでノーマライズ処理
-            # loudnormフィルターを使用してラウドネス正規化
-            cmd = [
-                "ffmpeg", "-y",  # -y: 上書き確認なし
-                "-i", input_path,
-                "-af", f"loudnorm=I={self.target_level}:TP=-1.5:LRA=11",  # ラウドネス正規化
-                "-c:a", "pcm_s16le",  # 16-bit PCM
-                "-ar", "48000",  # 48kHz（Discord標準）
-                "-ac", "2",  # ステレオ
-                output_path
-            ]
-            
-            # 非同期でFFmpegを実行
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
-            
-            if process.returncode == 0:
-                logger.debug(f"Audio normalized successfully: {input_path} -> {output_path}")
-                return output_path
-            else:
-                logger.error(f"FFmpeg normalization failed: {stderr.decode()}")
-                return input_path
+        
+        # 並列処理制限を適用
+        async with self._process_semaphore:
+            try:
+                # 出力パスが指定されていない場合は一時ファイルを作成
+                if not output_path:
+                    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                        output_path = temp_file.name
                 
-        except asyncio.TimeoutError:
-            logger.error("Audio normalization timeout")
-            return input_path
-        except Exception as e:
-            logger.error(f"Audio normalization error: {e}")
-            return input_path
+                # 高速処理のためのFFmpegコマンド最適化
+                cmd = [
+                    "ffmpeg", "-y",  # -y: 上書き確認なし
+                    "-threads", "1",  # 1つのFFmpegプロセスあたり1スレッド（並列実行するため）
+                    "-i", input_path,
+                    "-af", f"loudnorm=I={self.target_level}:TP=-1.5:LRA=11,aresample=async=1000",  # 非同期リサンプル追加
+                    "-c:a", "pcm_s16le",  # 16-bit PCM
+                    "-ar", "48000",  # 48kHz（Discord標準）
+                    "-ac", "2",  # ステレオ
+                    "-avoid_negative_ts", "make_zero",  # タイムスタンプの問題を回避
+                    output_path
+                ]
+                
+                # 非同期でFFmpegを実行
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    limit=1024 * 1024  # 1MBバッファ制限
+                )
+                
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)  # タイムアウト短縮
+                
+                if process.returncode == 0:
+                    logger.debug(f"Audio normalized successfully: {input_path} -> {output_path}")
+                    return output_path
+                else:
+                    logger.error(f"FFmpeg normalization failed: {stderr.decode()}")
+                    return input_path
+                    
+            except asyncio.TimeoutError:
+                logger.error("Audio normalization timeout")
+                return input_path
+            except Exception as e:
+                logger.error(f"Audio normalization error: {e}")
+                return input_path
     
     async def apply_audio_filters(self, input_path: str, output_path: Optional[str] = None,
                                 filters: Optional[list] = None) -> Optional[str]:

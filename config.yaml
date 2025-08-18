@@ -13,6 +13,8 @@ bot:
 audio_processing:
   normalize: true           # 音声ノーマライズ機能の有効/無効
   target_level: -16.0       # ターゲットレベル（dBFS）
+  max_concurrent_processes: 6  # 最大並列処理数
+  ffmpeg_timeout: 20        # FFmpeg処理タイムアウト（秒）
   filters:                  # 適用するフィルター
     - "highpass=f=80"       # ローカットフィルター
     - "lowpass=f=8000"      # ハイカットフィルター
@@ -23,6 +25,9 @@ recording:
   cleanup_hours: 1    # 録音ファイルの自動削除時間
   default_duration: 30 # デフォルト録音時間（秒）
   max_file_size_mb: 50 # 最大ファイルサイズ（MB）
+  buffer_save_interval: 30  # バッファ保存間隔（秒）
+  max_buffers_per_user: 5   # ユーザーあたり最大バッファ数
+  memory_buffer_limit: 100  # メモリバッファ制限（MB）
 
 message_reading:
   enabled: true                           # チャット読み上げ機能の有効/無効
@@ -48,3 +53,11 @@ dictionary:
   max_words_per_guild: 1000    # ギルドあたりの最大単語数
   max_word_length: 50          # 単語の最大文字数
   max_reading_length: 100      # 読み方の最大文字数
+
+# パフォーマンス監視機能
+performance:
+  monitoring_enabled: true     # パフォーマンス監視の有効/無効
+  monitoring_interval: 60      # 監視間隔（秒）
+  cpu_alert_threshold: 80.0    # CPU使用率アラート閾値（%）
+  memory_alert_threshold: 85.0 # メモリ使用率アラート閾値（%）
+  disk_alert_threshold: 90.0   # ディスク使用率アラート閾値（%）
