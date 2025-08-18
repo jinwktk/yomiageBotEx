@@ -223,10 +223,21 @@ class RecordingCog(commands.Cog):
         """replayコマンドの重い処理を非同期で実行"""
         try:
             import io
-            from datetime import datetime
+            from datetime import datetime, timedelta
             
             # リアルタイム録音データから直接バッファを取得（Guild別）
             guild_id = ctx.guild.id
+            
+            # TTSManagerは不要になったため削除
+            
+            # 現在時刻を記録（録音期間計算用）
+            current_time = datetime.now()
+            start_time = current_time - timedelta(seconds=duration)
+            
+            # 時刻文字列を生成（日本時間表示用）
+            time_range_str = f"{start_time.strftime('%H:%M:%S')}-{current_time.strftime('%H:%M:%S')}"
+            date_str = current_time.strftime('%m/%d')
+            date_str_for_filename = current_time.strftime('%m%d')  # ファイル名用（スラッシュなし）
             
             # 録音中の場合は強制的にチェックポイントを作成
             if guild_id in self.real_time_recorder.connections:
@@ -255,12 +266,13 @@ class RecordingCog(commands.Cog):
                     
                     # 一時ファイルに保存してノーマライズ処理
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"recording_user{user.id}_{duration}s_{timestamp}.wav"
+                    filename = f"recording_user{user.id}_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
                     
                     processed_buffer = await self._process_audio_buffer(audio_buffer)
                     
+                    # 音声ファイルを投稿
                     await ctx.followup.send(
-                        f"🎵 {user.mention} の録音です（過去{duration}秒分、ノーマライズ済み）",
+                        f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、{duration}秒分、ノーマライズ済み）",
                         file=discord.File(processed_buffer, filename=filename),
                         ephemeral=True
                     )
@@ -298,12 +310,13 @@ class RecordingCog(commands.Cog):
                     
                     # 一時ファイルに保存してノーマライズ処理
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"recording_all_{user_count}users_{duration}s_{timestamp}.wav"
+                    filename = f"recording_all_{user_count}users_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
                     
                     processed_buffer = await self._process_audio_buffer(combined_audio)
                     
+                    # 音声ファイルを投稿
                     await ctx.followup.send(
-                        f"🎵 全員の録音です（過去{duration}秒分、{user_count}人、ノーマライズ済み）",
+                        f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人、{duration}秒分、ノーマライズ済み）",
                         file=discord.File(processed_buffer, filename=filename),
                         ephemeral=True
                     )
@@ -337,12 +350,13 @@ class RecordingCog(commands.Cog):
                 
                 # 一時ファイルに保存してノーマライズ処理
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"recording_user{user.id}_{timestamp}.wav"
+                filename = f"recording_user{user.id}_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
                 
                 processed_buffer = await self._process_audio_buffer(audio_buffer)
                 
+                # 音声ファイルを投稿
                 await ctx.followup.send(
-                    f"🎵 {user.mention} の録音です（約{duration}秒分、ノーマライズ済み）",
+                    f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、約{duration}秒分、ノーマライズ済み）",
                     file=discord.File(processed_buffer, filename=filename),
                     ephemeral=True
                 )
@@ -389,12 +403,13 @@ class RecordingCog(commands.Cog):
                 
                 # マージした音声をノーマライズ処理
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"recording_all_{user_count}users_{timestamp}.wav"
+                filename = f"recording_all_{user_count}users_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
                 
                 processed_buffer = await self._process_audio_buffer(merged_audio)
                 
+                # 音声ファイルを投稿
                 await ctx.followup.send(
-                    f"🎵 全員の録音です（{user_count}人分、{duration}秒分、ノーマライズ済み）",
+                    f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人分、{duration}秒分、ノーマライズ済み）",
                     file=discord.File(processed_buffer, filename=filename),
                     ephemeral=True
                 )

@@ -148,7 +148,7 @@ class TTSManager:
         self.config = config
         # TTS設定をdata/tts_config.jsonから読み込み
         self.tts_config = self.load_tts_config()
-        self.api_url = self.tts_config.get("api_url", "http://127.0.0.1:5000")
+        self.api_url = self.tts_config.get("api_url", "http://192.168.0.99:5000")
         self.timeout = self.tts_config.get("timeout", 60)
         self.cache = TTSCache(
             cache_dir=Path("cache/tts"),
@@ -217,7 +217,7 @@ class TTSManager:
         try:
             # TTS設定をファイルから再読み込み
             self.tts_config = self.load_tts_config()
-            self.api_url = self.tts_config.get("api_url", "http://127.0.0.1:5000")
+            self.api_url = self.tts_config.get("api_url", "http://192.168.0.99:5000")
             self.timeout = self.tts_config.get("timeout", 60)
             logger.info("TTSManager: Configuration reloaded")
         except Exception as e:
@@ -237,7 +237,7 @@ class TTSManager:
                 # 設定を更新
                 self.config.update(new_config)
                 # 旧config.yamlからの読み込み（廃止予定）
-                self.api_url = self.config.get("tts", {}).get("api_url", "http://127.0.0.1:5000")
+                self.api_url = self.config.get("tts", {}).get("api_url", "http://192.168.0.99:5000")
                 self.timeout = self.config.get("tts", {}).get("timeout", 60)
                 
                 logger.info("TTSManager: Configuration reloaded")
