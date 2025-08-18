@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import io
 import logging
 import random
 from typing import Dict, Any, Optional
@@ -222,7 +223,6 @@ class RecordingCog(commands.Cog):
     async def _process_replay_async(self, ctx, duration: float, user):
         """replayコマンドの重い処理を非同期で実行"""
         try:
-            import io
             import time
             from datetime import datetime, timedelta
             
@@ -293,17 +293,31 @@ class RecordingCog(commands.Cog):
                     first_user = True
                     
                     for user_id, audio_data in time_range_audio.items():
+                        # 0bytes問題を防ぐための厳密な検証
                         if not audio_data:
+                            self.logger.warning(f"User {user_id}: No audio data (None)")
                             continue
+                        
+                        if len(audio_data) <= 44:  # WAVヘッダー以下
+                            self.logger.warning(f"User {user_id}: Audio data too small ({len(audio_data)} bytes)")
+                            continue
+                            
+                        if len(audio_data) < 1000:  # 1KB未満は実質無音
+                            self.logger.warning(f"User {user_id}: Audio data very small ({len(audio_data)} bytes)")
+                        
+                        self.logger.info(f"User {user_id}: Adding {len(audio_data)} bytes of audio data")
                         
                         if first_user:
                             # 最初のユーザーはヘッダー込みで追加
                             combined_audio.write(audio_data)
                             first_user = False
+                            self.logger.info(f"User {user_id}: Added as first user with header")
                         else:
                             # 2番目以降はヘッダーを除いて音声データのみ追加
                             if len(audio_data) > 44:
-                                combined_audio.write(audio_data[44:])
+                                data_only = audio_data[44:]
+                                combined_audio.write(data_only)
+                                self.logger.info(f"User {user_id}: Added {len(data_only)} bytes without header")
                     
                     if combined_audio.tell() > 0:
                         combined_audio.seek(0)
