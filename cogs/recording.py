@@ -286,56 +286,30 @@ class RecordingCog(commands.Cog):
                         return
                 
                 else:
-                    # 全員の音声をマージ
-                    # 全ユーザーの音声データを1つのWAVファイルに結合
-                    combined_audio = io.BytesIO()
+                    # 全員の音声をミキシング（混合）
+                    mixed_audio = await self._mix_multiple_audio_streams(time_range_audio)
                     user_count = len(time_range_audio)
-                    first_user = True
                     
-                    for user_id, audio_data in time_range_audio.items():
-                        # 0bytes問題を防ぐための厳密な検証
-                        if not audio_data:
-                            self.logger.warning(f"User {user_id}: No audio data (None)")
-                            continue
-                        
-                        if len(audio_data) <= 44:  # WAVヘッダー以下
-                            self.logger.warning(f"User {user_id}: Audio data too small ({len(audio_data)} bytes)")
-                            continue
-                            
-                        if len(audio_data) < 1000:  # 1KB未満は実質無音
-                            self.logger.warning(f"User {user_id}: Audio data very small ({len(audio_data)} bytes)")
-                        
-                        self.logger.info(f"User {user_id}: Adding {len(audio_data)} bytes of audio data")
-                        
-                        if first_user:
-                            # 最初のユーザーはヘッダー込みで追加
-                            combined_audio.write(audio_data)
-                            first_user = False
-                            self.logger.info(f"User {user_id}: Added as first user with header")
-                        else:
-                            # 2番目以降はヘッダーを除いて音声データのみ追加
-                            if len(audio_data) > 44:
-                                data_only = audio_data[44:]
-                                combined_audio.write(data_only)
-                                self.logger.info(f"User {user_id}: Added {len(data_only)} bytes without header")
-                    
-                    if combined_audio.tell() > 0:
-                        combined_audio.seek(0)
+                    if mixed_audio and len(mixed_audio.getvalue()) > 44:  # WAVヘッダーより大きい
+                        mixed_audio.seek(0)
                         
                         # 一時ファイルに保存してノーマライズ処理
                         filename = f"recording_all_{user_count}users_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
                         
-                        processed_buffer = await self._process_audio_buffer(combined_audio)
+                        processed_buffer = await self._process_audio_buffer(mixed_audio)
                         
                         # 時間精度を向上：指定した時間分のみ切り出し
                         trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
                         
                         # 音声ファイルを投稿
                         await ctx.followup.send(
-                            f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人、{duration}秒分、ノーマライズ済み）",
+                            f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人、{duration}秒分、ミキシング済み）",
                             file=discord.File(trimmed_buffer, filename=filename),
                             ephemeral=True
                         )
+                        return
+                    else:
+                        await ctx.followup.send("⚠️ ミキシングできる音声データがありませんでした。", ephemeral=True)
                         return
             
             # 時間範囲ベース処理が失敗した場合のみフォールバック
@@ -405,8 +379,8 @@ class RecordingCog(commands.Cog):
                     await ctx.followup.send("⚠️ 録音データがありません。", ephemeral=True)
                     return
                 
-                # 全ユーザーの音声データを収集・マージ（時間制限付き）
-                all_audio_data = []
+                # 全ユーザーの音声データを収集してミキシング用に準備
+                fallback_audio_data = {}
                 user_count = 0
                 current_time = time.time()
                 cutoff_time = current_time - duration  # duration秒前のカットオフ時刻
@@ -441,32 +415,33 @@ class RecordingCog(commands.Cog):
                     
                     if user_audio.tell() > 0:  # データがある場合のみ追加
                         user_audio.seek(0)
-                        all_audio_data.append(user_audio)
+                        fallback_audio_data[user_id] = user_audio.getvalue()
                 
-                if not all_audio_data:
+                if not fallback_audio_data:
                     await ctx.followup.send("⚠️ 有効な録音データがありません。", ephemeral=True)
                     return
                 
-                # 全員の音声を1つのファイルに結合
-                merged_audio = io.BytesIO()
-                for audio in all_audio_data:
-                    audio.seek(0)
-                    merged_audio.write(audio.read())
+                # フォールバック音声データをミキシング
+                mixed_audio = await self._mix_multiple_audio_streams(fallback_audio_data)
                 
-                merged_audio.seek(0)
+                if not mixed_audio or len(mixed_audio.getvalue()) <= 44:
+                    await ctx.followup.send("⚠️ ミキシングできる音声データがありませんでした（フォールバック）。", ephemeral=True)
+                    return
                 
-                # マージした音声をノーマライズ処理
+                mixed_audio.seek(0)
+                
+                # ミキシングした音声をノーマライズ処理
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"recording_all_{user_count}users_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
                 
-                processed_buffer = await self._process_audio_buffer(merged_audio)
+                processed_buffer = await self._process_audio_buffer(mixed_audio)
                 
                 # 時間精度を向上：指定した時間分のみ切り出し（フォールバック）
                 trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
                 
                 # 音声ファイルを投稿
                 await ctx.followup.send(
-                    f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人分、{duration}秒分、ノーマライズ済み・フォールバック）",
+                    f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人分、{duration}秒分、ミキシング済み・フォールバック）",
                     file=discord.File(trimmed_buffer, filename=filename),
                     ephemeral=True
                 )
@@ -672,6 +647,136 @@ class RecordingCog(commands.Cog):
             self.logger.error(f"Audio trimming failed: {e}")
             # エラー時は元の音声を返す
             return audio_buffer
+    
+    async def _mix_multiple_audio_streams(self, time_range_audio: Dict[int, bytes]) -> Optional[io.BytesIO]:
+        """複数ユーザーの音声データをミキシング（混合）して同時再生可能な音声を作成"""
+        try:
+            import tempfile
+            import os
+            import struct
+            import wave
+            
+            if not time_range_audio:
+                self.logger.warning("No audio data to mix")
+                return None
+            
+            # 有効な音声データをフィルタリング
+            valid_audio_data = {}
+            for user_id, audio_data in time_range_audio.items():
+                if not audio_data:
+                    self.logger.warning(f"User {user_id}: No audio data (None)")
+                    continue
+                
+                if len(audio_data) <= 44:  # WAVヘッダー以下
+                    self.logger.warning(f"User {user_id}: Audio data too small ({len(audio_data)} bytes)")
+                    continue
+                    
+                if len(audio_data) < 1000:  # 1KB未満は実質無音
+                    self.logger.warning(f"User {user_id}: Audio data very small ({len(audio_data)} bytes)")
+                
+                valid_audio_data[user_id] = audio_data
+                self.logger.info(f"User {user_id}: Will mix {len(audio_data)} bytes of audio data")
+            
+            if not valid_audio_data:
+                self.logger.warning("No valid audio data to mix")
+                return None
+            
+            if len(valid_audio_data) == 1:
+                # 1人だけの場合はミキシング不要
+                user_id, audio_data = next(iter(valid_audio_data.items()))
+                self.logger.info(f"Only one user ({user_id}), returning audio as-is")
+                return io.BytesIO(audio_data)
+            
+            # 複数人の音声をFFmpegでミキシング
+            temp_files = []
+            try:
+                # 各ユーザーの音声を一時ファイルに保存
+                for user_id, audio_data in valid_audio_data.items():
+                    temp_file = tempfile.NamedTemporaryFile(suffix=f'_user{user_id}.wav', delete=False)
+                    temp_file.write(audio_data)
+                    temp_file.close()
+                    temp_files.append(temp_file.name)
+                    self.logger.info(f"User {user_id}: Saved to temp file {temp_file.name}")
+                
+                # FFmpegで音声をミキシング（同時再生）
+                output_temp = tempfile.NamedTemporaryFile(suffix='_mixed.wav', delete=False)
+                output_temp.close()
+                
+                # FFmpegコマンド構築（複数入力をミックス）
+                input_args = []
+                for temp_file in temp_files:
+                    input_args.extend(['-i', temp_file])
+                
+                # フィルタで音声をミックス（amix: 音声をミキシング）
+                filter_complex = f"amix=inputs={len(temp_files)}:duration=longest:dropout_transition=2"
+                
+                # FFmpeg実行用のコマンド
+                cmd = ['ffmpeg', '-y'] + input_args + [
+                    '-filter_complex', filter_complex,
+                    '-ac', '2',  # ステレオ出力
+                    '-ar', '44100',  # サンプリングレート
+                    '-f', 'wav',
+                    output_temp.name
+                ]
+                
+                self.logger.info(f"Mixing {len(temp_files)} audio streams with FFmpeg")
+                self.logger.info(f"Command: {' '.join(cmd)}")
+                
+                # セマフォでFFmpeg実行を制限
+                if hasattr(self.audio_processor, '_process_semaphore'):
+                    async with self.audio_processor._process_semaphore:
+                        process = await asyncio.create_subprocess_exec(
+                            *cmd,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE
+                        )
+                        stdout, stderr = await process.communicate()
+                else:
+                    # フォールバック（セマフォなし）
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, stderr = await process.communicate()
+                
+                if process.returncode != 0:
+                    self.logger.error(f"FFmpeg mixing failed: {stderr.decode()}")
+                    return None
+                
+                # ミキシング結果を読み込み
+                if os.path.exists(output_temp.name) and os.path.getsize(output_temp.name) > 44:
+                    with open(output_temp.name, 'rb') as f:
+                        mixed_data = f.read()
+                    
+                    self.logger.info(f"Successfully mixed {len(temp_files)} audio streams")
+                    self.logger.info(f"Mixed audio size: {len(mixed_data)/1024/1024:.1f}MB")
+                    
+                    # クリーンアップ
+                    for temp_file in temp_files:
+                        if os.path.exists(temp_file):
+                            os.unlink(temp_file)
+                    if os.path.exists(output_temp.name):
+                        os.unlink(output_temp.name)
+                    
+                    return io.BytesIO(mixed_data)
+                else:
+                    self.logger.error("FFmpeg mixing produced no output")
+                    return None
+                
+            except Exception as e:
+                self.logger.error(f"Audio mixing failed: {e}")
+                # クリーンアップ
+                for temp_file in temp_files:
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                if 'output_temp' in locals() and os.path.exists(output_temp.name):
+                    os.unlink(output_temp.name)
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Audio mixing setup failed: {e}")
+            return None
 
 
 def setup(bot):
