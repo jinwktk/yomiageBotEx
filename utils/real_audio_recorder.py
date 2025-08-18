@@ -111,19 +111,35 @@ class RealTimeAudioRecorder:
             self.recording_status[guild_id] = True
             logger.info(f"RealTimeRecorder: Started recording for guild {guild_id} with channel {voice_client.channel.name}")
             logger.info(f"RealTimeRecorder: Recording start time: {recording_start_time}")
-            logger.info(f"RealTimeRecorder: Voice client recording status: {voice_client.recording}")
+            
+            # 録音開始後の状態確認（小さな遅延を追加して状態を安定化）
+            await asyncio.sleep(0.1)
+            actual_recording_status = getattr(voice_client, 'recording', False)
+            logger.info(f"RealTimeRecorder: Voice client recording status after start: {actual_recording_status}")
+            
+            if not actual_recording_status:
+                logger.error(f"RealTimeRecorder: CRITICAL - Recording did not start properly for guild {guild_id}!")
+                logger.error(f"  - Voice client connected: {voice_client.is_connected()}")
+                logger.error(f"  - Channel members: {[m.display_name for m in voice_client.channel.members]}")
+                logger.error(f"  - Sink object: {sink}")
+                # 録音が開始されていない場合は状態をクリア
+                self.recording_status[guild_id] = False
+                return
             
             # 録音開始のデバッグ情報
-            logger.info(f"RealTimeRecorder: Recording setup complete:")
+            logger.info(f"RealTimeRecorder: Recording setup verified and complete:")
             logger.info(f"  - Guild ID: {guild_id}")
             logger.info(f"  - Channel: {voice_client.channel.name}")
             logger.info(f"  - Current members: {[m.display_name for m in voice_client.channel.members]}")
-            logger.info(f"  - Recording active: {getattr(voice_client, 'recording', False)}")
+            logger.info(f"  - Recording active: ✅ {actual_recording_status}")
             logger.info(f"  - Sink type: {type(sink).__name__}")
             
             # 現在のバッファ状況（簡略化）
             current_buffers = self.guild_user_buffers.get(guild_id, {})
             logger.info(f"  - Existing buffers: {len(current_buffers)} users")
+            
+            # 録音が正常に開始されたことを確認メッセージ
+            logger.info(f"✅ RealTimeRecorder: Recording successfully started for guild {guild_id} - expecting audio data in callback")
                 
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to start recording: {e}", exc_info=True)
@@ -174,6 +190,17 @@ class RealTimeAudioRecorder:
                     
                     logger.info(f"RealTimeRecorder: Audio data size for user {user_id}: {len(audio_data)/1024/1024:.1f}MB")
                     
+                    # 0bytesの問題を防ぐための詳細チェック
+                    if not audio_data:
+                        logger.warning(f"RealTimeRecorder: Audio data is completely empty for user {user_id}")
+                        continue
+                    elif len(audio_data) <= 44:  # WAVヘッダー以下のサイズ
+                        logger.warning(f"RealTimeRecorder: Audio data too small for user {user_id}: {len(audio_data)} bytes (WAV header only)")
+                        continue
+                    elif len(audio_data) < 1000:  # 1KB未満の場合も警告
+                        logger.warning(f"RealTimeRecorder: Audio data very small for user {user_id}: {len(audio_data)} bytes")
+                    
+                    # データが有効な場合のみ処理
                     if audio_data and len(audio_data) > 44:  # WAVヘッダー以上のサイズ
                         user_audio_buffer = io.BytesIO(audio_data)
                         
@@ -210,13 +237,18 @@ class RealTimeAudioRecorder:
             
             logger.info(f"RealTimeRecorder: Processed {audio_count} audio files in callback")
             
-            # バッファを永続化（非同期タスクとして実行）
+            # バッファを永続化（必ず実行して状態を保存）
             if audio_count > 0:
-                # save_buffers()は内部で非同期タスクを作成するので、awaitは不要
-                self.save_buffers()
+                logger.info(f"RealTimeRecorder: Saving {audio_count} audio buffers to disk")
+            else:
+                logger.warning(f"RealTimeRecorder: No valid audio data saved - check microphone permissions and voice activity")
+            
+            # バッファを必ず保存（save_buffers()は内部で非同期タスクを作成）
+            self.save_buffers()
             
             # 録音状態をクリア
             self.recording_status[guild_id] = False
+            logger.info(f"RealTimeRecorder: Callback processing complete for guild {guild_id}")
                         
         except Exception as e:
             logger.error(f"RealTimeRecorder: Error in finished_callback: {e}", exc_info=True)
