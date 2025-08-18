@@ -222,6 +222,68 @@ class AudioProcessor:
             logger.error(f"Audio filtering error: {e}")
             return input_path
     
+    async def remove_silence(self, input_path: str, output_path: Optional[str] = None,
+                           silence_threshold: str = "-50dB", min_silence_duration: float = 0.5) -> str:
+        """
+        音声から無音部分を除去
+        
+        Args:
+            input_path: 入力ファイルパス
+            output_path: 出力ファイルパス（None時は一時ファイル生成）
+            silence_threshold: 無音と判定する閾値（例: "-50dB", "-40dB"）
+            min_silence_duration: 無音と判定する最小継続時間（秒）
+            
+        Returns:
+            処理済みファイルのパス
+        """
+        if not self.ffmpeg_available:
+            logger.warning("FFmpeg not available, skipping silence removal")
+            return input_path
+            
+        async with self._process_semaphore:
+            try:
+                # 出力パスが指定されていない場合は一時ファイルを作成
+                if not output_path:
+                    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                        output_path = temp_file.name
+                
+                # 無音除去のFFmpegコマンド
+                # silenceremoveフィルターを使用して前後の無音をカット
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-threads", "1",
+                    "-i", input_path,
+                    "-af", f"silenceremove=start_periods=1:start_duration={min_silence_duration}:start_threshold={silence_threshold}:stop_periods=-1:stop_duration={min_silence_duration}:stop_threshold={silence_threshold}",
+                    "-c:a", "pcm_s16le",
+                    "-ar", "48000",
+                    "-ac", "2",
+                    output_path
+                ]
+                
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    limit=1024 * 1024
+                )
+                
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+                
+                if process.returncode == 0:
+                    logger.debug(f"Silence removed successfully: {input_path} -> {output_path}")
+                    return output_path
+                else:
+                    logger.warning(f"FFmpeg silence removal failed: {stderr.decode()}")
+                    logger.warning("Returning original file without silence removal")
+                    return input_path
+                    
+            except asyncio.TimeoutError:
+                logger.error("Silence removal timeout")
+                return input_path
+            except Exception as e:
+                logger.error(f"Silence removal error: {e}")
+                return input_path
+
     async def merge_audio_files(self, input_files: list, output_path: str, 
                               normalize: bool = True) -> bool:
         """

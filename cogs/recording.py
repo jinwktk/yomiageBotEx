@@ -200,7 +200,7 @@ class RecordingCog(commands.Cog):
     async def replay_command(
         self, 
         ctx: discord.ApplicationContext, 
-        duration: discord.Option(float, "録音する時間（秒）", default=30.0, min_value=5.0, max_value=300.0) = 30.0,
+        duration: discord.Option(float, "録音する時間（秒）", default=60.0, min_value=5.0, max_value=300.0) = 60.0,
         user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None
     ):
         """録音をリプレイ（bot_simple.pyの実装を統合）"""
@@ -272,7 +272,7 @@ class RecordingCog(commands.Cog):
                         # 一時ファイルに保存してノーマライズ処理
                         filename = f"recording_user{user.id}_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
                         
-                        processed_buffer = await self._process_audio_buffer(audio_buffer)
+                        processed_buffer = await self._process_individual_audio_buffer(audio_buffer, user.display_name)
                         
                         # 時間精度を向上：指定した時間分のみ切り出し
                         trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
@@ -777,6 +777,110 @@ class RecordingCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Audio mixing setup failed: {e}")
             return None
+    
+    async def _process_individual_audio_buffer(self, audio_buffer, user_name: str = "Unknown"):
+        """個別音声バッファの高度処理（ノーマライズ + 無音カット）"""
+        try:
+            import tempfile
+            import os
+            
+            # ファイルサイズ制限（Discordの上限: 25MB、余裕を持って20MB）
+            MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+            
+            # 一時ファイルに保存
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
+                audio_buffer.seek(0)
+                original_data = audio_buffer.read()
+                
+                # ファイルサイズチェック
+                if len(original_data) > MAX_FILE_SIZE:
+                    self.logger.warning(f"Audio file too large: {len(original_data)/1024/1024:.1f}MB > 20MB limit")
+                    
+                    # 音声データを圧縮/切り取り
+                    compression_ratio = MAX_FILE_SIZE / len(original_data)
+                    compressed_size = int(len(original_data) * compression_ratio * 0.9)  # 90%まで圧縮
+                    
+                    # 単純に先頭部分を切り取り（より高度な処理も可能）
+                    compressed_data = original_data[:compressed_size]
+                    self.logger.info(f"Compressed audio from {len(original_data)/1024/1024:.1f}MB to {len(compressed_data)/1024/1024:.1f}MB")
+                    
+                    temp_input.write(compressed_data)
+                else:
+                    temp_input.write(original_data)
+                
+                temp_input_path = temp_input.name
+            
+            # ステップ1: 無音カット処理
+            silence_removed_path = await self.audio_processor.remove_silence(
+                temp_input_path, 
+                silence_threshold="-45dB",  # 比較的緩い無音判定
+                min_silence_duration=0.3   # 0.3秒以上の無音をカット
+            )
+            
+            # ステップ2: ノーマライズ処理
+            if silence_removed_path != temp_input_path:
+                # 無音カットが成功した場合、そのファイルをノーマライズ
+                normalized_path = await self.audio_processor.normalize_audio(silence_removed_path)
+                # 中間ファイルをクリーンアップ
+                if os.path.exists(temp_input_path):
+                    os.unlink(temp_input_path)
+            else:
+                # 無音カットが失敗した場合、元ファイルをノーマライズ
+                normalized_path = await self.audio_processor.normalize_audio(temp_input_path)
+            
+            # 最終ファイルを読み込み
+            if normalized_path and os.path.exists(normalized_path):
+                with open(normalized_path, 'rb') as f:
+                    processed_data = f.read()
+                
+                # 最終ファイルサイズ確認
+                if len(processed_data) > MAX_FILE_SIZE:
+                    # 最終圧縮
+                    compression_ratio = MAX_FILE_SIZE / len(processed_data)
+                    compressed_size = int(len(processed_data) * compression_ratio * 0.9)
+                    processed_data = processed_data[:compressed_size]
+                    self.logger.info(f"Final compression to {len(processed_data)/1024/1024:.1f}MB")
+                
+                # クリーンアップ
+                if silence_removed_path and silence_removed_path != temp_input_path and os.path.exists(silence_removed_path):
+                    os.unlink(silence_removed_path)
+                if normalized_path and normalized_path != silence_removed_path and os.path.exists(normalized_path):
+                    os.unlink(normalized_path)
+                
+                # 最終サイズ確認
+                final_size_mb = len(processed_data) / 1024 / 1024
+                self.logger.info(f"Individual audio processing completed for {user_name}: {final_size_mb:.1f}MB (silence removed + normalized)")
+                
+                if len(processed_data) > MAX_FILE_SIZE:
+                    raise Exception(f"Audio file still too large after processing: {final_size_mb:.1f}MB")
+                
+                # 処理済みデータをBytesIOで返す
+                return io.BytesIO(processed_data)
+                
+            else:
+                self.logger.warning(f"Audio processing failed for {user_name}, returning original")
+                # 処理に失敗した場合は元のデータを返す（サイズ制限適用）
+                return self._fallback_audio_processing(original_data)
+            
+        except Exception as e:
+            self.logger.error(f"Individual audio processing failed for {user_name}: {e}")
+            # エラー時は元のバッファを返す（サイズ制限適用）
+            audio_buffer.seek(0)
+            original_data = audio_buffer.read()
+            return self._fallback_audio_processing(original_data)
+    
+    def _fallback_audio_processing(self, audio_data: bytes):
+        """フォールバック音声処理（サイズ制限のみ）"""
+        MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+        if len(audio_data) > MAX_FILE_SIZE:
+            # 緊急時の圧縮
+            compression_ratio = MAX_FILE_SIZE / len(audio_data)
+            compressed_size = int(len(audio_data) * compression_ratio * 0.8)
+            compressed_data = audio_data[:compressed_size]
+            self.logger.warning(f"Fallback compression: {len(audio_data)/1024/1024:.1f}MB -> {len(compressed_data)/1024/1024:.1f}MB")
+            return io.BytesIO(compressed_data)
+        
+        return io.BytesIO(audio_data)
 
 
 def setup(bot):

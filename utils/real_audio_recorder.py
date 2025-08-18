@@ -102,9 +102,10 @@ class RealTimeAudioRecorder:
             async def callback(sink_obj):
                 await self._finished_callback(sink_obj, guild_id)
             
-            # 録音開始時刻を記録
+            # 録音開始時刻を正確に記録
             recording_start_time = time.time()
             self.recording_start_times[guild_id] = recording_start_time
+            logger.debug(f"RealTimeRecorder: Recording start time set to {recording_start_time:.1f} for guild {guild_id}")
             
             voice_client.start_recording(sink, callback)
             # 録音状態を設定
@@ -299,21 +300,33 @@ class RealTimeAudioRecorder:
         if user_id not in self.continuous_buffers[guild_id]:
             self.continuous_buffers[guild_id][user_id] = []
         
-        # WAVファイルから実際の音声データ時間を推定（サンプリングレート44100Hz、16bit、ステレオと仮定）
-        wav_data_size = len(audio_data) - 44  # WAVヘッダーを除く
-        estimated_duration = wav_data_size / (44100 * 2 * 2)  # サンプリングレート * チャンネル数 * バイト/サンプル
+        # 音声データから正確な時間を推定（48000Hz、16bit、ステレオ - Discord標準設定）
+        wav_data_size = max(0, len(audio_data) - 44) if len(audio_data) > 44 else len(audio_data)  # WAVヘッダーを除く
+        estimated_duration = wav_data_size / (48000 * 2 * 2)  # 48kHz * 2ch * 2bytes（Discord標準）
         
-        # 録音開始時刻を使用して正確な時間範囲を計算
+        # 録音終了時刻を正確に設定（timestampを録音完了時刻として使用）
+        end_time = timestamp
+        
+        # 録音開始時刻の管理を改善
         if guild_id in self.recording_start_times:
-            recording_start_time = self.recording_start_times[guild_id]
-            # timestampは録音完了時刻、recording_start_timeは録音開始時刻
-            end_time = timestamp
-            start_time = recording_start_time
+            # 録音開始時刻が記録されている場合はそれを使用
+            start_time = self.recording_start_times[guild_id]
+            # 録音時間が極端に長い場合（5分超）は推定時間を使用（エラー回避）
+            if end_time - start_time > 300:  # 5分を超える場合
+                start_time = end_time - estimated_duration
+                logger.warning(f"RealTimeRecorder: Recording duration too long ({end_time - start_time:.1f}s), using estimated duration")
         else:
-            # フォールバック：録音開始時刻が不明な場合は推定
-            end_time = timestamp
-            start_time = timestamp - estimated_duration
-            logger.warning(f"RealTimeRecorder: No recording start time for guild {guild_id}, using estimated duration")
+            # 録音開始時刻が不明の場合は推定時間を使用
+            start_time = end_time - estimated_duration
+            
+        # 前のチャンクとの連続性チェック（時間の整合性を保証）
+        if self.continuous_buffers[guild_id][user_id]:
+            last_chunk_end = self.continuous_buffers[guild_id][user_id][-1][2]
+            # 前回の終了から5秒以内なら連続録音とみなし、時間を調整
+            if 0 < end_time - last_chunk_end < 5.0:
+                # 連続録音の場合、前回の終了時刻を参考に開始時刻を調整
+                if start_time < last_chunk_end:
+                    start_time = last_chunk_end
         
         self.continuous_buffers[guild_id][user_id].append((audio_data, start_time, end_time))
         
@@ -325,24 +338,42 @@ class RealTimeAudioRecorder:
         ]
         
         actual_duration = end_time - start_time
-        logger.info(f"RealTimeRecorder: Added audio chunk for guild {guild_id}, user {user_id}")
-        logger.info(f"  - Duration: {actual_duration:.1f}s (estimated: {estimated_duration:.1f}s)")
-        logger.info(f"  - Time range: {current_time - end_time:.1f}s ago to {current_time - start_time:.1f}s ago")
-        logger.info(f"  - Start: {start_time:.1f}, End: {end_time:.1f}, Now: {current_time:.1f}")
+        logger.debug(f"RealTimeRecorder: Added audio chunk for guild {guild_id}, user {user_id}")
+        logger.debug(f"  - Duration: {actual_duration:.2f}s (estimated: {estimated_duration:.2f}s)")
+        logger.debug(f"  - Time range: {start_time:.1f} to {end_time:.1f} ({current_time - end_time:.1f}s ago)")
+        
+        # デバッグ：最新のチャンク時間情報を表示
+        total_chunks = len(self.continuous_buffers[guild_id][user_id])
+        if total_chunks > 0:
+            recent_chunk = self.continuous_buffers[guild_id][user_id][-1]
+            logger.debug(f"  - Latest chunk: {recent_chunk[1]:.1f} to {recent_chunk[2]:.1f} (total: {total_chunks} chunks)")
         
         # 録音開始時刻をクリア（次回の録音のため）
         if guild_id in self.recording_start_times:
             del self.recording_start_times[guild_id]
     
     def get_audio_for_time_range(self, guild_id: int, duration_seconds: float, user_id: Optional[int] = None) -> Dict[int, bytes]:
-        """指定した時間範囲の音声データを取得（現在時刻から過去N秒分）"""
+        """指定した時間範囲の音声データを取得（正確な時刻指定対応）"""
         current_time = time.time()
+        
+        # 時間範囲の計算を改善：録音終了から指定秒数前まで
+        # ユーザーが「今から60秒前まで」を期待しているため、現在時刻を基準にする
+        end_time = current_time
         start_time = current_time - duration_seconds
         
-        logger.info(f"RealTimeRecorder: Extracting audio for guild {guild_id}")
+        logger.info(f"RealTimeRecorder: Extracting precise audio for guild {guild_id}")
         logger.info(f"  - Requested duration: {duration_seconds}s")
-        logger.info(f"  - Time range: {start_time:.1f} to {current_time:.1f}")
-        logger.info(f"  - From {duration_seconds:.1f}s ago to now")
+        logger.info(f"  - Target time range: {start_time:.1f} to {end_time:.1f}")
+        logger.info(f"  - Time span: from {duration_seconds:.1f}s ago to now")
+        
+        # デバッグ：利用可能な録音データの時間範囲を表示
+        if guild_id in self.continuous_buffers:
+            for uid, chunks in self.continuous_buffers[guild_id].items():
+                if chunks:
+                    earliest = min(chunk[1] for chunk in chunks)
+                    latest = max(chunk[2] for chunk in chunks)
+                    logger.info(f"  - User {uid}: available data from {earliest:.1f} to {latest:.1f} ({current_time - latest:.1f}s ago)")
+                    logger.info(f"    -> covers {latest - earliest:.1f}s, ends {current_time - latest:.1f}s ago")
         
         result = {}
         
@@ -356,19 +387,19 @@ class RealTimeAudioRecorder:
         if user_id:
             # 特定ユーザーのみ
             if user_id in guild_buffers:
-                audio_data = self._extract_audio_range(guild_buffers[user_id], start_time, current_time)
+                audio_data = self._extract_audio_range(guild_buffers[user_id], start_time, end_time)
                 if audio_data:
                     result[user_id] = audio_data
-                logger.info(f"  - User {user_id}: {len(audio_data) if audio_data else 0} bytes")
+                logger.info(f"  - User {user_id}: {len(audio_data) if audio_data else 0} bytes extracted")
             else:
                 logger.warning(f"  - User {user_id} not found in buffers")
         else:
             # 全ユーザー
             for uid, chunks in guild_buffers.items():
-                audio_data = self._extract_audio_range(chunks, start_time, current_time)
+                audio_data = self._extract_audio_range(chunks, start_time, end_time)
                 if audio_data:
                     result[uid] = audio_data
-                    logger.info(f"  - User {uid}: {len(audio_data)} bytes")
+                    logger.info(f"  - User {uid}: {len(audio_data)} bytes extracted")
                 else:
                     logger.info(f"  - User {uid}: no data in time range")
         
@@ -376,37 +407,44 @@ class RealTimeAudioRecorder:
         return result
     
     def _extract_audio_range(self, chunks: list, start_time: float, end_time: float) -> bytes:
-        """指定した時間範囲の音声チャンクを結合"""
+        """指定した時間範囲の音声チャンクを正確に結合"""
         current_time = time.time()
-        logger.info(f"RealTimeRecorder: _extract_audio_range called")
-        logger.info(f"  - Target time range: {start_time:.1f} to {end_time:.1f}")
-        logger.info(f"  - Current time: {current_time:.1f}")
-        logger.info(f"  - Available chunks: {len(chunks)}")
+        logger.debug(f"RealTimeRecorder: _extract_audio_range called")
+        logger.debug(f"  - Target: {start_time:.1f} to {end_time:.1f} (duration: {end_time - start_time:.1f}s)")
+        logger.debug(f"  - Current: {current_time:.1f}")
+        logger.debug(f"  - Chunks: {len(chunks)}")
         
         matching_chunks = []
         
         for i, (audio_data, chunk_start, chunk_end) in enumerate(chunks):
-            # 録音中のチャンクは現在時刻まで延長して扱う（軽量な解決策）
+            # 現在進行中の録音チャンクの場合、現在時刻まで延長
             effective_end = chunk_end
-            if chunk_end < current_time and current_time - chunk_end < 2.0:  # 2秒以内なら録音中と判断
+            if chunk_end < current_time and current_time - chunk_end < 3.0:  # 3秒以内なら進行中
                 effective_end = current_time
-                logger.info(f"  - Chunk {i}: {chunk_start:.1f} to {chunk_end:.1f} (extended to {effective_end:.1f} - likely recording)")
+                logger.debug(f"  - Chunk {i}: {chunk_start:.1f}-{chunk_end:.1f} → {chunk_start:.1f}-{effective_end:.1f} (active)")
             else:
-                logger.info(f"  - Chunk {i}: {chunk_start:.1f} to {chunk_end:.1f}")
+                logger.debug(f"  - Chunk {i}: {chunk_start:.1f}-{chunk_end:.1f}")
             
-            # 時間範囲と重複するチャンクを選択
-            if effective_end >= start_time and chunk_start <= end_time:
+            # 時間範囲の重複判定を正確に実行
+            # チャンク開始 < 指定終了 AND チャンク終了 > 指定開始 の場合に重複
+            if chunk_start < end_time and effective_end > start_time:
                 matching_chunks.append((audio_data, chunk_start, effective_end))
-                logger.info(f"    -> MATCHED (overlaps with target range)")
+                overlap_start = max(chunk_start, start_time)
+                overlap_end = min(effective_end, end_time)
+                logger.debug(f"    -> MATCHED (overlap: {overlap_start:.1f}-{overlap_end:.1f}, duration: {overlap_end - overlap_start:.1f}s)")
             else:
-                logger.info(f"    -> SKIPPED (no overlap: chunk {chunk_start:.1f}-{effective_end:.1f} vs target {start_time:.1f}-{end_time:.1f})")
+                logger.debug(f"    -> SKIPPED (no overlap)")
         
-        logger.info(f"  - Matching chunks: {len(matching_chunks)}")
+        logger.info(f"  - Matching chunks: {len(matching_chunks)} out of {len(chunks)}")
         
         if not matching_chunks:
-            logger.warning(f"RealTimeRecorder: No matching chunks found for time range {start_time:.1f} to {end_time:.1f}")
-            logger.warning(f"  - Searched {len(chunks)} chunks, none overlapped with target range")
-            logger.warning(f"  - Target range spans {end_time - start_time:.1f} seconds")
+            logger.warning(f"RealTimeRecorder: No matching chunks for range {start_time:.1f}-{end_time:.1f}")
+            logger.warning(f"  - Target duration: {end_time - start_time:.1f}s")
+            if chunks:
+                earliest = min(c[1] for c in chunks)
+                latest = max(c[2] for c in chunks)
+                logger.warning(f"  - Available range: {earliest:.1f}-{latest:.1f} ({latest - earliest:.1f}s)")
+                logger.warning(f"  - Gap: target starts {start_time - latest:.1f}s after last chunk ends")
             return b""
         
         # 時系列順にソート
@@ -436,7 +474,8 @@ class RealTimeAudioRecorder:
                     logger.warning(f"    -> Chunk too small: {len(audio_data)} bytes")
         
         result = combined_audio.getvalue()
-        logger.info(f"RealTimeRecorder: Combined {len(matching_chunks)} chunks into {len(result)} bytes")
+        actual_duration = matching_chunks[-1][2] - matching_chunks[0][1] if matching_chunks else 0
+        logger.info(f"RealTimeRecorder: Combined {len(matching_chunks)} chunks -> {len(result)} bytes ({actual_duration:.1f}s)")
         return result
     
     def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
