@@ -16,8 +16,15 @@ import discord
 from discord.ext import commands
 import yaml
 from dotenv import load_dotenv
-from cogwatch import watch
 import fnmatch
+
+# cogwatchはオプショナル - 開発用ホットリロード機能
+try:
+    from cogwatch import watch
+    COGWATCH_AVAILABLE = True
+except ImportError:
+    COGWATCH_AVAILABLE = False
+    print("⚠️ cogwatch not installed - hot reload feature disabled")
 
 from utils.logger import setup_logging, start_log_cleanup_task
 
@@ -208,13 +215,16 @@ class YomiageBot(discord.Bot):
         """Cogを読み込む（非同期版）"""
         self.load_cogs_sync()
     
-    @watch(path="cogs", preload=True, debug=False)
-    async def on_ready(self):
+    async def on_ready(self, client=None):
         """Bot準備完了時のイベント"""
         logger.info(f"Bot is ready! Logged in as {self.user} (ID: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guild(s)")
         logger.info(f"Voice client type: {VOICE_CLIENT_TYPE}")
-        logger.info("🔄 Cogwatch enabled - Cogs will auto-reload on file changes")
+        
+        if COGWATCH_AVAILABLE:
+            logger.info("🔄 Cogwatch enabled - Cogs will auto-reload on file changes")
+        else:
+            logger.info("ℹ️ Cogwatch not available - manual Cog management only")
         
         # Cogが読み込まれていない場合は手動で読み込み
         if len(self.cogs) == 0:
@@ -317,6 +327,10 @@ class YomiageBot(discord.Bot):
     
 # Botインスタンスの作成
 bot = YomiageBot()
+
+# cogwatchが利用可能な場合、on_readyメソッドにwatchデコレータを適用
+if COGWATCH_AVAILABLE:
+    bot.on_ready = watch(path="cogs", preload=True, debug=False)(bot.on_ready)
 
 # Cogの初期読み込み
 bot.setup_cogs()

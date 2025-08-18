@@ -17,8 +17,17 @@ try:
     from discord.sinks import WaveSink
     PYCORD_AVAILABLE = True
 except ImportError:
-    PYCORD_AVAILABLE = False
-    logging.warning("py-cord not available. Real audio recording will not work.")
+    try:
+        import discord
+        # discord.pyの場合のフォールバック
+        WaveSink = None
+        PYCORD_AVAILABLE = False
+        logging.warning("py-cord not available. Using fallback mode.")
+    except ImportError:
+        discord = None
+        WaveSink = None
+        PYCORD_AVAILABLE = False
+        logging.warning("py-cord not available. Real audio recording will not work.")
 
 logger = logging.getLogger(__name__)
 
@@ -764,14 +773,25 @@ class RealTimeAudioRecorder:
         self.guild_user_buffers.clear()
 
 
-class RealEnhancedVoiceClient(discord.VoiceClient):
-    """py-cord の WaveSink を使用したリアル音声録音クライアント"""
-    
-    def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
-        super().__init__(client, channel)
-        self.recording_manager = None
-        self.guild_id = channel.guild.id
+if PYCORD_AVAILABLE and discord:
+    class RealEnhancedVoiceClient(discord.VoiceClient):
+        """py-cord の WaveSink を使用したリアル音声録音クライアント"""
         
-    def set_recording_manager(self, recording_manager):
-        """録音マネージャーを設定"""
-        self.recording_manager = recording_manager
+        def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
+            super().__init__(client, channel)
+            self.recording_manager = None
+            self.guild_id = channel.guild.id
+        
+        def set_recording_manager(self, recording_manager):
+            """録音マネージャーを設定"""
+            self.recording_manager = recording_manager
+else:
+    # py-cordが利用できない場合のダミークラス
+    class RealEnhancedVoiceClient:
+        """py-cord が利用できない場合のダミークラス"""
+        
+        def __init__(self, *args, **kwargs):
+            raise ImportError("py-cord[voice] is required for voice functionality")
+        
+        def set_recording_manager(self, recording_manager):
+            pass
