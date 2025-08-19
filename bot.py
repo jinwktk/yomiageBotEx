@@ -111,9 +111,27 @@ class YomiageBot(discord.Bot):
         self.setup_cogs()
     
     async def connect_voice_safely(self, channel):
-        """安全な音声接続（WebSocketエラー対応強化版）"""
+        """安全な音声接続（重複接続対応強化版）"""
         max_retries = 3
         retry_delay = 2.0
+        
+        # 事前チェック：既に接続している場合
+        guild = channel.guild
+        if guild.voice_client and guild.voice_client.is_connected():
+            current_channel = guild.voice_client.channel
+            if current_channel == channel:
+                logger.info(f"Already connected to target channel {channel.name}, returning existing connection")
+                return guild.voice_client
+            else:
+                logger.info(f"Already connected to {current_channel.name}, moving to {channel.name}")
+                await guild.voice_client.move_to(channel)
+                return guild.voice_client
+        elif guild.voice_client and not guild.voice_client.is_connected():
+            logger.info(f"Cleaning up disconnected voice client for {guild.name}")
+            try:
+                await guild.voice_client.disconnect()
+            except:
+                pass  # エラーは無視してクリーンアップを続行
         
         for attempt in range(max_retries):
             try:
@@ -150,6 +168,25 @@ class YomiageBot(discord.Bot):
                         await vc.disconnect()
                     raise Exception("Connection not stable")
                     
+            except discord.ClientException as e:
+                if "Already connected to a voice channel" in str(e):
+                    logger.warning(f"Already connected error: {e}")
+                    # 既存接続を確認して適切に処理
+                    current_vc = guild.voice_client
+                    if current_vc and current_vc.is_connected():
+                        if current_vc.channel == channel:
+                            logger.info(f"Already connected to target channel {channel.name}")
+                            return current_vc
+                        else:
+                            logger.info(f"Moving from {current_vc.channel.name} to {channel.name}")
+                            await current_vc.move_to(channel)
+                            return current_vc
+                    else:
+                        logger.error("ClientException occurred but no valid connection found")
+                        raise
+                else:
+                    logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
+                    
             except Exception as e:
                 logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
                 
@@ -172,6 +209,13 @@ class YomiageBot(discord.Bot):
                     logger.error("All connection attempts failed, trying basic connect")
                     try:
                         return await channel.connect()
+                    except discord.ClientException as fallback_e:
+                        if "Already connected to a voice channel" in str(fallback_e):
+                            logger.warning("Fallback also failed with already connected error")
+                            # 最終的に既存接続を返す
+                            if guild.voice_client and guild.voice_client.is_connected():
+                                return guild.voice_client
+                        raise
                     except Exception as e2:
                         logger.error(f"Fallback connection also failed: {e2}")
                         raise
@@ -312,18 +356,54 @@ class YomiageBot(discord.Bot):
         await super().close()
     
     async def connect_to_voice(self, channel: discord.VoiceChannel) -> discord.VoiceClient:
-        """カスタムVoiceClientで接続"""
-        # 既存の接続をチェック
-        if channel.guild.voice_client:
-            await channel.guild.voice_client.disconnect()
+        """カスタムVoiceClientで接続（重複接続対応）"""
+        guild = channel.guild
+        
+        # 詳細な既存接続チェック
+        if guild.voice_client and guild.voice_client.is_connected():
+            current_channel = guild.voice_client.channel
+            if current_channel == channel:
+                logger.info(f"connect_to_voice: Already connected to target channel {channel.name}")
+                return guild.voice_client
+            else:
+                logger.info(f"connect_to_voice: Moving from {current_channel.name} to {channel.name}")
+                await guild.voice_client.move_to(channel)
+                return guild.voice_client
+        elif guild.voice_client and not guild.voice_client.is_connected():
+            logger.info(f"connect_to_voice: Cleaning up disconnected voice client for {guild.name}")
+            try:
+                await guild.voice_client.disconnect()
+            except:
+                pass  # エラーは無視してクリーンアップを続行
         
         # 安全な接続を試行
         try:
             return await self.connect_voice_safely(channel)
+        except discord.ClientException as e:
+            if "Already connected to a voice channel" in str(e):
+                logger.warning(f"connect_to_voice: ClientException - {e}")
+                # 既存接続を再確認して返す
+                if guild.voice_client and guild.voice_client.is_connected():
+                    logger.info("connect_to_voice: Returning existing connection after ClientException")
+                    return guild.voice_client
+                else:
+                    logger.error("connect_to_voice: ClientException but no valid connection found")
+                    raise
+            else:
+                logger.error(f"connect_to_voice: Safe connection failed with ClientException: {e}")
+                raise
         except Exception as e:
-            logger.error(f"Safe connection failed, trying EnhancedVoiceClient: {e}")
+            logger.error(f"connect_to_voice: Safe connection failed, trying EnhancedVoiceClient: {e}")
             # フォールバック：EnhancedVoiceClientを使用
-            return await channel.connect(cls=EnhancedVoiceClient)
+            try:
+                return await channel.connect(cls=EnhancedVoiceClient)
+            except discord.ClientException as fallback_e:
+                if "Already connected to a voice channel" in str(fallback_e):
+                    logger.warning(f"connect_to_voice: EnhancedVoiceClient fallback also failed - {fallback_e}")
+                    # 最終的に既存接続を返す
+                    if guild.voice_client and guild.voice_client.is_connected():
+                        return guild.voice_client
+                raise
     
 # Botインスタンスの作成
 bot = YomiageBot()
