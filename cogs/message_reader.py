@@ -35,10 +35,12 @@ class MessageReaderCog(commands.Cog):
         
         # ギルドごとの読み上げ有効/無効状態
         self.guild_reading_enabled: Dict[int, bool] = {}
+        self.load_guild_settings()  # 永続化設定の読み込み
         
         # 初期化時の設定値をログ出力
         self.logger.info(f"MessageReader: Initializing with reading_enabled: {self.reading_enabled}")
         self.logger.info(f"MessageReader: Config section: {config.get('message_reading', {})}")
+        self.logger.info(f"MessageReader: Loaded guild settings: {self.guild_reading_enabled}")
         
         # 辞書の初期状態をログ出力
         global_count = len(self.dictionary_manager.global_dictionary)
@@ -50,7 +52,44 @@ class MessageReaderCog(commands.Cog):
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
+        self.save_guild_settings()  # 設定を保存
         asyncio.create_task(self.tts_manager.cleanup())
+    
+    def load_guild_settings(self):
+        """ギルド設定の読み込み"""
+        try:
+            import json
+            from pathlib import Path
+            
+            settings_file = Path("data/guild_reading_settings.json")
+            if settings_file.exists():
+                with open(settings_file, "r", encoding="utf-8") as f:
+                    saved_settings = json.load(f)
+                    # 文字列キーを整数に変換
+                    self.guild_reading_enabled = {int(k): v for k, v in saved_settings.items()}
+                    self.logger.info(f"MessageReader: Loaded settings for {len(self.guild_reading_enabled)} guilds")
+        except Exception as e:
+            self.logger.error(f"MessageReader: Failed to load guild settings: {e}")
+            self.guild_reading_enabled = {}
+    
+    def save_guild_settings(self):
+        """ギルド設定の保存"""
+        try:
+            import json
+            from pathlib import Path
+            
+            settings_file = Path("data/guild_reading_settings.json")
+            settings_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 整数キーを文字列に変換してJSON保存
+            save_data = {str(k): v for k, v in self.guild_reading_enabled.items()}
+            
+            with open(settings_file, "w", encoding="utf-8") as f:
+                json.dump(save_data, f, indent=2, ensure_ascii=False)
+                
+            self.logger.debug(f"MessageReader: Saved settings for {len(self.guild_reading_enabled)} guilds")
+        except Exception as e:
+            self.logger.error(f"MessageReader: Failed to save guild settings: {e}")
     
     def is_reading_enabled(self, guild_id: int) -> bool:
         """ギルドで読み上げが有効かチェック"""
@@ -107,17 +146,38 @@ class MessageReaderCog(commands.Cog):
             if not message.guild:  # DMは対象外
                 return
             
+            guild_name = message.guild.name
+            author_name = message.author.display_name
+            content_preview = message.content[:50] + "..." if len(message.content) > 50 else message.content
+            
+            # should_read_messageの詳細チェック
             if not self.should_read_message(message):
+                # 詳細な理由をログ出力
+                reasons = []
+                if self.ignore_bots and message.author.bot:
+                    reasons.append("bot_message")
+                if not message.content.strip():
+                    reasons.append("empty_content")
+                for prefix in self.ignore_prefixes:
+                    if message.content.startswith(prefix):
+                        reasons.append(f"prefix_{prefix}")
+                        break
+                if not self.is_reading_enabled(message.guild.id):
+                    reasons.append("reading_disabled")
+                
+                self.logger.debug(f"MessageReader: Skipping message in {guild_name} from {author_name}: {', '.join(reasons)}")
                 return
             
             # ボットがVCに接続しているかチェック
             voice_client = message.guild.voice_client
             if not voice_client or not voice_client.is_connected():
+                self.logger.debug(f"MessageReader: Not connected to voice in {guild_name} - voice_client: {voice_client is not None}, connected: {voice_client.is_connected() if voice_client else False}")
                 return
             
             # メッセージの前処理
             processed_content = self.preprocess_message(message.content)
             if not processed_content:
+                self.logger.debug(f"MessageReader: Empty content after preprocessing in {guild_name}")
                 return
             
             # 辞書を適用
@@ -204,14 +264,22 @@ class MessageReaderCog(commands.Cog):
             new_state = not current_state
             
             self.guild_reading_enabled[guild_id] = new_state
+            self.save_guild_settings()  # 設定を即座に保存
             
             state_text = "有効" if new_state else "無効"
-            await ctx.respond(
-                f"📢 チャット読み上げを{state_text}にしました。",
-                ephemeral=True
-            )
             
-            self.logger.info(f"MessageReader: Reading toggled to {new_state} for guild {ctx.guild.name}")
+            # 詳細な状態情報を含める
+            voice_client = ctx.guild.voice_client
+            vc_status = "接続中" if voice_client and voice_client.is_connected() else "未接続"
+            channel_name = voice_client.channel.name if voice_client and voice_client.is_connected() else "なし"
+            
+            response = f"📢 チャット読み上げを{state_text}にしました。\n"
+            response += f"🔊 ボイスチャット: {vc_status} ({channel_name})\n"
+            response += f"⚙️ グローバル設定: {'有効' if self.reading_enabled else '無効'}"
+            
+            await ctx.respond(response, ephemeral=True)
+            
+            self.logger.info(f"MessageReader: Reading toggled to {new_state} for guild {ctx.guild.name} (ID: {guild_id})")
             
         except Exception as e:
             self.logger.error(f"MessageReader: Failed to toggle reading: {e}")
