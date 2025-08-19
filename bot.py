@@ -198,7 +198,9 @@ class YomiageBot(discord.Bot):
                             await asyncio.sleep(retry_delay)
                             continue
                         else:
-                            raise
+                            logger.warning("Final attempt with ClientException, will try fallback method")
+                            # 最終試行では例外を投げずに続行してフォールバック処理に進む
+                            break
                 else:
                     logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
                     
@@ -240,7 +242,8 @@ class YomiageBot(discord.Bot):
                     retry_delay *= 1.2
                 else:
                     # 最後の試行：フォールバック
-                    logger.error("All connection attempts failed, trying basic connect")
+                    logger.warning("All connection attempts failed, trying basic connect")
+                    logger.info(f"Attempting fallback connection to {channel.name} in {guild.name}")
                     
                     # 最終的なクリーンアップ
                     try:
@@ -253,7 +256,14 @@ class YomiageBot(discord.Bot):
                         pass
                     
                     try:
-                        return await channel.connect()
+                        logger.info("Executing basic channel.connect() fallback")
+                        vc = await channel.connect()
+                        if vc and vc.is_connected():
+                            logger.info(f"Fallback connection successful to {channel.name}")
+                            return vc
+                        else:
+                            logger.error("Fallback connection returned invalid voice client")
+                            return vc
                     except discord.ClientException as fallback_e:
                         if "Already connected to a voice channel" in str(fallback_e):
                             logger.warning("Fallback also failed with already connected error")
@@ -278,6 +288,34 @@ class YomiageBot(discord.Bot):
                     except Exception as e2:
                         logger.error(f"Fallback connection also failed: {e2}")
                         raise
+        
+        # forループを抜けた場合（breakまたは全試行完了）のフォールバック処理
+        logger.warning("Loop completed without successful connection, executing final fallback")
+        logger.info(f"Final fallback attempt to {channel.name} in {guild.name}")
+        
+        # 最終クリーンアップ
+        try:
+            if guild.voice_client:
+                logger.info("Final cleanup before ultimate fallback")
+                await guild.voice_client.disconnect()
+                guild._voice_client = None
+                await asyncio.sleep(1.0)
+        except:
+            pass
+        
+        # 最終フォールバック
+        try:
+            logger.info("Executing ultimate fallback: basic channel.connect()")
+            vc = await channel.connect()
+            if vc and vc.is_connected():
+                logger.info(f"Ultimate fallback successful to {channel.name}")
+                return vc
+            else:
+                logger.error("Ultimate fallback returned invalid voice client")
+                raise Exception("Ultimate fallback failed: invalid connection")
+        except Exception as final_e:
+            logger.error(f"Ultimate fallback failed: {final_e}")
+            raise final_e
         
     def setup_cogs(self):
         """起動時のCog読み込み（同期処理）"""
