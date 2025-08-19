@@ -162,6 +162,20 @@ class VoiceCog(commands.Cog):
         self.logger.info(f"Checking guild: {guild.name} (ID: {guild.id})")
         
         try:
+            # 権限チェック
+            bot_member = guild.get_member(self.bot.user.id)
+            if not bot_member:
+                self.logger.warning(f"Bot is not a member of guild {guild.name}")
+                return
+                
+            # 基本権限があるかチェック
+            if not bot_member.guild_permissions.connect:
+                self.logger.warning(f"Bot lacks CONNECT permission in guild {guild.name}")
+                return
+                
+            if not bot_member.guild_permissions.speak:
+                self.logger.warning(f"Bot lacks SPEAK permission in guild {guild.name}")
+                
             # 既に接続している場合はスキップ（詳細チェック）
             if guild.voice_client and guild.voice_client.is_connected():
                 current_channel = guild.voice_client.channel
@@ -226,6 +240,18 @@ class VoiceCog(commands.Cog):
                     # ユーザー名をログ出力
                     user_names = [m.display_name for m in non_bot_members]
                     self.logger.info(f"Found users in {channel.name} ({guild.name}): {', '.join(user_names)}")
+                    
+                    # チャンネル固有の権限チェック
+                    channel_perms = channel.permissions_for(bot_member)
+                    if not channel_perms.connect:
+                        self.logger.warning(f"❌ No CONNECT permission for channel {channel.name} in {guild.name}")
+                        continue
+                    if not channel_perms.speak:
+                        self.logger.warning(f"⚠️  No SPEAK permission for channel {channel.name} in {guild.name}")
+                    if not channel_perms.use_voice_activation:
+                        self.logger.warning(f"⚠️  No VOICE ACTIVITY permission for channel {channel.name} in {guild.name}")
+                    
+                    self.logger.info(f"✅ Permission check passed for {channel.name}")
                     
                     # 既に接続中かチェック
                     if guild.voice_client:
@@ -592,6 +618,119 @@ class VoiceCog(commands.Cog):
                 ephemeral=True
             )
             self.logger.error(f"Failed to disconnect from voice channel: {e}")
+    
+    @discord.slash_command(name="vc_status", description="ボイスチャンネル接続状況をデバッグ表示します")
+    async def vc_status_command(self, ctx: discord.ApplicationContext):
+        """VCのデバッグ情報表示コマンド"""
+        try:
+            guild = ctx.guild
+            self.logger.info(f"/vc_status command called by {ctx.author} in {guild.name}")
+            
+            # 基本情報
+            status_lines = [
+                f"🏰 **サーバー**: {guild.name}",
+                f"🤖 **Bot ID**: {self.bot.user.id}",
+                f"📊 **ギルドID**: {guild.id}",
+                ""
+            ]
+            
+            # 音声接続状況
+            voice_client = guild.voice_client
+            if voice_client:
+                if voice_client.is_connected():
+                    channel_name = voice_client.channel.name
+                    channel_id = voice_client.channel.id
+                    member_count = len(voice_client.channel.members)
+                    member_names = [m.display_name for m in voice_client.channel.members]
+                    
+                    status_lines.extend([
+                        "🔊 **音声接続**: ✅ 接続中",
+                        f"📍 **チャンネル**: {channel_name} (ID: {channel_id})",
+                        f"👥 **メンバー数**: {member_count}人",
+                        f"👤 **メンバー**: {', '.join(member_names)}",
+                        ""
+                    ])
+                else:
+                    status_lines.extend([
+                        "🔊 **音声接続**: ⚠️ 切断状態",
+                        f"📍 **前回のチャンネル**: {voice_client.channel.name if voice_client.channel else '不明'}",
+                        ""
+                    ])
+            else:
+                status_lines.extend([
+                    "🔊 **音声接続**: ❌ 未接続",
+                    ""
+                ])
+            
+            # 全ボイスチャンネルの状況
+            status_lines.append("📋 **全ボイスチャンネル情報**:")
+            voice_channels = guild.voice_channels
+            if voice_channels:
+                for channel in voice_channels:
+                    member_count = len(channel.members)
+                    if member_count > 0:
+                        member_names = [f"{m.display_name}({'bot' if m.bot else 'user'})" for m in channel.members]
+                        status_lines.append(f"  🎤 **{channel.name}**: {member_count}人 - {', '.join(member_names)}")
+                    else:
+                        status_lines.append(f"  🔇 **{channel.name}**: 空室")
+            else:
+                status_lines.append("  ❌ ボイスチャンネルなし")
+            
+            # 自動参加設定
+            auto_join_enabled = self.config.get("bot", {}).get("auto_join", True)
+            auto_leave_enabled = self.config.get("bot", {}).get("auto_leave", True)
+            
+            status_lines.extend([
+                "",
+                "⚙️ **設定情報**:",
+                f"  🔄 **自動参加**: {'有効' if auto_join_enabled else '無効'}",
+                f"  🚪 **自動退出**: {'有効' if auto_leave_enabled else '無効'}"
+            ])
+            
+            # セッション情報
+            saved_session = self.saved_sessions.get(guild.id)
+            if saved_session:
+                try:
+                    saved_channel = guild.get_channel(saved_session)
+                    saved_channel_name = saved_channel.name if saved_channel else f"不明 (ID: {saved_session})"
+                    status_lines.extend([
+                        "",
+                        "💾 **保存済みセッション**:",
+                        f"  📍 **チャンネル**: {saved_channel_name}"
+                    ])
+                except:
+                    status_lines.extend([
+                        "",
+                        "💾 **保存済みセッション**: エラー"
+                    ])
+            else:
+                status_lines.extend([
+                    "",
+                    "💾 **保存済みセッション**: なし"
+                ])
+            
+            response = "\n".join(status_lines)
+            
+            # 長すぎる場合は分割
+            if len(response) > 2000:
+                # 最初の部分を送信
+                first_part = response[:1900] + "\n...(続く)"
+                await ctx.respond(first_part, ephemeral=True)
+                
+                # 残りの部分を送信
+                remaining = response[1900:]
+                if len(remaining) > 1900:
+                    remaining = remaining[:1900] + "\n...(省略)"
+                await ctx.followup.send(f"...(続き)\n{remaining}", ephemeral=True)
+            else:
+                await ctx.respond(response, ephemeral=True)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to show VC status: {e}", exc_info=True)
+            await ctx.respond(
+                f"❌ ステータス情報の取得に失敗しました: {str(e)}",
+                ephemeral=True
+            )
 
 
 def setup(bot):
