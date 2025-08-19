@@ -293,14 +293,28 @@ class YomiageBot(discord.Bot):
         logger.warning("Loop completed without successful connection, executing final fallback")
         logger.info(f"Final fallback attempt to {channel.name} in {guild.name}")
         
-        # 最終クリーンアップ
+        # 最終クリーンアップ - グローバル強制リセット
+        logger.info("Starting comprehensive global cleanup for ultimate fallback")
         try:
-            if guild.voice_client:
-                logger.info("Final cleanup before ultimate fallback")
-                await guild.voice_client.disconnect()
-                guild._voice_client = None
-                await asyncio.sleep(1.0)
-        except:
+            # 全ギルドの接続状態を強制リセット
+            for g in self.guilds:
+                if g.voice_client:
+                    logger.info(f"Global cleanup: force disconnecting from {g.name}")
+                    try:
+                        await g.voice_client.disconnect()
+                    except:
+                        pass
+                    g._voice_client = None
+            
+            # Discord.pyの内部状態強制リセット（あまり推奨されないが必要）
+            if hasattr(self, '_voice_clients'):
+                logger.info("Force clearing Discord.py internal voice clients")
+                self._voice_clients.clear()
+            
+            await asyncio.sleep(2.0)  # 長めの待機時間
+            logger.info("Global cleanup completed")
+        except Exception as cleanup_e:
+            logger.warning(f"Global cleanup partial failure: {cleanup_e}")
             pass
         
         # 最終フォールバック
@@ -313,6 +327,31 @@ class YomiageBot(discord.Bot):
             else:
                 logger.error("Ultimate fallback returned invalid voice client")
                 raise Exception("Ultimate fallback failed: invalid connection")
+        except discord.ClientException as client_e:
+            if "Already connected to a voice channel" in str(client_e):
+                logger.critical("Ultimate fallback still reports 'Already connected' - this is a Discord.py internal issue")
+                logger.info("Attempting to find and return any existing valid connection")
+                
+                # 最後の手段: 既存の接続を探して返す
+                for g in self.guilds:
+                    if g.voice_client and g.voice_client.is_connected():
+                        logger.info(f"Found existing valid connection in {g.name}: {g.voice_client.channel.name}")
+                        if g.voice_client.channel == channel:
+                            logger.info("Existing connection is already the target channel - returning it")
+                            return g.voice_client
+                        else:
+                            logger.info(f"Moving existing connection from {g.voice_client.channel.name} to {channel.name}")
+                            try:
+                                await g.voice_client.move_to(channel)
+                                return g.voice_client
+                            except Exception as move_e:
+                                logger.error(f"Failed to move existing connection: {move_e}")
+                
+                logger.critical("No valid existing connection found despite 'Already connected' error")
+                raise client_e
+            else:
+                logger.error(f"Ultimate fallback failed with ClientException: {client_e}")
+                raise client_e
         except Exception as final_e:
             logger.error(f"Ultimate fallback failed: {final_e}")
             raise final_e
