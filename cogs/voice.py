@@ -146,16 +146,24 @@ class VoiceCog(commands.Cog):
         guild_count = len(self.bot.guilds)
         self.logger.info(f"Found {guild_count} guilds to check")
         
-        # 並列処理でギルドを同時チェック
-        tasks = []
+        # ギルドを順次処理（並列処理だと競合が発生するため）
+        successful_connections = []
         for guild in self.bot.guilds:
-            task = asyncio.create_task(self._check_guild_for_auto_join(guild))
-            tasks.append(task)
+            try:
+                result = await self._check_guild_for_auto_join(guild)
+                if result:
+                    successful_connections.append(guild.name)
+                # 各ギルド処理の間に短い待機時間を追加
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                self.logger.error(f"Error checking guild {guild.name}: {e}", exc_info=True)
         
-        # 全ギルドを並列で処理
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-            self.logger.info("Startup voice channel check completed")
+        if successful_connections:
+            self.logger.info(f"Successfully connected to voice channels in: {', '.join(successful_connections)}")
+        else:
+            self.logger.info("No voice channel connections made on startup")
+        
+        self.logger.info("Startup voice channel check completed")
     
     async def _check_guild_for_auto_join(self, guild):
         """個別ギルドの自動参加チェック"""
@@ -193,7 +201,7 @@ class VoiceCog(commands.Cog):
                                 await recording_cog.handle_bot_joined_with_user(guild, members[0])
                     except Exception as e:
                         self.logger.debug(f"Failed to start recording for existing connection: {e}")
-                return
+                return True  # 既に接続済み
             
             # ボイスチャンネル数をログ
             vc_count = len(guild.voice_channels)
@@ -276,17 +284,22 @@ class VoiceCog(commands.Cog):
                         # セッションを保存
                         self.save_sessions()
                         
-                        # 1つのギルドで1つのチャンネルのみ
-                        return  # break → returnに変更
+                        # このギルドでは接続完了
+                        return True  # 成功を返す
                         
                     except Exception as e:
                         self.logger.error(f"Failed to auto-join {channel.name} on startup: {e}", exc_info=True)
                         continue
                 else:
                     self.logger.debug(f"Channel {channel.name} is empty, skipping")
+            
+            # このギルドでは接続対象が見つからなかった
+            self.logger.info(f"No suitable voice channel found in {guild.name}")
+            return False
                         
         except Exception as e:
             self.logger.error(f"Failed to check guild {guild.name} on startup: {e}", exc_info=True)
+            return False
     
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
