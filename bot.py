@@ -183,15 +183,49 @@ class YomiageBot(discord.Bot):
                             return current_vc
                     else:
                         logger.error("ClientException occurred but no valid connection found")
-                        raise
+                        # 無効な接続状態をクリーンアップ
+                        try:
+                            if guild.voice_client:
+                                logger.info("Force cleaning up invalid voice client state")
+                                await guild.voice_client.disconnect()
+                                guild._voice_client = None
+                        except:
+                            pass
+                        
+                        # クリーンアップ後に再試行
+                        if attempt < max_retries - 1:
+                            logger.info(f"Retrying after cleanup, attempt {attempt + 2}")
+                            await asyncio.sleep(retry_delay)
+                            continue
+                        else:
+                            raise
                 else:
                     logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
                     
             except Exception as e:
                 logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
                 
+                # list index out of range エラーの特別な処理
+                if "list index out of range" in str(e):
+                    logger.warning(f"Encryption mode selection error detected: {e}")
+                    # 不完全な接続状態をクリーンアップ
+                    try:
+                        if guild.voice_client:
+                            logger.info("Cleaning up partial connection after list index error")
+                            await guild.voice_client.disconnect()
+                            # 強制的にNoneに設定
+                            guild._voice_client = None
+                    except:
+                        pass
+                    
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying after {retry_delay}s due to encryption error...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 1.5
+                        continue
+                
                 # WebSocket 4000 エラーの特別な処理
-                if "4000" in str(e) or "WebSocket" in str(e) or "ClientConnectionResetError" in str(e):
+                elif "4000" in str(e) or "WebSocket" in str(e) or "ClientConnectionResetError" in str(e):
                     logger.warning(f"WebSocket error detected: {e}")
                     if attempt < max_retries - 1:
                         logger.info(f"Retrying after {retry_delay}s due to WebSocket error...")
@@ -207,14 +241,39 @@ class YomiageBot(discord.Bot):
                 else:
                     # 最後の試行：フォールバック
                     logger.error("All connection attempts failed, trying basic connect")
+                    
+                    # 最終的なクリーンアップ
+                    try:
+                        if guild.voice_client:
+                            logger.info("Final cleanup before fallback connection")
+                            await guild.voice_client.disconnect()
+                            guild._voice_client = None
+                            await asyncio.sleep(1.0)  # クリーンアップ待機
+                    except:
+                        pass
+                    
                     try:
                         return await channel.connect()
                     except discord.ClientException as fallback_e:
                         if "Already connected to a voice channel" in str(fallback_e):
                             logger.warning("Fallback also failed with already connected error")
-                            # 最終的に既存接続を返す
-                            if guild.voice_client and guild.voice_client.is_connected():
-                                return guild.voice_client
+                            # グローバルクリーンアップを試行
+                            for g in self.guilds:
+                                try:
+                                    if g.voice_client:
+                                        logger.info(f"Global cleanup: disconnecting from {g.name}")
+                                        await g.voice_client.disconnect()
+                                        g._voice_client = None
+                                except:
+                                    pass
+                            
+                            # 最終的に再試行
+                            await asyncio.sleep(2.0)
+                            try:
+                                return await channel.connect()
+                            except:
+                                logger.error("Final fallback connection also failed")
+                                raise fallback_e
                         raise
                     except Exception as e2:
                         logger.error(f"Fallback connection also failed: {e2}")
