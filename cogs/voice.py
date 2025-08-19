@@ -146,25 +146,145 @@ class VoiceCog(commands.Cog):
         guild_count = len(self.bot.guilds)
         self.logger.info(f"Found {guild_count} guilds to check")
         
-        # ギルドを順次処理（並列処理だと競合が発生するため）
-        successful_connections = []
+        # Discord仕様: 1つのボットは同時に1つのボイスチャンネルにしか接続できない
+        # 最適なチャンネルを選択するため、全ギルドを調査してから接続
+        
+        # Step 1: 全ギルドの候補チャンネルを調査
+        candidates = []
         for guild in self.bot.guilds:
             try:
-                result = await self._check_guild_for_auto_join(guild)
-                if result:
-                    successful_connections.append(guild.name)
-                # 各ギルド処理の間に短い待機時間を追加
-                await asyncio.sleep(0.5)
+                candidate = await self._find_best_channel_in_guild(guild)
+                if candidate:
+                    candidates.append(candidate)
             except Exception as e:
-                self.logger.error(f"Error checking guild {guild.name}: {e}", exc_info=True)
+                self.logger.error(f"Error scanning guild {guild.name}: {e}", exc_info=True)
         
-        if successful_connections:
-            self.logger.info(f"Successfully connected to voice channels in: {', '.join(successful_connections)}")
+        # Step 2: 最適なチャンネルを選択（ユーザー数が多い順）
+        if candidates:
+            # ユーザー数で降順ソート
+            candidates.sort(key=lambda x: x['user_count'], reverse=True)
+            
+            self.logger.info(f"Found {len(candidates)} candidate channels:")
+            for candidate in candidates:
+                self.logger.info(f"  - {candidate['guild_name']}.{candidate['channel_name']}: {candidate['user_count']}人")
+            
+            # 最適なチャンネルに接続
+            best_candidate = candidates[0]
+            try:
+                await self._connect_to_candidate_channel(best_candidate)
+                self.logger.info(f"Successfully connected to {best_candidate['guild_name']}.{best_candidate['channel_name']} ({best_candidate['user_count']}人)")
+                
+                # 他の候補について説明
+                if len(candidates) > 1:
+                    skipped = candidates[1:]
+                    skipped_info = [f"{c['guild_name']}.{c['channel_name']}({c['user_count']}人)" for c in skipped]
+                    self.logger.info(f"Discord仕様により1つのチャンネルのみ接続可能。スキップ: {', '.join(skipped_info)}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to connect to best candidate: {e}", exc_info=True)
         else:
-            self.logger.info("No voice channel connections made on startup")
+            self.logger.info("No suitable voice channels found in any guild")
         
         self.logger.info("Startup voice channel check completed")
     
+    async def _find_best_channel_in_guild(self, guild):
+        """ギルド内で最適なチャンネルを見つける"""
+        self.logger.debug(f"Scanning guild: {guild.name} (ID: {guild.id})")
+        
+        try:
+            # 権限チェック
+            bot_member = guild.get_member(self.bot.user.id)
+            if not bot_member:
+                self.logger.warning(f"Bot is not a member of guild {guild.name}")
+                return None
+                
+            if not bot_member.guild_permissions.connect:
+                self.logger.warning(f"Bot lacks CONNECT permission in guild {guild.name}")
+                return None
+            
+            # 既に接続している場合（グローバルチェック）
+            for g in self.bot.guilds:
+                if g.voice_client and g.voice_client.is_connected():
+                    current_channel = g.voice_client.channel
+                    self.logger.info(f"Already connected to {current_channel.name} in {g.name}")
+                    # 既存接続を候補として返す（優先度最高）
+                    members = [m for m in current_channel.members if not m.bot]
+                    return {
+                        'guild': g,
+                        'channel': current_channel,
+                        'guild_name': g.name,
+                        'channel_name': current_channel.name,
+                        'user_count': len(members) + 1000,  # 既存接続は最高優先度
+                        'members': members,
+                        'already_connected': True
+                    }
+            
+            # 最適なチャンネルを探す
+            best_channel = None
+            max_users = 0
+            
+            for channel in guild.voice_channels:
+                # チャンネル固有権限チェック
+                channel_perms = channel.permissions_for(bot_member)
+                if not channel_perms.connect:
+                    self.logger.debug(f"No CONNECT permission for {channel.name} in {guild.name}")
+                    continue
+                
+                # ユーザー数をチェック
+                non_bot_members = [m for m in channel.members if not m.bot]
+                user_count = len(non_bot_members)
+                
+                if user_count > 0:
+                    self.logger.debug(f"Channel {channel.name}: {user_count}人")
+                    if user_count > max_users:
+                        max_users = user_count
+                        best_channel = {
+                            'guild': guild,
+                            'channel': channel,
+                            'guild_name': guild.name,
+                            'channel_name': channel.name,
+                            'user_count': user_count,
+                            'members': non_bot_members,
+                            'already_connected': False
+                        }
+            
+            if best_channel:
+                self.logger.debug(f"Best channel in {guild.name}: {best_channel['channel_name']} ({best_channel['user_count']}人)")
+            else:
+                self.logger.debug(f"No suitable channels found in {guild.name}")
+                
+            return best_channel
+            
+        except Exception as e:
+            self.logger.error(f"Error scanning guild {guild.name}: {e}", exc_info=True)
+            return None
+    
+    async def _connect_to_candidate_channel(self, candidate):
+        """候補チャンネルに接続"""
+        if candidate['already_connected']:
+            self.logger.info(f"Already connected to {candidate['channel_name']}, ensuring recording is active")
+            
+            # 録音が開始されているか確認
+            recording_cog = self.bot.get_cog("RecordingCog")
+            if recording_cog and candidate['members']:
+                try:
+                    if not getattr(candidate['guild'].voice_client, 'recording', False):
+                        self.logger.info(f"Starting recording for existing connection")
+                        await recording_cog.handle_bot_joined_with_user(candidate['guild'], candidate['members'][0])
+                except Exception as e:
+                    self.logger.debug(f"Failed to start recording: {e}")
+            return True
+        else:
+            # 新規接続
+            await self.bot.connect_to_voice(candidate['channel'])
+            
+            # 他のCogに接続を通知
+            await self.notify_bot_joined_channel(candidate['guild'], candidate['channel'], is_startup=True)
+            
+            # セッション保存
+            self.save_sessions()
+            return True
+
     async def _check_guild_for_auto_join(self, guild):
         """個別ギルドの自動参加チェック"""
         self.logger.info(f"Checking guild: {guild.name} (ID: {guild.id})")
