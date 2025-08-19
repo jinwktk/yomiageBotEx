@@ -285,6 +285,143 @@ class VoiceCog(commands.Cog):
             self.save_sessions()
             return True
 
+    async def _check_guild_for_auto_join(self, guild):
+        """個別ギルドの自動参加チェック"""
+        self.logger.info(f"Checking guild: {guild.name} (ID: {guild.id})")
+        
+        try:
+            # 権限チェック
+            bot_member = guild.get_member(self.bot.user.id)
+            if not bot_member:
+                self.logger.warning(f"Bot is not a member of guild {guild.name}")
+                return
+                
+            # 基本権限があるかチェック
+            if not bot_member.guild_permissions.connect:
+                self.logger.warning(f"Bot lacks CONNECT permission in guild {guild.name}")
+                return
+                
+            if not bot_member.guild_permissions.speak:
+                self.logger.warning(f"Bot lacks SPEAK permission in guild {guild.name}")
+                
+            # 既に接続している場合はスキップ（詳細チェック）
+            if guild.voice_client and guild.voice_client.is_connected():
+                current_channel = guild.voice_client.channel
+                self.logger.info(f"Already connected to {current_channel.name} in {guild.name}, skipping auto-join")
+                
+                # 既存接続で録音が開始されているかチェック
+                recording_cog = self.bot.get_cog("RecordingCog")
+                if recording_cog:
+                    # 録音が開始されていない場合のみ開始を試行
+                    try:
+                        if not getattr(guild.voice_client, 'recording', False):
+                            members = [m for m in current_channel.members if not m.bot]
+                            if members:
+                                self.logger.info(f"Starting recording for existing connection in {current_channel.name}")
+                                await recording_cog.handle_bot_joined_with_user(guild, members[0])
+                    except Exception as e:
+                        self.logger.debug(f"Failed to start recording for existing connection: {e}")
+                return True  # 既に接続済み
+            
+            # ボイスチャンネル数をログ
+            vc_count = len(guild.voice_channels)
+            self.logger.info(f"Guild {guild.name} has {vc_count} voice channels")
+            
+            # 各ボイスチャンネルをチェック
+            for channel in guild.voice_channels:
+                # 複数の方法でメンバー情報を取得
+                all_members = []
+                non_bot_members = []
+                    
+                # 方法1: 標準のchannel.members
+                standard_members = channel.members
+                self.logger.debug(f"Standard method - Channel {channel.name}: {len(standard_members)} members")
+                
+                # 方法2: ギルドのvoice_statesから取得
+                voice_state_members = []
+                for member in guild.members:
+                    if member.voice and member.voice.channel and member.voice.channel.id == channel.id:
+                        voice_state_members.append(member)
+                self.logger.debug(f"Voice states method - Channel {channel.name}: {len(voice_state_members)} members")
+                
+                # より多くのメンバーが検出された方を使用
+                if len(voice_state_members) > len(standard_members):
+                    all_members = voice_state_members
+                    self.logger.info(f"Using voice_states method for {channel.name}")
+                else:
+                    all_members = standard_members
+                    self.logger.info(f"Using standard method for {channel.name}")
+                
+                # ボット以外のメンバーをフィルタ
+                non_bot_members = [m for m in all_members if not m.bot]
+                    
+                self.logger.info(f"Channel {channel.name}: {len(all_members)} total members, {len(non_bot_members)} non-bot members")
+                
+                # メンバーの詳細情報をログ出力
+                if len(all_members) > 0:
+                    member_info = []
+                    for member in all_members:
+                        member_info.append(f"{member.display_name}({'bot' if member.bot else 'user'})")
+                    self.logger.info(f"Channel {channel.name} members: {', '.join(member_info)}")
+                
+                if len(non_bot_members) > 0:
+                    # ユーザー名をログ出力
+                    user_names = [m.display_name for m in non_bot_members]
+                    self.logger.info(f"Found users in {channel.name} ({guild.name}): {', '.join(user_names)}")
+                    
+                    # チャンネル固有の権限チェック
+                    channel_perms = channel.permissions_for(bot_member)
+                    if not channel_perms.connect:
+                        self.logger.warning(f"❌ No CONNECT permission for channel {channel.name} in {guild.name}")
+                        continue
+                    if not channel_perms.speak:
+                        self.logger.warning(f"⚠️  No SPEAK permission for channel {channel.name} in {guild.name}")
+                    if not channel_perms.use_voice_activation:
+                        self.logger.warning(f"⚠️  No VOICE ACTIVITY permission for channel {channel.name} in {guild.name}")
+                    
+                    self.logger.info(f"✅ Permission check passed for {channel.name}")
+                    
+                    # 既に接続中かチェック
+                    if guild.voice_client:
+                        self.logger.info(f"Already connected to {guild.voice_client.channel.name} in {guild.name}, skipping join")
+                        # 接続チャンネルが異なる場合は移動
+                        if guild.voice_client.channel != channel:
+                            self.logger.info(f"Moving from {guild.voice_client.channel.name} to {channel.name}")
+                            await guild.voice_client.move_to(channel)
+                        continue
+                    
+                    try:
+                        self.logger.info(f"Attempting to join {channel.name}...")
+                        
+                        # カスタムVoiceClientで接続
+                        await self.bot.connect_to_voice(channel)
+                        self.logger.info(f"Successfully auto-joined on startup: {channel.name} in {guild.name}")
+                        
+                        # 他のCogに参加を通知（起動時フラグを設定）
+                        self.logger.info(f"Notifying other Cogs about startup join to {channel.name}")
+                        await self.notify_bot_joined_channel(guild, channel, is_startup=True)
+                        
+                        # セッションを保存
+                        self.save_sessions()
+                        
+                        # このギルドでは接続完了
+                        return True  # 成功を返す
+                        
+                    except Exception as e:
+                        self.logger.error(f"Failed to auto-join {channel.name} on startup: {e}", exc_info=True)
+                        continue
+                else:
+                    self.logger.debug(f"Channel {channel.name} is empty, skipping")
+            
+            # このギルドでは接続対象が見つからなかった
+            self.logger.info(f"No suitable voice channel found in {guild.name}")
+            return False
+                        
+        except Exception as e:
+            self.logger.error(f"Failed to check guild {guild.name} on startup: {e}", exc_info=True)
+            return False
+    
+    @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         """ボイスステート変更時の自動参加・退出処理"""
         if member.bot:  # ボット自身の変更は無視
