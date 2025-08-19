@@ -162,9 +162,23 @@ class VoiceCog(commands.Cog):
         self.logger.info(f"Checking guild: {guild.name} (ID: {guild.id})")
         
         try:
-            # 既に接続している場合はスキップ
-            if guild.voice_client:
-                self.logger.info(f"Already connected to voice in {guild.name}, skipping")
+            # 既に接続している場合はスキップ（詳細チェック）
+            if guild.voice_client and guild.voice_client.is_connected():
+                current_channel = guild.voice_client.channel
+                self.logger.info(f"Already connected to {current_channel.name} in {guild.name}, skipping auto-join")
+                
+                # 既存接続で録音が開始されているかチェック
+                recording_cog = self.bot.get_cog("RecordingCog")
+                if recording_cog:
+                    # 録音が開始されていない場合のみ開始を試行
+                    try:
+                        if not getattr(guild.voice_client, 'recording', False):
+                            members = [m for m in current_channel.members if not m.bot]
+                            if members:
+                                self.logger.info(f"Starting recording for existing connection in {current_channel.name}")
+                                await recording_cog.handle_bot_joined_with_user(guild, members[0])
+                    except Exception as e:
+                        self.logger.debug(f"Failed to start recording for existing connection: {e}")
                 return
             
             # ボイスチャンネル数をログ
@@ -274,7 +288,7 @@ class VoiceCog(commands.Cog):
             return
         
         # 既に接続している場合
-        if guild.voice_client:
+        if guild.voice_client and guild.voice_client.is_connected():
             # 同じチャンネルの場合、録音が開始されているか確認
             if guild.voice_client.channel == channel:
                 # 新しいユーザーが参加した時の録音開始処理
@@ -288,11 +302,10 @@ class VoiceCog(commands.Cog):
                         if not getattr(guild.voice_client, 'recording', False):
                             self.logger.info(f"Starting recording for user join: {channel.name}")
                             await recording_cog.real_time_recorder.start_recording(guild.id, guild.voice_client)
-                            recording_cog.real_time_recorder.debug_recording_status(guild.id)
                         else:
-                            self.logger.info(f"Recording already active in {channel.name}")
+                            self.logger.debug(f"Recording already active in {channel.name}")
                     except Exception as e:
-                        self.logger.error(f"Failed to start recording on user join: {e}")
+                        self.logger.debug(f"Failed to start recording on user join: {e}")
                 return
             
             # 別のチャンネルに移動
@@ -484,8 +497,8 @@ class VoiceCog(commands.Cog):
         channel = ctx.author.voice.channel
         self.logger.info(f"User {ctx.author} is in channel: {channel.name}")
         
-        # 既に接続している場合
-        if ctx.guild.voice_client:
+        # 既に接続している場合（詳細チェック）
+        if ctx.guild.voice_client and ctx.guild.voice_client.is_connected():
             if ctx.guild.voice_client.channel == channel:
                 await ctx.respond(
                     f"✅ 既に {channel.name} に接続しています。",
@@ -513,6 +526,15 @@ class VoiceCog(commands.Cog):
                         ephemeral=True
                     )
                     return
+        elif ctx.guild.voice_client and not ctx.guild.voice_client.is_connected():
+            # 接続が切れたVoiceClientが残っている場合はクリーンアップ
+            self.logger.info(f"Cleaning up disconnected voice client for {ctx.guild.name}")
+            try:
+                await ctx.guild.voice_client.disconnect()
+            except:
+                pass  # エラーは無視
+            # VoiceClientをNoneにリセット（Discord.pyが自動的に行うが確実にするため）
+            # Note: 直接設定はできないので、新規接続を試行
         
         # 新規接続
         try:

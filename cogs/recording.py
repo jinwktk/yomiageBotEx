@@ -151,6 +151,11 @@ class RecordingCog(commands.Cog):
             
             # ロックを使用して同時実行を防ぐ
             async with self.recording_locks[guild.id]:
+                # 録音が既に開始されているかチェック（最優先）
+                if self.real_time_recorder.recording_status.get(guild.id, False):
+                    self.logger.debug(f"Recording: Already recording for guild {guild.id}, skipping start")
+                    return
+                
                 # 複数回チェックして接続の安定性を確保
                 voice_client = None
                 for attempt in range(5):
@@ -163,6 +168,16 @@ class RecordingCog(commands.Cog):
                     await asyncio.sleep(0.5)
                 
                 if voice_client and voice_client.is_connected():
+                    # 再度録音状態をチェック（ダブルチェック）
+                    if self.real_time_recorder.recording_status.get(guild.id, False):
+                        self.logger.debug(f"Recording: Already recording detected after voice check for guild {guild.id}")
+                        return
+                    
+                    # py-cord側の録音状態もチェック
+                    if hasattr(voice_client, 'recording') and voice_client.recording:
+                        self.logger.debug(f"Recording: py-cord already recording for guild {guild.id}, skipping")
+                        return
+                    
                     self.logger.info(f"Recording: Bot joined, starting recording for user {member.display_name}")
                     
                     # さらに短い安定化待機
@@ -178,11 +193,13 @@ class RecordingCog(commands.Cog):
                         await self.real_time_recorder.start_recording(guild.id, voice_client)
                         self.logger.info(f"Recording: Started real-time recording for {voice_client.channel.name}")
                         
-                        # 録音状況デバッグ（一時的に無効化 - パフォーマンス問題回避）
-                        await asyncio.sleep(1)  # 録音開始を待つ
-                        # self.real_time_recorder.debug_recording_status(guild.id)
+                        # 録音状況デバッグ（簡略化）
+                        await asyncio.sleep(0.5)
+                        recording_active = self.real_time_recorder.recording_status.get(guild.id, False)
+                        self.logger.debug(f"Recording: Status check - active: {recording_active}")
+                        
                     except Exception as e:
-                        self.logger.error(f"Recording: Failed to start real-time recording: {e}")
+                        self.logger.debug(f"Recording: Failed to start real-time recording: {e}")
                         # フォールバック: シミュレーション録音
                         try:
                             sink = self.get_recording_sink(guild.id)
