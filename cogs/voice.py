@@ -519,44 +519,65 @@ class VoiceCog(commands.Cog):
         channel = ctx.author.voice.channel
         self.logger.info(f"User {ctx.author} is in channel: {channel.name}")
         
-        # 既に接続している場合（詳細チェック）
-        if ctx.guild.voice_client and ctx.guild.voice_client.is_connected():
-            if ctx.guild.voice_client.channel == channel:
+        # グローバル接続チェック（Discord仕様: 1ボット=1接続）
+        current_connection = None
+        connected_guild = None
+        
+        for guild in self.bot.guilds:
+            if guild.voice_client and guild.voice_client.is_connected():
+                current_connection = guild.voice_client
+                connected_guild = guild
+                break
+        
+        if current_connection:
+            current_channel = current_connection.channel
+            self.logger.info(f"Bot is currently connected to {current_channel.name} in {connected_guild.name}")
+            
+            # 同じチャンネルの場合
+            if connected_guild.id == ctx.guild.id and current_channel.id == channel.id:
                 await ctx.respond(
                     f"✅ 既に {channel.name} に接続しています。",
                     ephemeral=True
                 )
                 return
-            else:
-                # 別のチャンネルに移動
-                try:
-                    await ctx.guild.voice_client.move_to(channel)
-                    await ctx.respond(
-                        f"🔄 {channel.name} に移動しました。",
-                        ephemeral=True
-                    )
-                    self.logger.info(f"Moved to voice channel: {channel.name} in {ctx.guild.name}")
-                    self.save_sessions()
-                    
-                    # 移動後に他のCogに通知
-                    await self.notify_bot_joined_channel(ctx.guild, channel)
-                    return
-                except Exception as e:
-                    self.logger.error(f"Failed to move to voice channel: {e}")
-                    await ctx.respond(
-                        "❌ チャンネルの移動に失敗しました。",
-                        ephemeral=True
-                    )
-                    return
-        elif ctx.guild.voice_client and not ctx.guild.voice_client.is_connected():
-            # 接続が切れたVoiceClientが残っている場合はクリーンアップ
+            
+            # 異なるチャンネル/サーバーの場合は強制移動
+            try:
+                self.logger.info(f"Disconnecting from {current_channel.name} in {connected_guild.name} to move to {channel.name} in {ctx.guild.name}")
+                await current_connection.disconnect()
+                
+                # 短い待機時間
+                await asyncio.sleep(1.0)
+                
+                # 新しいチャンネルに接続
+                await self.bot.connect_to_voice(channel)
+                
+                await ctx.respond(
+                    f"🔄 {connected_guild.name}.{current_channel.name} から {ctx.guild.name}.{channel.name} に移動しました。",
+                    ephemeral=True
+                )
+                self.logger.info(f"Successfully moved from {connected_guild.name}.{current_channel.name} to {ctx.guild.name}.{channel.name}")
+                self.save_sessions()
+                
+                # 移動後に他のCogに通知
+                await self.notify_bot_joined_channel(ctx.guild, channel)
+                return
+                
+            except Exception as e:
+                self.logger.error(f"Failed to move between servers: {e}", exc_info=True)
+                await ctx.respond(
+                    f"❌ {connected_guild.name}から{ctx.guild.name}への移動に失敗しました。",
+                    ephemeral=True
+                )
+                return
+        
+        # 接続が切れたVoiceClientのクリーンアップ
+        if ctx.guild.voice_client and not ctx.guild.voice_client.is_connected():
             self.logger.info(f"Cleaning up disconnected voice client for {ctx.guild.name}")
             try:
                 await ctx.guild.voice_client.disconnect()
             except:
                 pass  # エラーは無視
-            # VoiceClientをNoneにリセット（Discord.pyが自動的に行うが確実にするため）
-            # Note: 直接設定はできないので、新規接続を試行
         
         # 新規接続
         try:
