@@ -8,7 +8,7 @@
   "speaker_id": 0,
   "style": "Neutral",
   "greeting": {
-    "enabled": false,
+    "enabled": true,
     "skip_on_startup": true,
     "startup_message": "おもちだよ",
     "join_message": "さん、こんちゃ！",

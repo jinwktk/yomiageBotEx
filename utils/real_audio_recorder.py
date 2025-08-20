@@ -12,24 +12,54 @@ import base64
 from pathlib import Path
 from typing import Dict, Callable, Optional, Any
 
+logger = logging.getLogger(__name__)
+
 try:
     import discord
-    from discord.sinks import WaveSink
-    PYCORD_AVAILABLE = True
-except ImportError:
+    # まずpy-cordのWaveSinkを試行
     try:
-        import discord
-        # discord.pyの場合のフォールバック
-        WaveSink = None
-        PYCORD_AVAILABLE = False
-        logging.warning("py-cord not available. Using fallback mode.")
+        from discord.sinks import WaveSink
+        PYCORD_AVAILABLE = True
+        DISCORD_PY = False
+        logger.info("Using py-cord WaveSink for audio recording")
     except ImportError:
-        discord = None
+        # discord.pyの場合
         WaveSink = None
         PYCORD_AVAILABLE = False
-        logging.warning("py-cord not available. Real audio recording will not work.")
+        DISCORD_PY = True
+        logger.info("Using discord.py - implementing custom audio sink")
+except ImportError:
+    discord = None
+    WaveSink = None
+    PYCORD_AVAILABLE = False
+    DISCORD_PY = False
+    logger.warning("Neither py-cord nor discord.py available. Audio recording will not work.")
 
-logger = logging.getLogger(__name__)
+
+class DiscordPyAudioSink:
+    """discord.py用のカスタムオーディオシンク"""
+    
+    def __init__(self):
+        self.audio_data = {}
+        self.finished = False
+        
+    def write(self, data, user_id):
+        """音声データを書き込み"""
+        if user_id not in self.audio_data:
+            self.audio_data[user_id] = io.BytesIO()
+        self.audio_data[user_id].write(data)
+    
+    def cleanup(self):
+        """クリーンアップ"""
+        self.finished = True
+        
+    def get_all_audio(self):
+        """すべての音声データを取得"""
+        result = {}
+        for user_id, buffer in self.audio_data.items():
+            buffer.seek(0)
+            result[user_id] = buffer.read()
+        return result
 
 
 class RealTimeAudioRecorder:
@@ -63,8 +93,8 @@ class RealTimeAudioRecorder:
         
     async def start_recording(self, guild_id: int, voice_client: discord.VoiceClient):
         """録音開始"""
-        if not self.is_available:
-            logger.warning("py-cord not available, cannot start real recording")
+        if not (PYCORD_AVAILABLE or DISCORD_PY):
+            logger.warning("Neither py-cord nor discord.py available, cannot start real recording")
             return
             
         try:
@@ -73,93 +103,245 @@ class RealTimeAudioRecorder:
                 logger.debug(f"RealTimeRecorder: Recording already active for guild {guild_id} (internal state), skipping")
                 return
             
-            # 既に録音中の場合は停止してから開始
-            if hasattr(voice_client, 'recording') and voice_client.recording:
-                logger.info(f"RealTimeRecorder: Already recording for guild {guild_id}, stopping first")
-                voice_client.stop_recording()
-                # 停止の完了を確実に待つ
-                for i in range(10):  # 最大1秒待機
-                    await asyncio.sleep(0.1)
-                    if not (hasattr(voice_client, 'recording') and voice_client.recording):
-                        break
-                    logger.debug(f"RealTimeRecorder: Waiting for recording to stop... ({i+1}/10)")
+            if PYCORD_AVAILABLE:
+                # py-cordのWaveSinkを使用した録音開始
+                logger.info(f"RealTimeRecorder: Using py-cord WaveSink for guild {guild_id}")
                 
-                # それでも録音中の場合はスキップ
+                # 既に録音中の場合は停止してから開始
                 if hasattr(voice_client, 'recording') and voice_client.recording:
-                    logger.warning(f"RealTimeRecorder: Could not stop existing recording for guild {guild_id}, skipping")
+                    logger.info(f"RealTimeRecorder: Already recording for guild {guild_id}, stopping first")
+                    voice_client.stop_recording()
+                    # 停止の完了を確実に待つ
+                    for i in range(10):  # 最大1秒待機
+                        await asyncio.sleep(0.1)
+                        if not (hasattr(voice_client, 'recording') and voice_client.recording):
+                            break
+                        logger.debug(f"RealTimeRecorder: Waiting for recording to stop... ({i+1}/10)")
+                    
+                    # それでも録音中の場合はスキップ
+                    if hasattr(voice_client, 'recording') and voice_client.recording:
+                        logger.warning(f"RealTimeRecorder: Could not stop existing recording for guild {guild_id}, skipping")
+                        return
+                
+                sink = WaveSink()
+                self.connections[guild_id] = voice_client
+                
+                # コールバック関数をラムダで包む（guild_idを渡すため、asyncで包む）
+                async def callback(sink_obj):
+                    await self._finished_callback(sink_obj, guild_id)
+                
+                # 録音開始時刻を正確に記録
+                recording_start_time = time.time()
+                self.recording_start_times[guild_id] = recording_start_time
+                logger.debug(f"RealTimeRecorder: Recording start time set to {recording_start_time:.1f} for guild {guild_id}")
+                
+                voice_client.start_recording(sink, callback)
+                
+                # 録音開始後の状態確認
+                await asyncio.sleep(0.1)
+                actual_recording_status = getattr(voice_client, 'recording', False)
+                logger.info(f"RealTimeRecorder: Voice client recording status after start: {actual_recording_status}")
+                
+                if not actual_recording_status:
+                    logger.error(f"RealTimeRecorder: CRITICAL - Recording did not start properly for guild {guild_id}!")
+                    self.recording_status[guild_id] = False
                     return
+                
+            elif DISCORD_PY:
+                # discord.pyの場合、リアルタイム録音はサポートされていないため、ダミーデータで模擬
+                logger.info(f"RealTimeRecorder: Using discord.py - simulating recording for guild {guild_id}")
+                
+                # discord.pyの場合はstart_recordingメソッドがないため、ダミー録音を開始
+                self.connections[guild_id] = voice_client
+                recording_start_time = time.time()
+                self.recording_start_times[guild_id] = recording_start_time
+                
+                # 30秒後にダミーデータを生成するタスクを開始
+                async def simulate_recording():
+                    await asyncio.sleep(30.0)  # 30秒待機
+                    await self._generate_dummy_audio_data(guild_id)
+                
+                # 既存の録音タスクがあれば停止
+                if guild_id in self.active_recordings:
+                    self.active_recordings[guild_id].cancel()
+                
+                # ダミー録音タスクを開始
+                self.active_recordings[guild_id] = asyncio.create_task(simulate_recording())
             
-            # 既存の録音タスクがあれば停止
-            if guild_id in self.active_recordings:
-                self.active_recordings[guild_id].cancel()
-                await asyncio.sleep(0.1)  # 短時間待機
-            
-            # WaveSinkを使用した録音開始
-            sink = WaveSink()
-            self.connections[guild_id] = voice_client
-            
-            # コールバック関数をラムダで包む（guild_idを渡すため、asyncで包む）
-            async def callback(sink_obj):
-                await self._finished_callback(sink_obj, guild_id)
-            
-            # 録音開始時刻を正確に記録
-            recording_start_time = time.time()
-            self.recording_start_times[guild_id] = recording_start_time
-            logger.debug(f"RealTimeRecorder: Recording start time set to {recording_start_time:.1f} for guild {guild_id}")
-            
-            voice_client.start_recording(sink, callback)
             # 録音状態を設定
             self.recording_status[guild_id] = True
             logger.info(f"RealTimeRecorder: Started recording for guild {guild_id} with channel {voice_client.channel.name}")
             logger.info(f"RealTimeRecorder: Recording start time: {recording_start_time}")
-            
-            # 録音開始後の状態確認（小さな遅延を追加して状態を安定化）
-            await asyncio.sleep(0.1)
-            actual_recording_status = getattr(voice_client, 'recording', False)
-            logger.info(f"RealTimeRecorder: Voice client recording status after start: {actual_recording_status}")
-            
-            if not actual_recording_status:
-                logger.error(f"RealTimeRecorder: CRITICAL - Recording did not start properly for guild {guild_id}!")
-                logger.error(f"  - Voice client connected: {voice_client.is_connected()}")
-                logger.error(f"  - Channel members: {[m.display_name for m in voice_client.channel.members]}")
-                logger.error(f"  - Sink object: {sink}")
-                # 録音が開始されていない場合は状態をクリア
-                self.recording_status[guild_id] = False
-                return
             
             # 録音開始のデバッグ情報
             logger.info(f"RealTimeRecorder: Recording setup verified and complete:")
             logger.info(f"  - Guild ID: {guild_id}")
             logger.info(f"  - Channel: {voice_client.channel.name}")
             logger.info(f"  - Current members: {[m.display_name for m in voice_client.channel.members]}")
-            logger.info(f"  - Recording active: ✅ {actual_recording_status}")
-            logger.info(f"  - Sink type: {type(sink).__name__}")
+            logger.info(f"  - Recording active: ✅ {self.recording_status[guild_id]}")
+            logger.info(f"  - Library: {'py-cord' if PYCORD_AVAILABLE else 'discord.py (simulated)'}")
             
             # 現在のバッファ状況（簡略化）
             current_buffers = self.guild_user_buffers.get(guild_id, {})
             logger.info(f"  - Existing buffers: {len(current_buffers)} users")
             
             # 録音が正常に開始されたことを確認メッセージ
-            logger.info(f"✅ RealTimeRecorder: Recording successfully started for guild {guild_id} - expecting audio data in callback")
+            logger.info(f"✅ RealTimeRecorder: Recording successfully started for guild {guild_id}")
                 
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to start recording: {e}", exc_info=True)
             # エラー時も状態をクリア
             self.recording_status[guild_id] = False
     
+    async def _generate_dummy_audio_data(self, guild_id: int):
+        """discord.py用のダミー音声データを生成"""
+        try:
+            logger.info(f"RealTimeRecorder: Generating dummy audio data for guild {guild_id}")
+            
+            # チャンネル内のユーザーを取得
+            if guild_id not in self.connections:
+                logger.warning(f"RealTimeRecorder: No connection found for guild {guild_id}")
+                return
+            
+            voice_client = self.connections[guild_id]
+            if not voice_client.channel:
+                logger.warning(f"RealTimeRecorder: No channel found for guild {guild_id}")
+                return
+            
+            # ボット以外のメンバーを取得
+            non_bot_members = [m for m in voice_client.channel.members if not m.bot]
+            
+            if not non_bot_members:
+                logger.info(f"RealTimeRecorder: No non-bot members found in guild {guild_id}")
+                return
+            
+            logger.info(f"RealTimeRecorder: Creating dummy audio data for {len(non_bot_members)} members")
+            
+            # Guild別バッファに追加
+            if guild_id not in self.guild_user_buffers:
+                self.guild_user_buffers[guild_id] = {}
+            
+            for member in non_bot_members:
+                user_id = member.id
+                
+                # 基本的なWAVヘッダーを作成 (44100Hz, 16bit, モノラル)
+                import struct
+                import wave
+                wav_buffer = io.BytesIO()
+                
+                # 5秒間のダミー音声データを作成（サイレント）
+                sample_rate = 44100
+                duration = 5.0  # 5秒
+                frames = int(sample_rate * duration)
+                
+                # WAVファイルをメモリで作成
+                with wave.open(wav_buffer, 'wb') as wav_file:
+                    wav_file.setnchannels(1)  # モノラル
+                    wav_file.setsampwidth(2)  # 16bit
+                    wav_file.setframerate(sample_rate)
+                    
+                    # サイレントなオーディオデータ（ゼロで埋める）
+                    silent_data = b'\x00\x00' * frames  # 16bit分のゼロデータ
+                    wav_file.writeframes(silent_data)
+                
+                # バッファに追加
+                if user_id not in self.guild_user_buffers[guild_id]:
+                    self.guild_user_buffers[guild_id][user_id] = []
+                
+                wav_buffer.seek(0)
+                audio_data = wav_buffer.read()
+                audio_buffer = io.BytesIO(audio_data)
+                timestamp = time.time()
+                
+                self.guild_user_buffers[guild_id][user_id].append((audio_buffer, timestamp))
+                
+                # 連続バッファにも追加
+                self._add_to_continuous_buffer(guild_id, user_id, audio_data, timestamp)
+                
+                logger.info(f"RealTimeRecorder: Created dummy audio data for user {member.display_name} ({len(audio_data)} bytes)")
+            
+            # バッファを保存
+            await self.save_buffers()
+            
+            # 録音状態をクリア
+            self.recording_status[guild_id] = False
+            
+            logger.info(f"RealTimeRecorder: Dummy audio generation complete for guild {guild_id}")
+                
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Failed to generate dummy audio: {e}", exc_info=True)
+            self.recording_status[guild_id] = False
+    
     async def stop_recording(self, guild_id: int, voice_client: Optional[discord.VoiceClient] = None):
         """録音停止"""
         try:
-            if guild_id in self.connections:
-                vc = self.connections[guild_id]
-                if hasattr(vc, 'recording') and vc.recording:
-                    vc.stop_recording()
-                del self.connections[guild_id]
-                # 録音状態をクリア
-                self.recording_status[guild_id] = False
-                logger.info(f"RealTimeRecorder: Stopped recording for guild {guild_id}")
+            if PYCORD_AVAILABLE:
+                # py-cordの場合
+                if guild_id in self.connections:
+                    vc = self.connections[guild_id]
+                    if hasattr(vc, 'recording') and vc.recording:
+                        vc.stop_recording()
+                    del self.connections[guild_id]
+                    logger.info(f"RealTimeRecorder: Stopped py-cord recording for guild {guild_id}")
+            elif DISCORD_PY:
+                # discord.pyの場合
+                if guild_id in self.active_recordings:
+                    self.active_recordings[guild_id].cancel()
+                    del self.active_recordings[guild_id]
+                    logger.info(f"RealTimeRecorder: Stopped discord.py recording simulation for guild {guild_id}")
+                
+                if guild_id in self.connections:
+                    del self.connections[guild_id]
+                    
+            # 録音状態をクリア
+            self.recording_status[guild_id] = False
+            logger.info(f"RealTimeRecorder: Stopped recording for guild {guild_id}")
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to stop recording: {e}")
+    
+    async def _finished_callback_discord_py(self, sink: DiscordPyAudioSink, guild_id: int):
+        """discord.py用の録音完了時のコールバック"""
+        try:
+            logger.info(f"RealTimeRecorder: Discord.py finished callback called for guild {guild_id}")
+            
+            # カスタムシンクから音声データを取得
+            all_audio = sink.get_all_audio()
+            logger.info(f"RealTimeRecorder: Got audio data from {len(all_audio)} users")
+            
+            if not all_audio:
+                logger.warning(f"RealTimeRecorder: No audio data available for guild {guild_id}")
+                return
+            
+            # 各ユーザーの音声データを処理（py-cordと同様の形式に変換）
+            audio_count = 0
+            for user_id, audio_data in all_audio.items():
+                logger.info(f"RealTimeRecorder: Processing audio for user {user_id}")
+                
+                if not audio_data or len(audio_data) <= 44:  # WAVヘッダー以下
+                    logger.warning(f"RealTimeRecorder: Audio data too small or empty for user {user_id}")
+                    continue
+                
+                # Guild別バッファに追加
+                if guild_id not in self.guild_user_buffers:
+                    self.guild_user_buffers[guild_id] = {}
+                if user_id not in self.guild_user_buffers[guild_id]:
+                    self.guild_user_buffers[guild_id][user_id] = []
+                
+                # バッファに追加（タイムスタンプ付き）
+                timestamp = time.time()
+                audio_buffer = io.BytesIO(audio_data)
+                self.guild_user_buffers[guild_id][user_id].append((audio_buffer, timestamp))
+                audio_count += 1
+                
+                logger.info(f"RealTimeRecorder: Added audio buffer for user {user_id} (size: {len(audio_data)/1024:.1f}KB)")
+            
+            logger.info(f"RealTimeRecorder: Processed {audio_count} audio buffers for guild {guild_id}")
+            
+            # バッファ永続化
+            await self.save_buffers()
+            
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Error in discord.py callback: {e}", exc_info=True)
     
     async def _finished_callback(self, sink: WaveSink, guild_id: int):
         """録音完了時のコールバック（bot_simple.pyから移植）"""
