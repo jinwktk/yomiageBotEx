@@ -261,7 +261,7 @@ class RealTimeAudioRecorder:
                 logger.info(f"RealTimeRecorder: Created dummy audio data for user {member.display_name} ({len(audio_data)} bytes)")
             
             # バッファを保存
-            await self.save_buffers()
+            self.save_buffers()
             
             # 録音状態をクリア
             self.recording_status[guild_id] = False
@@ -338,7 +338,7 @@ class RealTimeAudioRecorder:
             logger.info(f"RealTimeRecorder: Processed {audio_count} audio buffers for guild {guild_id}")
             
             # バッファ永続化
-            await self.save_buffers()
+            self.save_buffers()
             
         except Exception as e:
             logger.error(f"RealTimeRecorder: Error in discord.py callback: {e}", exc_info=True)
