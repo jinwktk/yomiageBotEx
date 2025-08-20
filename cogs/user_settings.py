@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional
 
 import discord
 from discord.ext import commands
+from discord import app_commands
 
 from utils.user_settings import UserSettingsManager
 
@@ -32,13 +33,13 @@ class UserSettingsCog(commands.Cog):
         delay = random.uniform(*self.config["bot"]["rate_limit_delay"])
         await asyncio.sleep(delay)
     
-    @discord.slash_command(name="my_settings", description="現在の個人設定を表示します")
-    async def my_settings_command(self, ctx: discord.ApplicationContext):
+    @app_commands.command(name="my_settings", description="現在の個人設定を表示します")
+    async def my_settings_command(self, interaction: discord.Interaction):
         """現在の個人設定を表示"""
         await self.rate_limit_delay()
         
         try:
-            settings_summary = self.user_settings.get_settings_summary(ctx.user.id)
+            settings_summary = self.user_settings.get_settings_summary(interaction.user.id)
             
             embed = discord.Embed(
                 title="⚙️ あなたの個人設定",
@@ -47,24 +48,30 @@ class UserSettingsCog(commands.Cog):
             )
             embed.set_footer(text="設定を変更するには /set_reading, /set_global_tts コマンドを使用してください")
             
-            await ctx.respond(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             
         except Exception as e:
             self.logger.error(f"Failed to show user settings: {e}")
-            await ctx.respond(
+            await interaction.response.send_message(
                 "❌ 設定の表示中にエラーが発生しました。",
                 ephemeral=True
             )
     
     
-    @discord.slash_command(name="set_reading", description="読み上げ設定を変更します")
+    @app_commands.command(name="set_reading", description="読み上げ設定を変更します")
+    @app_commands.describe(
+        enabled="読み上げを有効にするか",
+        max_length="最大文字数",
+        ignore_mentions="メンションを無視するか",
+        ignore_links="リンクを無視するか"
+    )
     async def set_reading_command(
         self, 
-        ctx: discord.ApplicationContext,
-        enabled: discord.Option(bool, "読み上げを有効にするか", required=False) = None,
-        max_length: discord.Option(int, "最大文字数", min_value=10, max_value=500, required=False) = None,
-        ignore_mentions: discord.Option(bool, "メンションを無視するか", required=False) = None,
-        ignore_links: discord.Option(bool, "リンクを無視するか", required=False) = None
+        interaction: discord.Interaction,
+        enabled: Optional[bool] = None,
+        max_length: Optional[int] = None,
+        ignore_mentions: Optional[bool] = None,
+        ignore_links: Optional[bool] = None
     ):
         """読み上げ設定を変更"""
         await self.rate_limit_delay()
@@ -74,50 +81,50 @@ class UserSettingsCog(commands.Cog):
             
             # 各パラメータを更新
             if enabled is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "reading", "enabled", enabled)
+                self.user_settings.set_user_setting(interaction.user.id, "reading", "enabled", enabled)
                 updated_settings.append(f"読み上げ: {'有効' if enabled else '無効'}")
             
             if max_length is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "reading", "max_length", max_length)
+                self.user_settings.set_user_setting(interaction.user.id, "reading", "max_length", max_length)
                 updated_settings.append(f"最大文字数: {max_length}")
             
             if ignore_mentions is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "reading", "ignore_mentions", ignore_mentions)
+                self.user_settings.set_user_setting(interaction.user.id, "reading", "ignore_mentions", ignore_mentions)
                 updated_settings.append(f"メンション無視: {'有効' if ignore_mentions else '無効'}")
             
             if ignore_links is not None:
-                self.user_settings.set_user_setting(ctx.user.id, "reading", "ignore_links", ignore_links)
+                self.user_settings.set_user_setting(interaction.user.id, "reading", "ignore_links", ignore_links)
                 updated_settings.append(f"リンク無視: {'有効' if ignore_links else '無効'}")
             
             if updated_settings:
                 settings_text = "\n".join([f"• {setting}" for setting in updated_settings])
-                await ctx.respond(
+                await interaction.response.send_message(
                     f"✅ 読み上げ設定を更新しました:\n{settings_text}",
                     ephemeral=True
                 )
-                self.logger.info(f"Updated reading settings for user {ctx.user}: {updated_settings}")
+                self.logger.info(f"Updated reading settings for user {interaction.user}: {updated_settings}")
             else:
-                await ctx.respond(
+                await interaction.response.send_message(
                     "❌ 更新する設定項目を指定してください。",
                     ephemeral=True
                 )
             
         except Exception as e:
             self.logger.error(f"Failed to update reading settings: {e}")
-            await ctx.respond(
+            await interaction.response.send_message(
                 "❌ 読み上げ設定の更新中にエラーが発生しました。",
                 ephemeral=True
             )
     
-    @discord.slash_command(name="set_global_tts", description="サーバー全体のTTS設定を変更します（管理者限定）")
-    async def set_global_tts_command(self, ctx: discord.ApplicationContext):
+    @app_commands.command(name="set_global_tts", description="サーバー全体のTTS設定を変更します（管理者限定）")
+    async def set_global_tts_command(self, interaction: discord.Interaction):
         """グローバルTTS設定を変更（プルダウン選択式・管理者限定）"""
         await self.rate_limit_delay()
         
         # 特定ユーザーIDでの管理者権限チェック
         admin_user_id = self.config.get("bot", {}).get("admin_user_id", 372768430149074954)
-        if ctx.author.id != admin_user_id:
-            await ctx.respond("❌ この機能は管理者限定です。", ephemeral=True)
+        if interaction.user.id != admin_user_id:
+            await interaction.response.send_message("❌ この機能は管理者限定です。", ephemeral=True)
             return
         
         try:
@@ -194,11 +201,11 @@ class UserSettingsCog(commands.Cog):
             embed.description = description
             embed.set_footer(text="下のプルダウンメニューから設定を変更してください（全ユーザーに即座に反映されます）")
             
-            await ctx.respond(embed=embed, view=view, ephemeral=True)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             
         except Exception as e:
             self.logger.error(f"Failed to show global TTS settings: {e}")
-            await ctx.respond(
+            await interaction.response.send_message(
                 "❌ グローバルTTS設定の表示中にエラーが発生しました。",
                 ephemeral=True
             )
