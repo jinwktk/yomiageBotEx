@@ -900,6 +900,6 @@ class RecordingCog(commands.Cog):
         return io.BytesIO(audio_data)
 
 
-def setup(bot):
+async def setup(bot):
     """Cogのセットアップ"""
-    bot.add_cog(RecordingCog(bot, bot.config))
+    await bot.add_cog(RecordingCog(bot, bot.config))

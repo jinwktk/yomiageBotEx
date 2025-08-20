@@ -35,13 +35,10 @@ temp/
 # TTSキャッシュ
 cache/
 
-# データファイル
-data/*
 
 # セッションファイル
 sessions.json
 recordings_buffer.pkl
-audio_buffers.json
 
 # IDE設定
 .vscode/

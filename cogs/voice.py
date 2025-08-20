@@ -13,6 +13,7 @@ from pathlib import Path
 
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 
 
 class VoiceCog(commands.Cog):
@@ -501,8 +502,8 @@ class VoiceCog(commands.Cog):
         """定期チェック開始前の待機"""
         await self.bot.wait_until_ready()
     
-    @discord.slash_command(name="join", description="ボイスチャンネルに参加します")
-    async def join_command(self, ctx: discord.ApplicationContext):
+    @app_commands.command(name="join", description="ボイスチャンネルに参加します")
+    async def join_command(self, interaction: discord.Interaction):
         """VCに参加するコマンド"""
         self.logger.info(f"/join command called by {ctx.author} in {ctx.guild.name}")
         await self.rate_limit_delay()
@@ -750,6 +751,6 @@ class VoiceCog(commands.Cog):
             )
 
 
-def setup(bot):
+async def setup(bot):
     """Cogのセットアップ"""
-    bot.add_cog(VoiceCog(bot, bot.config))
+    await bot.add_cog(VoiceCog(bot, bot.config))

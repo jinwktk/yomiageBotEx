@@ -118,6 +118,6 @@ class DictionaryCog(commands.Cog):
     
 
 
-def setup(bot):
+async def setup(bot):
     """Cogのセットアップ"""
-    bot.add_cog(DictionaryCog(bot, bot.config))
+    await bot.add_cog(DictionaryCog(bot, bot.config))

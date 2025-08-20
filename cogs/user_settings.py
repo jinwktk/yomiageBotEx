@@ -606,6 +606,6 @@ class TTSStyleSelect(discord.ui.Select):
                 ephemeral=True
             )
     
-def setup(bot):
+async def setup(bot):
     """Cogのセットアップ"""
-    bot.add_cog(UserSettingsCog(bot, bot.config))
+    await bot.add_cog(UserSettingsCog(bot, bot.config))

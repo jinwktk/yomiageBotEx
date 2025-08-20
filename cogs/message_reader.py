@@ -255,40 +255,13 @@ class MessageReaderCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"MessageReader: Failed to play audio: {e}")
     
-    @discord.slash_command(name="reading", description="チャット読み上げのON/OFFを切り替えます")
-    async def toggle_reading(self, ctx: discord.ApplicationContext):
-        """読み上げ機能のON/OFF切り替え"""
-        try:
-            guild_id = ctx.guild.id
-            current_state = self.is_reading_enabled(guild_id)
-            new_state = not current_state
-            
-            self.guild_reading_enabled[guild_id] = new_state
-            self.save_guild_settings()  # 設定を即座に保存
-            
-            state_text = "有効" if new_state else "無効"
-            
-            # 詳細な状態情報を含める
-            voice_client = ctx.guild.voice_client
-            vc_status = "接続中" if voice_client and voice_client.is_connected() else "未接続"
-            channel_name = voice_client.channel.name if voice_client and voice_client.is_connected() else "なし"
-            
-            response = f"📢 チャット読み上げを{state_text}にしました。\n"
-            response += f"🔊 ボイスチャット: {vc_status} ({channel_name})\n"
-            response += f"⚙️ グローバル設定: {'有効' if self.reading_enabled else '無効'}"
-            
-            await ctx.respond(response, ephemeral=True)
-            
-            self.logger.info(f"MessageReader: Reading toggled to {new_state} for guild {ctx.guild.name} (ID: {guild_id})")
-            
-        except Exception as e:
-            self.logger.error(f"MessageReader: Failed to toggle reading: {e}")
-            await ctx.respond(
-                "❌ 設定の変更に失敗しました。",
-                ephemeral=True
-            )
+    # スラッシュコマンド一時無効化（discord.py互換性のため）
+    # @commands.slash_command(name="reading", description="チャット読み上げのON/OFFを切り替えます")
+    # async def toggle_reading(self, ctx):
+    #     """読み上げ機能のON/OFF切り替え"""
+    #     pass
 
 
-def setup(bot):
+async def setup(bot):
     """Cogのセットアップ"""
-    bot.add_cog(MessageReaderCog(bot, bot.config))
+    await bot.add_cog(MessageReaderCog(bot, bot.config))

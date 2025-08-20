@@ -14,6 +14,7 @@ import time
 
 import discord
 from discord.ext import commands
+from discord import app_commands
 import yaml
 from dotenv import load_dotenv
 import fnmatch
@@ -24,17 +25,17 @@ try:
     COGWATCH_AVAILABLE = True
 except ImportError:
     COGWATCH_AVAILABLE = False
-    print("⚠️ cogwatch not installed - hot reload feature disabled")
+    print("WARNING: cogwatch not installed - hot reload feature disabled")
 
 from utils.logger import setup_logging, start_log_cleanup_task
 
 # 音声受信クライアントのインポート（py-cord統合版のみ使用）
 try:
     from utils.real_audio_recorder import RealEnhancedVoiceClient as EnhancedVoiceClient
-    print("✅ Using py-cord real audio recording")
+    print("SUCCESS: Using py-cord real audio recording")
     VOICE_CLIENT_TYPE = "py-cord"
 except Exception as e:
-    print(f"❌ Could not import RealEnhancedVoiceClient: {e}")
+    print(f"ERROR: Could not import RealEnhancedVoiceClient: {e}")
     print("   Please ensure py-cord[voice] and required dependencies are installed")
     sys.exit(1)
 
@@ -85,7 +86,7 @@ config = load_config()
 # ロギングの初期化
 logger = setup_logging(config)
 
-class YomiageBot(discord.Bot):
+class YomiageBot(commands.Bot):
     """読み上げボットのメインクラス"""
     
     def __init__(self):
@@ -99,9 +100,9 @@ class YomiageBot(discord.Bot):
         # グローバルコマンド同期（すべてのギルドで利用可能）
         # debug_guildsを指定しないことで、すべてのギルドでコマンドが同期される
         super().__init__(
+            command_prefix='/',
             intents=intents,
             heartbeat_timeout=60.0  # HeartBeatタイムアウトを60秒に延長
-            # debug_guildsを削除してグローバル同期に変更
         )
         
         self.config = config
@@ -385,7 +386,7 @@ class YomiageBot(discord.Bot):
                     logger.debug(f"Cog {cog} already loaded, skipping")
                     continue
                 
-                # py-cordの推奨方法でCogを読み込み
+                # discord.pyの推奨方法でCogを読み込み
                 self.load_extension(cog)
                 logger.info(f"Loaded cog: {cog}")
             except Exception as e:
@@ -393,7 +394,27 @@ class YomiageBot(discord.Bot):
                 
     async def load_cogs(self):
         """Cogを読み込む（非同期版）"""
-        self.load_cogs_sync()
+        cogs = [
+            "cogs.voice",
+            "cogs.tts", 
+            "cogs.recording",
+            "cogs.message_reader",
+            "cogs.dictionary",
+            "cogs.user_settings",
+        ]
+        
+        for cog in cogs:
+            try:
+                # 既に読み込まれているかチェック
+                if cog in self.extensions:
+                    logger.debug(f"Cog {cog} already loaded, skipping")
+                    continue
+                
+                # discord.pyの非同期方法でCogを読み込み
+                await self.load_extension(cog)
+                logger.info(f"Loaded cog: {cog}")
+            except Exception as e:
+                logger.error(f"Failed to load cog {cog}: {e}", exc_info=True)
     
     async def on_ready(self, client=None):
         """Bot準備完了時のイベント"""
@@ -442,7 +463,121 @@ class YomiageBot(discord.Bot):
                 name="自動参加・退出対応 | /join"
             )
         )
+        
+        # 自動接続機能を強制実行
+        await self.force_auto_connect()
     
+    async def force_auto_connect(self):
+        """自動接続機能を強制実行"""
+        try:
+            logger.info("Starting forced auto-connect...")
+            
+            # 自動参加が有効かチェック
+            auto_join_enabled = self.config.get("bot", {}).get("auto_join", True)
+            if not auto_join_enabled:
+                logger.info("Auto-join disabled in config, skipping")
+                return
+            
+            # 少し待機してからギルド情報を取得
+            await asyncio.sleep(3)
+            
+            # 全ギルドの候補チャンネルを調査
+            candidates = []
+            for guild in self.guilds:
+                try:
+                    candidate = await self._find_best_channel_in_guild(guild)
+                    if candidate:
+                        candidates.append(candidate)
+                except Exception as e:
+                    logger.error(f"Error scanning guild {guild.name}: {e}")
+            
+            if candidates:
+                # ユーザー数で降順ソート
+                candidates.sort(key=lambda x: x.get('user_count', 0), reverse=True)
+                
+                logger.info(f"Found {len(candidates)} candidate channels:")
+                for candidate in candidates:
+                    logger.info(f"  - {candidate['guild_name']}.{candidate['channel_name']}: {candidate['user_count']}人")
+                
+                # 最適なチャンネルに接続
+                best_candidate = candidates[0]
+                try:
+                    await self._connect_to_candidate_channel(best_candidate)
+                    logger.info(f"Auto-connected to {best_candidate['guild_name']}.{best_candidate['channel_name']}")
+                except Exception as e:
+                    logger.error(f"Failed to auto-connect: {e}")
+            else:
+                logger.info("No suitable voice channels found for auto-connect")
+                
+        except Exception as e:
+            logger.error(f"Error in force_auto_connect: {e}")
+    
+    async def _find_best_channel_in_guild(self, guild):
+        """ギルド内で最適なチャンネルを見つける（簡易版）"""
+        try:
+            # 権限チェック
+            bot_member = guild.get_member(self.user.id)
+            if not bot_member or not bot_member.guild_permissions.connect:
+                return None
+            
+            # 既に接続している場合をチェック
+            for g in self.guilds:
+                if g.voice_client and g.voice_client.is_connected():
+                    current_channel = g.voice_client.channel
+                    members = [m for m in current_channel.members if not m.bot]
+                    return {
+                        'guild': g,
+                        'channel': current_channel,
+                        'guild_name': g.name,
+                        'channel_name': current_channel.name,
+                        'user_count': len(members) + 1000,  # 既存接続は最高優先度
+                        'members': members,
+                        'already_connected': True
+                    }
+            
+            # 最適なチャンネルを探す
+            best_channel = None
+            max_users = 0
+            
+            for channel in guild.voice_channels:
+                # チャンネル権限チェック
+                channel_perms = channel.permissions_for(bot_member)
+                if not channel_perms.connect:
+                    continue
+                
+                # ユーザー数をチェック
+                non_bot_members = [m for m in channel.members if not m.bot]
+                user_count = len(non_bot_members)
+                
+                if user_count > 0 and user_count > max_users:
+                    max_users = user_count
+                    best_channel = {
+                        'guild': guild,
+                        'channel': channel,
+                        'guild_name': guild.name,
+                        'channel_name': channel.name,
+                        'user_count': user_count,
+                        'members': non_bot_members,
+                        'already_connected': False
+                    }
+            
+            return best_channel
+            
+        except Exception as e:
+            logger.error(f"Error scanning guild {guild.name}: {e}")
+            return None
+    
+    async def _connect_to_candidate_channel(self, candidate):
+        """候補チャンネルに接続（簡易版）"""
+        if candidate['already_connected']:
+            logger.info(f"Already connected to {candidate['channel_name']}")
+            return True
+        
+        # 新規接続
+        await self.connect_to_voice(candidate['channel'])
+        logger.info(f"Connected to {candidate['guild_name']}.{candidate['channel_name']}")
+        return True
+
     async def on_error(self, event_method: str, *args, **kwargs):
         """エラーハンドリング"""
         logger.error(f"Error in {event_method}", exc_info=True)
