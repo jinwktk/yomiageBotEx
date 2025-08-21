@@ -16,24 +16,24 @@ logger = logging.getLogger(__name__)
 
 try:
     import discord
-    # まずpy-cordのWaveSinkを試行
+    # py-cordのWaveSinkを検出
     try:
         from discord.sinks import WaveSink
         PYCORD_AVAILABLE = True
         DISCORD_PY = False
-        logger.info("Using py-cord WaveSink for audio recording")
+        logger.info("✅ Using py-cord WaveSink for real audio recording")
     except ImportError:
-        # discord.pyの場合
+        # discord.pyの場合（フォールバック）
         WaveSink = None
         PYCORD_AVAILABLE = False
         DISCORD_PY = True
-        logger.info("Using discord.py - implementing custom audio sink")
+        logger.warning("❌ py-cord not available - Using discord.py with simulated recording")
 except ImportError:
     discord = None
     WaveSink = None
     PYCORD_AVAILABLE = False
     DISCORD_PY = False
-    logger.warning("Neither py-cord nor discord.py available. Audio recording will not work.")
+    logger.error("❌ Neither py-cord nor discord.py available. Audio recording will not work.")
 
 
 class DiscordPyAudioSink:

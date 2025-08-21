@@ -260,13 +260,12 @@ class RecordingCog(commands.Cog):
         
         # 重い処理を別タスクで実行してボットのブロックを回避
         asyncio.create_task(self._process_replay_async(interaction, duration, user))
-        
-        # すぐにユーザーに応答
-        await interaction.followup.send("🎵 録音を処理中です...", ephemeral=True)
     
     async def _process_replay_async(self, interaction, duration: float, user):
         """replayコマンドの重い処理を非同期で実行"""
         try:
+            # 処理開始をユーザーに通知
+            await interaction.followup.send("🎵 録音を処理中です...", ephemeral=True)
             import time
             from datetime import datetime, timedelta
             
