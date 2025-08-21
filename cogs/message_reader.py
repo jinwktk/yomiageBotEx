@@ -52,7 +52,7 @@ class MessageReaderCog(commands.Cog):
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
-        self.save_guild_settings()  # 設定を保存
+        asyncio.create_task(self.save_guild_settings())  # 設定を非同期保存
         asyncio.create_task(self.tts_manager.cleanup())
     
     def load_guild_settings(self):
@@ -72,10 +72,11 @@ class MessageReaderCog(commands.Cog):
             self.logger.error(f"MessageReader: Failed to load guild settings: {e}")
             self.guild_reading_enabled = {}
     
-    def save_guild_settings(self):
-        """ギルド設定の保存"""
+    async def save_guild_settings(self):
+        """ギルド設定の保存（非同期版）"""
         try:
             import json
+            import aiofiles
             from pathlib import Path
             
             settings_file = Path("data/guild_reading_settings.json")
@@ -83,9 +84,11 @@ class MessageReaderCog(commands.Cog):
             
             # 整数キーを文字列に変換してJSON保存
             save_data = {str(k): v for k, v in self.guild_reading_enabled.items()}
+            json_data = json.dumps(save_data, indent=2, ensure_ascii=False)
             
-            with open(settings_file, "w", encoding="utf-8") as f:
-                json.dump(save_data, f, indent=2, ensure_ascii=False)
+            # 非同期ファイル書き込み
+            async with aiofiles.open(settings_file, "w", encoding="utf-8") as f:
+                await f.write(json_data)
                 
             self.logger.debug(f"MessageReader: Saved settings for {len(self.guild_reading_enabled)} guilds")
         except Exception as e:
@@ -255,13 +258,63 @@ class MessageReaderCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"MessageReader: Failed to play audio: {e}")
     
-    # スラッシュコマンド一時無効化（discord.py互換性のため）
-    # @commands.slash_command(name="reading", description="チャット読み上げのON/OFFを切り替えます")
-    # async def toggle_reading(self, ctx):
-    #     """読み上げ機能のON/OFF切り替え"""
-    #     pass
+    @discord.slash_command(name="reading", description="チャット読み上げのON/OFFを切り替えます")
+    async def toggle_reading(self, ctx: discord.ApplicationContext):
+        """読み上げ機能のON/OFF切り替え"""
+        try:
+            self.logger.info(f"MessageReader: /reading command received from {ctx.author} in {ctx.guild.name}")
+            
+            guild_id = ctx.guild.id
+            current_status = self.is_reading_enabled(guild_id)
+            
+            # 状態を反転
+            self.guild_reading_enabled[guild_id] = not current_status
+            new_status = not current_status
+            
+            status_text = "有効" if new_status else "無効"
+            
+            # 即座に応答（タイムアウト防止）
+            self.logger.info(f"MessageReader: Sending immediate response for {status_text} status")
+            await ctx.respond(f"🎤 チャット読み上げ機能を **{status_text}** にしました。", ephemeral=True)
+            
+            # 応答後に設定保存（バックグラウンド処理）
+            asyncio.create_task(self.save_guild_settings())
+            
+            self.logger.info(f"MessageReader: Reading toggled for guild {ctx.guild.name}: {current_status} -> {new_status}")
+            self.logger.info(f"MessageReader: /reading command completed successfully")
+            
+        except Exception as e:
+            self.logger.error(f"MessageReader: Error in /reading command: {e}", exc_info=True)
+            try:
+                await ctx.respond("❌ 読み上げ設定の変更中にエラーが発生しました。", ephemeral=True)
+            except:
+                pass  # 応答に失敗した場合は無視
+    
+    @discord.slash_command(name="reading_status", description="現在の読み上げ設定状態を表示します")
+    async def reading_status(self, ctx: discord.ApplicationContext):
+        """読み上げ機能の現在の状態を表示"""
+        guild_id = ctx.guild.id
+        is_enabled = self.is_reading_enabled(guild_id)
+        global_enabled = self.reading_enabled
+        
+        # 詳細な状態表示
+        status_lines = [
+            f"🎤 **チャット読み上げ設定状態**",
+            f"",
+            f"**グローバル設定**: {'✅ 有効' if global_enabled else '❌ 無効'}",
+            f"**このサーバー**: {'✅ 有効' if is_enabled else '❌ 無効'}",
+            f"**最終状態**: {'🔊 読み上げ中' if is_enabled and global_enabled else '🔇 読み上げ停止中'}",
+            f"",
+            f"**設定情報**:",
+            f"• 最大文字数: {self.max_length}文字",
+            f"• 無視プレフィックス: {', '.join(self.ignore_prefixes)}",
+            f"• ボットメッセージ無視: {'はい' if self.ignore_bots else 'いいえ'}"
+        ]
+        
+        await ctx.respond("\n".join(status_lines), ephemeral=True)
+    
 
 
-async def setup(bot):
+def setup(bot):
     """Cogのセットアップ"""
-    await bot.add_cog(MessageReaderCog(bot, bot.config))
+    bot.add_cog(MessageReaderCog(bot, bot.config))

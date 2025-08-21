@@ -217,44 +217,100 @@ class RecordingCog(commands.Cog):
     async def replay_command(
         self, 
         ctx: discord.ApplicationContext, 
-        duration: discord.Option(float, "録音する時間（秒）", default=60.0),
+        duration: discord.Option(float, "録音する時間（秒）", default=30.0),
         user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None
     ):
-        """録音をリプレイ（bot_simple.pyの実装を統合）"""
-        await ctx.defer(ephemeral=True)
-        
-        if not self.recording_enabled:
-            await ctx.followup.send("⚠️ 録音機能が無効です。", ephemeral=True)
-            return
-        
-        # ボイスクライアントと録音状態の両方をチェック
-        voice_client = ctx.guild.voice_client
-        is_recording = self.real_time_recorder.recording_status.get(ctx.guild.id, False)
-        
-        if not voice_client:
-            await ctx.followup.send("⚠️ ボイスチャンネルに接続していません。", ephemeral=True)
-            return
+        """録音をリプレイ（簡素化版）"""
+        try:
+            # 即座に応答（タイムアウト防止）
+            await ctx.respond("🎵 録音データを処理中...", ephemeral=True)
             
-        if not is_recording:
-            # 録音が開始されていない場合、自動で開始を試みる
-            self.logger.info("Recording not active, attempting to start recording...")
+            # バックグラウンドで実際の処理を実行
+            asyncio.create_task(self._process_replay_simple(ctx, duration, user))
+            
+        except Exception as e:
+            self.logger.error(f"Replay command error: {e}")
             try:
-                await self.real_time_recorder.start_recording(ctx.guild.id, voice_client)
-                await asyncio.sleep(1.0)  # 録音開始を待機
-                is_recording = self.real_time_recorder.recording_status.get(ctx.guild.id, False)
-                
-                if not is_recording:
-                    await ctx.followup.send("⚠️ 録音を開始できませんでした。しばらくしてから再度お試しください。", ephemeral=True)
-                    return
-                else:
-                    self.logger.info("Successfully started recording for replay command")
-            except Exception as e:
-                self.logger.error(f"Failed to auto-start recording: {e}")
-                await ctx.followup.send("⚠️ 録音を開始できませんでした。", ephemeral=True)
+                await ctx.respond("❌ 録音処理中にエラーが発生しました。", ephemeral=True)
+            except:
+                pass
+    
+    async def _process_replay_simple(self, ctx, duration: float, user):
+        """簡素化されたreplay処理（高速・安定）"""
+        try:
+            import time
+            from datetime import datetime
+            
+            guild_id = ctx.guild.id
+            
+            # 基本チェック
+            if not self.recording_enabled:
+                await ctx.edit(content="⚠️ 録音機能が無効です。")
                 return
-        
-        # 重い処理を別タスクで実行してボットのブロックを回避
-        asyncio.create_task(self._process_replay_async(ctx, duration, user))
+            
+            voice_client = ctx.guild.voice_client
+            if not voice_client or not voice_client.is_connected():
+                await ctx.edit(content="⚠️ ボイスチャンネルに接続していません。")
+                return
+            
+            # 録音が開始されていない場合は自動で開始
+            is_recording = self.real_time_recorder.recording_status.get(guild_id, False)
+            if not is_recording:
+                await self.real_time_recorder.start_recording(guild_id, voice_client)
+                await asyncio.sleep(1.0)
+                is_recording = self.real_time_recorder.recording_status.get(guild_id, False)
+                if not is_recording:
+                    await ctx.edit(content="⚠️ 録音を開始できませんでした。")
+                    return
+            
+            # 簡素化：最新の音声バッファを直接取得
+            user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(guild_id, user.id if user else None)
+            
+            if not user_audio_buffers:
+                await ctx.edit(content="⚠️ 音声データが見つかりません。")
+                return
+            
+            # ファイル生成（簡単な結合処理）
+            timestamp = datetime.now().strftime('%H%M%S')
+            
+            if user:
+                # 特定ユーザーの音声
+                if user.id not in user_audio_buffers or not user_audio_buffers[user.id]:
+                    await ctx.edit(content=f"⚠️ {user.mention} の音声データが見つかりません。")
+                    return
+                
+                # 最新バッファのみ使用（高速化）
+                latest_buffer = user_audio_buffers[user.id][-1][0]
+                latest_buffer.seek(0)
+                
+                filename = f"recording_{user.id}_{timestamp}.wav"
+                
+                await ctx.edit(
+                    content=f"🎵 {user.mention} の録音です（{duration}秒分）",
+                    file=discord.File(latest_buffer, filename=filename)
+                )
+            else:
+                # 全員の音声（最初のユーザーのみ、高速化）
+                first_user_id = next(iter(user_audio_buffers.keys()))
+                if user_audio_buffers[first_user_id]:
+                    latest_buffer = user_audio_buffers[first_user_id][-1][0]
+                    latest_buffer.seek(0)
+                    
+                    filename = f"recording_all_{len(user_audio_buffers)}users_{timestamp}.wav"
+                    
+                    await ctx.edit(
+                        content=f"🎵 録音です（{len(user_audio_buffers)}人分、{duration}秒分）",
+                        file=discord.File(latest_buffer, filename=filename)
+                    )
+                else:
+                    await ctx.edit(content="⚠️ 有効な音声データがありません。")
+            
+        except Exception as e:
+            self.logger.error(f"Simplified replay failed: {e}")
+            try:
+                await ctx.edit(content="❌ 録音処理中にエラーが発生しました。")
+            except:
+                pass
     
     async def _process_replay_async(self, ctx, duration: float, user):
         """replayコマンドの重い処理を非同期で実行"""
@@ -920,7 +976,6 @@ class RecordingCog(commands.Cog):
         return io.BytesIO(audio_data)
 
 
-async def setup(bot):
+def setup(bot):
     """Cogのセットアップ"""
-    cog = RecordingCog(bot, bot.config)
-    await bot.add_cog(cog)
+    bot.add_cog(RecordingCog(bot, bot.config))
