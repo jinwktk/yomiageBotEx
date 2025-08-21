@@ -13,7 +13,6 @@ from typing import Dict, Any, Optional
 
 import discord
 from discord.ext import commands
-from discord import app_commands
 
 from utils.recording import RecordingManager, SimpleRecordingSink
 from utils.real_audio_recorder import RealTimeAudioRecorder
@@ -214,63 +213,59 @@ class RecordingCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
     
-    @app_commands.command(name="replay", description="最近の音声を録音ファイルとして投稿します")
-    @app_commands.describe(
-        duration="録音する時間（秒）",
-        user="対象ユーザー（省略時は全体）"
-    )
+    @discord.slash_command(name="replay", description="最近の音声を録音ファイルとして投稿します")
     async def replay_command(
         self, 
-        interaction: discord.Interaction, 
-        duration: float = 60.0,
-        user: Optional[discord.Member] = None
+        ctx: discord.ApplicationContext, 
+        duration: discord.Option(float, "録音する時間（秒）", default=60.0),
+        user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None
     ):
         """録音をリプレイ（bot_simple.pyの実装を統合）"""
-        await interaction.response.defer(ephemeral=True)
+        await ctx.defer(ephemeral=True)
         
         if not self.recording_enabled:
-            await interaction.followup.send("⚠️ 録音機能が無効です。", ephemeral=True)
+            await ctx.followup.send("⚠️ 録音機能が無効です。", ephemeral=True)
             return
         
         # ボイスクライアントと録音状態の両方をチェック
-        voice_client = interaction.guild.voice_client
-        is_recording = self.real_time_recorder.recording_status.get(interaction.guild.id, False)
+        voice_client = ctx.guild.voice_client
+        is_recording = self.real_time_recorder.recording_status.get(ctx.guild.id, False)
         
         if not voice_client:
-            await interaction.followup.send("⚠️ ボイスチャンネルに接続していません。", ephemeral=True)
+            await ctx.followup.send("⚠️ ボイスチャンネルに接続していません。", ephemeral=True)
             return
             
         if not is_recording:
             # 録音が開始されていない場合、自動で開始を試みる
             self.logger.info("Recording not active, attempting to start recording...")
             try:
-                await self.real_time_recorder.start_recording(interaction.guild.id, voice_client)
+                await self.real_time_recorder.start_recording(ctx.guild.id, voice_client)
                 await asyncio.sleep(1.0)  # 録音開始を待機
-                is_recording = self.real_time_recorder.recording_status.get(interaction.guild.id, False)
+                is_recording = self.real_time_recorder.recording_status.get(ctx.guild.id, False)
                 
                 if not is_recording:
-                    await interaction.followup.send("⚠️ 録音を開始できませんでした。しばらくしてから再度お試しください。", ephemeral=True)
+                    await ctx.followup.send("⚠️ 録音を開始できませんでした。しばらくしてから再度お試しください。", ephemeral=True)
                     return
                 else:
                     self.logger.info("Successfully started recording for replay command")
             except Exception as e:
                 self.logger.error(f"Failed to auto-start recording: {e}")
-                await interaction.followup.send("⚠️ 録音を開始できませんでした。", ephemeral=True)
+                await ctx.followup.send("⚠️ 録音を開始できませんでした。", ephemeral=True)
                 return
         
         # 重い処理を別タスクで実行してボットのブロックを回避
-        asyncio.create_task(self._process_replay_async(interaction, duration, user))
+        asyncio.create_task(self._process_replay_async(ctx, duration, user))
     
-    async def _process_replay_async(self, interaction, duration: float, user):
+    async def _process_replay_async(self, ctx, duration: float, user):
         """replayコマンドの重い処理を非同期で実行"""
         try:
             # 処理開始をユーザーに通知
-            await interaction.followup.send("🎵 録音を処理中です...", ephemeral=True)
+            await ctx.followup.send("🎵 録音を処理中です...", ephemeral=True)
             import time
             from datetime import datetime, timedelta
             
             # リアルタイム録音データから直接バッファを取得（Guild別）
-            guild_id = interaction.guild.id
+            guild_id = ctx.guild.id
             
             # TTSManagerは不要になったため削除
             
@@ -321,7 +316,7 @@ class RecordingCog(commands.Cog):
                         trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
                         
                         # 音声ファイルを投稿
-                        await interaction.followup.send(
+                        await ctx.followup.send(
                             f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、{duration}秒分、ノーマライズ済み）",
                             file=discord.File(trimmed_buffer, filename=filename),
                             ephemeral=True
@@ -345,14 +340,14 @@ class RecordingCog(commands.Cog):
                         trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
                         
                         # 音声ファイルを投稿
-                        await interaction.followup.send(
+                        await ctx.followup.send(
                             f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人、{duration}秒分、ミキシング済み）",
                             file=discord.File(trimmed_buffer, filename=filename),
                             ephemeral=True
                         )
                         return
                     else:
-                        await interaction.followup.send("⚠️ ミキシングできる音声データがありませんでした。", ephemeral=True)
+                        await ctx.followup.send("⚠️ ミキシングできる音声データがありませんでした。", ephemeral=True)
                         return
             
             # 時間範囲ベース処理が失敗した場合のみフォールバック
@@ -367,13 +362,13 @@ class RecordingCog(commands.Cog):
             if user:
                 # 特定ユーザーの音声
                 if user.id not in user_audio_buffers or not user_audio_buffers[user.id]:
-                    await interaction.followup.send(f"⚠️ {user.mention} の音声データが見つかりません。", ephemeral=True)
+                    await ctx.followup.send(f"⚠️ {user.mention} の音声データが見つかりません。", ephemeral=True)
                     return
                 
                 # 最新のバッファを取得
                 sorted_buffers = sorted(user_audio_buffers[user.id], key=lambda x: x[1])
                 if not sorted_buffers:
-                    await interaction.followup.send(f"⚠️ {user.mention} の音声データがありません。", ephemeral=True)
+                    await ctx.followup.send(f"⚠️ {user.mention} の音声データがありません。", ephemeral=True)
                     return
                 
                 # 時間制限を考慮したバッファを結合
@@ -410,7 +405,7 @@ class RecordingCog(commands.Cog):
                 trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
                 
                 # 音声ファイルを投稿
-                await interaction.followup.send(
+                await ctx.followup.send(
                     f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、{duration}秒分、ノーマライズ済み・フォールバック）",
                     file=discord.File(trimmed_buffer, filename=filename),
                     ephemeral=True
@@ -419,7 +414,7 @@ class RecordingCog(commands.Cog):
             else:
                 # 全員の音声をマージ
                 if not user_audio_buffers:
-                    await interaction.followup.send("⚠️ 録音データがありません。", ephemeral=True)
+                    await ctx.followup.send("⚠️ 録音データがありません。", ephemeral=True)
                     return
                 
                 # 全ユーザーの音声データを収集してミキシング用に準備
@@ -461,14 +456,14 @@ class RecordingCog(commands.Cog):
                         fallback_audio_data[user_id] = user_audio.getvalue()
                 
                 if not fallback_audio_data:
-                    await interaction.followup.send("⚠️ 有効な録音データがありません。", ephemeral=True)
+                    await ctx.followup.send("⚠️ 有効な録音データがありません。", ephemeral=True)
                     return
                 
                 # フォールバック音声データをミキシング
                 mixed_audio = await self._mix_multiple_audio_streams(fallback_audio_data)
                 
                 if not mixed_audio or len(mixed_audio.getvalue()) <= 44:
-                    await interaction.followup.send("⚠️ ミキシングできる音声データがありませんでした（フォールバック）。", ephemeral=True)
+                    await ctx.followup.send("⚠️ ミキシングできる音声データがありませんでした（フォールバック）。", ephemeral=True)
                     return
                 
                 mixed_audio.seek(0)
@@ -483,24 +478,24 @@ class RecordingCog(commands.Cog):
                 trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
                 
                 # 音声ファイルを投稿
-                await interaction.followup.send(
+                await ctx.followup.send(
                     f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人分、{duration}秒分、ミキシング済み・フォールバック）",
                     file=discord.File(trimmed_buffer, filename=filename),
                     ephemeral=True
                 )
             
-            self.logger.info(f"Replaying {duration}s audio (user: {user}) for {interaction.user} in {interaction.guild.name}")
+            self.logger.info(f"Replaying {duration}s audio (user: {user}) for {ctx.user} in {ctx.guild.name}")
             
         except Exception as e:
             self.logger.error(f"Failed to replay audio: {e}", exc_info=True)
-            await interaction.followup.send(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
+            await ctx.followup.send(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
     
-    @app_commands.command(name="recordings", description="最近の録音リストを表示します")
-    async def recordings_command(self, interaction: discord.Interaction):
+    @discord.slash_command(name="recordings", description="最近の録音リストを表示します")
+    async def recordings_command(self, ctx: discord.ApplicationContext):
         """録音リストを表示するコマンド"""
         
         if not self.recording_enabled:
-            await interaction.response.send_message(
+            await ctx.respond(
                 "❌ 録音機能は現在無効になっています。",
                 ephemeral=True
             )
@@ -508,12 +503,12 @@ class RecordingCog(commands.Cog):
         
         try:
             recordings = await self.recording_manager.list_recent_recordings(
-                guild_id=interaction.guild.id,
+                guild_id=ctx.guild.id,
                 limit=5
             )
             
             if not recordings:
-                await interaction.response.send_message(
+                await ctx.respond(
                     "📂 録音ファイルはありません。",
                     ephemeral=True
                 )
@@ -539,11 +534,11 @@ class RecordingCog(commands.Cog):
             
             embed.set_footer(text="録音は1時間後に自動削除されます")
             
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await ctx.respond(embed=embed, ephemeral=True)
             
         except Exception as e:
             self.logger.error(f"Failed to list recordings: {e}")
-            await interaction.response.send_message(
+            await ctx.respond(
                 "❌ 録音リストの取得に失敗しました。",
                 ephemeral=True
             )

@@ -11,7 +11,6 @@ from typing import Dict, Any, List, Optional
 
 import discord
 from discord.ext import commands
-from discord import app_commands
 
 from utils.user_settings import UserSettingsManager
 
@@ -33,13 +32,13 @@ class UserSettingsCog(commands.Cog):
         delay = random.uniform(*self.config["bot"]["rate_limit_delay"])
         await asyncio.sleep(delay)
     
-    @app_commands.command(name="my_settings", description="現在の個人設定を表示します")
-    async def my_settings_command(self, interaction: discord.Interaction):
+    @discord.slash_command(name="my_settings", description="現在の個人設定を表示します")
+    async def my_settings_command(self, ctx: discord.ApplicationContext):
         """現在の個人設定を表示"""
         await self.rate_limit_delay()
         
         try:
-            settings_summary = self.user_settings.get_settings_summary(interaction.user.id)
+            settings_summary = self.user_settings.get_settings_summary(ctx.user.id)
             
             embed = discord.Embed(
                 title="⚙️ あなたの個人設定",
@@ -48,7 +47,7 @@ class UserSettingsCog(commands.Cog):
             )
             embed.set_footer(text="設定を変更するには /set_reading, /set_global_tts コマンドを使用してください")
             
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await ctx.respond(embed=embed, ephemeral=True)
             
         except Exception as e:
             self.logger.error(f"Failed to show user settings: {e}")

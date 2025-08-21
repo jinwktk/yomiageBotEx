@@ -14,7 +14,6 @@ import time
 
 import discord
 from discord.ext import commands
-from discord import app_commands
 import yaml
 from dotenv import load_dotenv
 import fnmatch
@@ -453,18 +452,8 @@ class YomiageBot(commands.Bot):
             for cmd in cog_commands:
                 logger.info(f"  - {cmd.name}")
         
-        # app_commandsを同期（スラッシュコマンドを有効化）
-        try:
-            logger.info("Syncing app commands...")
-            synced_commands = await self.tree.sync()
-            logger.info(f"Successfully synced {len(synced_commands)} app commands")
-            
-            # 同期されたコマンドをログ出力
-            for cmd in synced_commands:
-                logger.info(f"  - /{cmd.name}: {cmd.description}")
-                
-        except Exception as e:
-            logger.error(f"Failed to sync app commands: {e}", exc_info=True)
+        # py-cordではapp_commandsの同期は不要（自動的に同期される）
+        logger.info("py-cord detected - slash commands will sync automatically")
         
         # ログクリーンアップタスクの開始
         asyncio.create_task(start_log_cleanup_task(self.config))
