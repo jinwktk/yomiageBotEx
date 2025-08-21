@@ -4,6 +4,7 @@ RecordingCog v2 - シンプルな録音・リプレイ機能
 - /replayコマンド
 """
 
+import asyncio
 import logging
 import tempfile
 from pathlib import Path
@@ -138,6 +139,30 @@ class RecordingCogV2(commands.Cog):
                 
         except Exception as e:
             logger.error(f"Handle user left error: {e}", exc_info=True)
+    
+    async def handle_bot_joined_with_users(self, channel: discord.VoiceChannel, members: list):
+        """Botが既存ユーザーと一緒にVCに参加した時の録音開始"""
+        try:
+            if not self.enabled or not self.recorder:
+                return
+            
+            voice_cog = self.bot.get_cog('VoiceCogV2')
+            if not voice_cog:
+                return
+            
+            voice_client = voice_cog.get_voice_client(channel.guild.id)
+            if not voice_client:
+                return
+            
+            # 録音開始
+            if not self.recorder.is_recording(channel.guild.id):
+                # 少し待ってから録音開始（接続安定化のため）
+                await asyncio.sleep(1)
+                await self.recorder.start_recording(voice_client)
+                logger.info(f"Started recording with {len(members)} users in {channel.name}")
+                
+        except Exception as e:
+            logger.error(f"Bot joined recording error: {e}", exc_info=True)
     
     def is_recording(self, guild_id: int) -> bool:
         """録音中かチェック"""

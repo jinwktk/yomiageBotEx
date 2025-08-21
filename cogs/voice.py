@@ -25,6 +25,13 @@ class VoiceCogV2(commands.Cog):
         
         logger.info("VoiceCog v2 initialized")
     
+    async def cog_load(self):
+        """Cog読み込み時の初期化処理"""
+        # 起動時にVCをチェックして自動参加
+        if self.config.get('auto_join', True):
+            await asyncio.sleep(3)  # Bot準備完了まで待機
+            await self.check_voice_channels_on_startup()
+    
     @discord.slash_command(name="join", description="ボイスチャンネルに参加")
     async def join_command(self, ctx: discord.ApplicationContext):
         """手動VC参加コマンド"""
@@ -177,6 +184,42 @@ class VoiceCogV2(commands.Cog):
     def get_voice_client(self, guild_id: int) -> Optional[discord.VoiceClient]:
         """指定ギルドのVoiceClientを取得"""
         return self.connected_channels.get(guild_id)
+    
+    async def check_voice_channels_on_startup(self):
+        """起動時にVCをチェックして自動参加"""
+        try:
+            for guild in self.bot.guilds:
+                # 各ギルドのVCをチェック
+                for channel in guild.voice_channels:
+                    # Bot以外のユーザーがいるチャンネルを探す
+                    human_members = [m for m in channel.members if not m.bot]
+                    
+                    if human_members:
+                        logger.info(f"Found {len(human_members)} users in {channel.name}, auto-joining...")
+                        await self.join_voice_channel(channel)
+                        
+                        # 他のCogに通知
+                        await self.notify_bot_joined_with_users(channel, human_members)
+                        break  # 1つのギルドにつき1つのチャンネルにのみ参加
+                        
+        except Exception as e:
+            logger.error(f"Startup VC check error: {e}", exc_info=True)
+    
+    async def notify_bot_joined_with_users(self, channel: discord.VoiceChannel, members: list):
+        """Botが既存ユーザーと一緒にVCに参加した時の通知"""
+        try:
+            # TTSCogに挨拶を依頼
+            tts_cog = self.bot.get_cog('TTSCogV2')
+            if tts_cog:
+                await tts_cog.handle_bot_joined_with_users(channel, members)
+            
+            # RecordingCogに録音開始を依頼
+            recording_cog = self.bot.get_cog('RecordingCogV2')
+            if recording_cog:
+                await recording_cog.handle_bot_joined_with_users(channel, members)
+                
+        except Exception as e:
+            logger.error(f"Bot joined notification error: {e}", exc_info=True)
     
     def cog_unload(self):
         """Cog終了時の処理"""

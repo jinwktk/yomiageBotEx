@@ -5,12 +5,17 @@ bot:
   auto_leave: true     # VC自動退出
 
 tts:
-  api_url: "http://localhost:5000"    # StyleBertVITS2 APIサーバー
+  api_url: "http://192.168.1.99:5000"    # Serena APIサーバー
   enabled: true                       # TTS機能有効/無効
-  default_model: "jvnv-F1-jp"        # デフォルトモデル
+  default_model: "Serena"             # Serenaモデル
   default_speaker: 0                  # デフォルト話者
   timeout: 30                         # API接続タイムアウト（秒）
   max_length: 100                     # 読み上げ最大文字数
+  
+greeting:
+  enabled: true                       # 挨拶機能有効/無効
+  join_message: "こんにちは！"         # 入室時挨拶
+  leave_message: "お疲れ様でした"      # 退室時挨拶
 
 recording:
   enabled: true        # 録音機能有効/無効

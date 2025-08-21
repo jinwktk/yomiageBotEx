@@ -22,9 +22,11 @@ class TTSCogV2(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.config = bot.config.get('tts', {})
+        self.greeting_config = bot.config.get('greeting', {})
         
         # TTS機能が有効かチェック
         self.enabled = self.config.get('enabled', True)
+        self.greeting_enabled = self.greeting_config.get('enabled', True)
         
         # ギルド別読み上げ状態管理
         self.reading_enabled: Dict[int, bool] = {}  # guild_id: enabled
@@ -34,7 +36,7 @@ class TTSCogV2(commands.Cog):
         if self.enabled:
             self.tts_client = TTSClientV2(self.config)
         
-        logger.info(f"TTSCog v2 initialized - Enabled: {self.enabled}")
+        logger.info(f"TTSCog v2 initialized - Enabled: {self.enabled}, Greeting: {self.greeting_enabled}")
     
     async def cog_load(self):
         """Cog読み込み時の処理"""
@@ -145,6 +147,130 @@ class TTSCogV2(commands.Cog):
     def is_reading_enabled(self, guild_id: int) -> bool:
         """指定ギルドで読み上げが有効かチェック"""
         return self.reading_enabled.get(guild_id, False)
+    
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        """VC状態変更時の挨拶処理"""
+        if not self.greeting_enabled or not self.enabled:
+            return
+        
+        # Botの状態変更は無視
+        if member.bot:
+            return
+        
+        try:
+            # ユーザーがVCに参加した場合
+            if after.channel and not before.channel:
+                await self.handle_user_joined(member, after.channel)
+            
+            # ユーザーがVCから退出した場合
+            elif before.channel and not after.channel:
+                await self.handle_user_left(member, before.channel)
+                
+        except Exception as e:
+            logger.error(f"Voice state greeting error: {e}", exc_info=True)
+    
+    async def handle_user_joined(self, member: discord.Member, channel: discord.VoiceChannel):
+        """ユーザーVC参加時の挨拶"""
+        try:
+            # Botが同じチャンネルにいるかチェック
+            voice_cog = self.bot.get_cog('VoiceCogV2')
+            if not voice_cog:
+                return
+            
+            voice_client = voice_cog.get_voice_client(member.guild.id)
+            if not voice_client or voice_client.channel != channel:
+                return
+            
+            # 挨拶メッセージ
+            join_message = self.greeting_config.get('join_message', 'こんにちは！')
+            greeting_text = f"{member.display_name}さん、{join_message}"
+            
+            await self.speak_greeting(greeting_text, voice_client)
+            logger.info(f"Greeted {member.display_name} joining {channel.name}")
+            
+        except Exception as e:
+            logger.error(f"User joined greeting error: {e}", exc_info=True)
+    
+    async def handle_user_left(self, member: discord.Member, channel: discord.VoiceChannel):
+        """ユーザーVC退出時の挨拶"""
+        try:
+            # Botが同じチャンネルにいるかチェック
+            voice_cog = self.bot.get_cog('VoiceCogV2')
+            if not voice_cog:
+                return
+            
+            voice_client = voice_cog.get_voice_client(member.guild.id)
+            if not voice_client or voice_client.channel != channel:
+                return
+            
+            # 挨拶メッセージ
+            leave_message = self.greeting_config.get('leave_message', 'お疲れ様でした')
+            greeting_text = f"{member.display_name}さん、{leave_message}"
+            
+            await self.speak_greeting(greeting_text, voice_client)
+            logger.info(f"Said goodbye to {member.display_name} leaving {channel.name}")
+            
+        except Exception as e:
+            logger.error(f"User left greeting error: {e}", exc_info=True)
+    
+    async def handle_bot_joined_with_users(self, channel: discord.VoiceChannel, members: list):
+        """Botが既存ユーザーと一緒にVCに参加した時の挨拶"""
+        try:
+            if not self.greeting_enabled or not self.enabled:
+                return
+            
+            voice_cog = self.bot.get_cog('VoiceCogV2')
+            if not voice_cog:
+                return
+            
+            voice_client = voice_cog.get_voice_client(channel.guild.id)
+            if not voice_client:
+                return
+            
+            # 複数人いる場合は「皆さん」で挨拶
+            if len(members) > 1:
+                greeting_text = "皆さん、こんにちは！"
+            else:
+                member = members[0]
+                greeting_text = f"{member.display_name}さん、こんにちは！"
+            
+            # 少し待ってから挨拶（接続安定化のため）
+            await asyncio.sleep(2)
+            await self.speak_greeting(greeting_text, voice_client)
+            logger.info(f"Greeted {len(members)} users in {channel.name}")
+            
+        except Exception as e:
+            logger.error(f"Bot joined greeting error: {e}", exc_info=True)
+    
+    async def speak_greeting(self, text: str, voice_client: discord.VoiceClient):
+        """挨拶音声を再生"""
+        try:
+            if not self.tts_client:
+                return
+            
+            # 音声合成
+            audio_source = await self.tts_client.synthesize_speech(text)
+            
+            if not audio_source:
+                logger.warning(f"Failed to synthesize greeting: {text}")
+                return
+            
+            # 既に再生中の場合は停止
+            if voice_client.is_playing():
+                voice_client.stop()
+            
+            # 挨拶音声再生
+            voice_client.play(audio_source)
+            
+            # 再生完了まで待機（最大10秒）
+            timeout = 10
+            while voice_client.is_playing() and timeout > 0:
+                await asyncio.sleep(0.1)
+                timeout -= 0.1
+            
+        except Exception as e:
+            logger.error(f"Greeting speech error: {e}", exc_info=True)
 
 def setup(bot):
     bot.add_cog(TTSCogV2(bot))
