@@ -286,6 +286,7 @@ class VoiceCog(commands.Cog):
             self.save_sessions()
             return True
 
+    @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         """ボイスステート変更時の自動参加・退出処理"""
         if member.bot:  # ボット自身の変更は無視
@@ -457,14 +458,22 @@ class VoiceCog(commands.Cog):
     
     async def handle_user_leave(self, guild: discord.Guild, channel: discord.VoiceChannel):
         """ユーザー退出時の処理"""
+        self.logger.info(f"VoiceCog: User left channel {channel.name} in {guild.name}")
+        
         if not self.config["bot"]["auto_leave"]:
+            self.logger.info("VoiceCog: Auto-leave disabled in config")
             return
         
         # ボットが接続していない場合は何もしない
         if not guild.voice_client or guild.voice_client.channel != channel:
+            self.logger.info(f"VoiceCog: Bot not connected to {channel.name} or connected to different channel")
             return
         
         # チャンネルが空かチェック
+        members_count = len(channel.members)
+        non_bot_members = len([m for m in channel.members if not m.bot])
+        self.logger.info(f"VoiceCog: Channel {channel.name} has {members_count} total members, {non_bot_members} non-bot members")
+        
         if len(channel.members) <= 1:  # ボット自身のみ
             try:
                 await guild.voice_client.disconnect()

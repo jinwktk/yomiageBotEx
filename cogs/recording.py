@@ -132,7 +132,7 @@ class RecordingCog(commands.Cog):
             if members_count == 0:
                 # リアルタイム録音を停止
                 try:
-                    self.real_time_recorder.stop_recording(guild.id, voice_client)
+                    await self.real_time_recorder.stop_recording(guild.id, voice_client)
                     self.logger.info(f"Recording: Stopped real-time recording for {bot_channel.name}")
                 except Exception as e:
                     self.logger.error(f"Recording: Failed to stop real-time recording: {e}")
