@@ -232,9 +232,31 @@ class RecordingCog(commands.Cog):
             await interaction.followup.send("⚠️ 録音機能が無効です。", ephemeral=True)
             return
         
-        if not interaction.guild.voice_client:
-            await interaction.followup.send("⚠️ 現在録音中ではありません。", ephemeral=True)
+        # ボイスクライアントと録音状態の両方をチェック
+        voice_client = interaction.guild.voice_client
+        is_recording = self.real_time_recorder.recording_status.get(interaction.guild.id, False)
+        
+        if not voice_client:
+            await interaction.followup.send("⚠️ ボイスチャンネルに接続していません。", ephemeral=True)
             return
+            
+        if not is_recording:
+            # 録音が開始されていない場合、自動で開始を試みる
+            self.logger.info("Recording not active, attempting to start recording...")
+            try:
+                await self.real_time_recorder.start_recording(interaction.guild.id, voice_client)
+                await asyncio.sleep(1.0)  # 録音開始を待機
+                is_recording = self.real_time_recorder.recording_status.get(interaction.guild.id, False)
+                
+                if not is_recording:
+                    await interaction.followup.send("⚠️ 録音を開始できませんでした。しばらくしてから再度お試しください。", ephemeral=True)
+                    return
+                else:
+                    self.logger.info("Successfully started recording for replay command")
+            except Exception as e:
+                self.logger.error(f"Failed to auto-start recording: {e}")
+                await interaction.followup.send("⚠️ 録音を開始できませんでした。", ephemeral=True)
+                return
         
         # 重い処理を別タスクで実行してボットのブロックを回避
         asyncio.create_task(self._process_replay_async(interaction, duration, user))

@@ -29,6 +29,9 @@ class VoiceCog(commands.Cog):
         # 定期チェックタスクを開始
         if not self.empty_channel_check.is_running():
             self.empty_channel_check.start()
+            
+        if not self.recording_check.is_running():
+            self.recording_check.start()
         
         # 起動時自動参加チェックのタスクを開始
         if not self.startup_auto_join_check.is_running():
@@ -37,6 +40,7 @@ class VoiceCog(commands.Cog):
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
         self.empty_channel_check.cancel()
+        self.recording_check.cancel()
         self.startup_auto_join_check.cancel()
     
     def load_sessions(self) -> Dict[int, int]:
@@ -269,11 +273,14 @@ class VoiceCog(commands.Cog):
             recording_cog = self.bot.get_cog("RecordingCog")
             if recording_cog and candidate['members']:
                 try:
-                    if not getattr(candidate['guild'].voice_client, 'recording', False):
+                    is_recording = recording_cog.real_time_recorder.recording_status.get(candidate['guild'].id, False)
+                    if not is_recording:
                         self.logger.info(f"Starting recording for existing connection")
                         await recording_cog.handle_bot_joined_with_user(candidate['guild'], candidate['members'][0])
+                    else:
+                        self.logger.debug(f"Recording already active for existing connection")
                 except Exception as e:
-                    self.logger.debug(f"Failed to start recording: {e}")
+                    self.logger.error(f"Failed to start recording: {e}", exc_info=True)
             return True
         else:
             # 新規接続
@@ -322,14 +329,22 @@ class VoiceCog(commands.Cog):
                 recording_cog = self.bot.get_cog("RecordingCog")
                 if recording_cog:
                     try:
-                        # 録音が既に開始されているかチェック
-                        if not getattr(guild.voice_client, 'recording', False):
+                        # 録音状態を正確にチェック
+                        is_recording = recording_cog.real_time_recorder.recording_status.get(guild.id, False)
+                        if not is_recording:
                             self.logger.info(f"Starting recording for user join: {channel.name}")
                             await recording_cog.real_time_recorder.start_recording(guild.id, guild.voice_client)
+                            # 録音開始を確認
+                            await asyncio.sleep(0.5)
+                            new_status = recording_cog.real_time_recorder.recording_status.get(guild.id, False)
+                            if new_status:
+                                self.logger.info(f"Successfully started recording in {channel.name}")
+                            else:
+                                self.logger.warning(f"Failed to start recording in {channel.name}")
                         else:
                             self.logger.debug(f"Recording already active in {channel.name}")
                     except Exception as e:
-                        self.logger.debug(f"Failed to start recording on user join: {e}")
+                        self.logger.error(f"Failed to start recording on user join: {e}", exc_info=True)
                 return
             
             # 別のチャンネルに移動
@@ -509,6 +524,49 @@ class VoiceCog(commands.Cog):
     @empty_channel_check.before_loop
     async def before_empty_channel_check(self):
         """定期チェック開始前の待機"""
+        await self.bot.wait_until_ready()
+    
+    @tasks.loop(minutes=2)
+    async def recording_check(self):
+        """2分ごとの録音状態チェック"""
+        try:
+            recording_cog = self.bot.get_cog("RecordingCog")
+            if not recording_cog:
+                return
+                
+            for guild in self.bot.guilds:
+                if not guild.voice_client or not guild.voice_client.is_connected():
+                    continue
+                
+                channel = guild.voice_client.channel
+                # チャンネルにユーザーがいるか確認
+                non_bot_members = [m for m in channel.members if not m.bot]
+                if not non_bot_members:
+                    continue
+                
+                # 録音状態を確認
+                is_recording = recording_cog.real_time_recorder.recording_status.get(guild.id, False)
+                if not is_recording:
+                    self.logger.info(f"Recording not active in {channel.name}, attempting to start...")
+                    try:
+                        await recording_cog.real_time_recorder.start_recording(guild.id, guild.voice_client)
+                        await asyncio.sleep(1.0)  # 録音開始を待機
+                        new_status = recording_cog.real_time_recorder.recording_status.get(guild.id, False)
+                        if new_status:
+                            self.logger.info(f"Successfully restarted recording in {channel.name}")
+                        else:
+                            self.logger.warning(f"Failed to restart recording in {channel.name}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to restart recording in {channel.name}: {e}")
+                else:
+                    self.logger.debug(f"Recording is active in {channel.name}")
+                    
+        except Exception as e:
+            self.logger.error(f"Error in recording check: {e}", exc_info=True)
+    
+    @recording_check.before_loop
+    async def before_recording_check(self):
+        """録音チェック開始前の待機"""
         await self.bot.wait_until_ready()
     
     @app_commands.command(name="join", description="ボイスチャンネルに参加します")
