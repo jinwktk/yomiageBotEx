@@ -2,9 +2,9 @@
 
 bot:
   command_prefix: "/"
-  auto_join: true
+  auto_join: true   # 音声接続を再有効化
   auto_leave: true
-  rate_limit_delay: [0.5, 1.0]  # API呼び出し時のランダム遅延（秒）
+  rate_limit_delay: [0.1, 0.3]  # API呼び出し時のランダム遅延を短縮（高速化）
   admin_user_id: 372768430149074954  # 管理者ユーザーID
 
 # TTS設定は data/tts_config.json に移動しました

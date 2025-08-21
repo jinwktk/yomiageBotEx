@@ -96,12 +96,14 @@ class YomiageBot(commands.Bot):
         intents.guilds = True
         intents.members = True  # メンバー情報の取得を有効化
         
-        # グローバルコマンド同期（すべてのギルドで利用可能）
-        # debug_guildsを指定しないことで、すべてのギルドでコマンドが同期される
+        # デバッグ用ギルド設定（即座にコマンド同期）
+        debug_guilds = [813783748566581249, 995627275074666568]  # にめろうサーバー、Valworld
+        
         super().__init__(
             command_prefix='/',
             intents=intents,
-            heartbeat_timeout=60.0  # HeartBeatタイムアウトを60秒に延長
+            heartbeat_timeout=60.0,  # HeartBeatタイムアウトを60秒に延長
+            debug_guilds=debug_guilds  # デバッグギルドで即座同期
         )
         
         self.config = config
@@ -139,12 +141,12 @@ class YomiageBot(commands.Bot):
                 
                 # タイムアウトとreconnectで接続の安定性を向上
                 vc = await channel.connect(
-                    timeout=60.0,  # タイムアウトを延長（45秒→60秒）
-                    reconnect=True
+                    timeout=15.0,  # タイムアウト短縮（WebSocket 4006エラー対策）
+                    reconnect=False  # 自動再接続無効化（手動制御）
                 )
                 
-                # 接続成功後の安定化待機を延長
-                await asyncio.sleep(2.0)
+                # 接続成功後の安定化待機を短縮
+                await asyncio.sleep(0.5)
                 
                 # 接続状態の確認
                 if vc and vc.is_connected():
@@ -357,39 +359,9 @@ class YomiageBot(commands.Bot):
             raise final_e
         
     def setup_cogs(self):
-        """起動時のCog読み込み（同期処理）"""
-        logger.info("Loading cogs...")
-        
-        try:
-            self.load_cogs_sync()
-            self._cogs_loaded = True
-            logger.info(f"Cogs loaded. Total cogs: {len(self.cogs)}")
-        except Exception as e:
-            logger.error(f"Failed to load cogs: {e}", exc_info=True)
-    
-    def load_cogs_sync(self):
-        """Cogを読み込む（同期版）"""
-        cogs = [
-            "cogs.voice",
-            "cogs.tts", 
-            "cogs.recording",
-            "cogs.message_reader",
-            "cogs.dictionary",
-            "cogs.user_settings",
-        ]
-        
-        for cog in cogs:
-            try:
-                # 既に読み込まれているかチェック
-                if cog in self.extensions:
-                    logger.debug(f"Cog {cog} already loaded, skipping")
-                    continue
-                
-                # discord.pyの推奨方法でCogを読み込み
-                self.load_extension(cog)
-                logger.info(f"Loaded cog: {cog}")
-            except Exception as e:
-                logger.error(f"Failed to load cog {cog}: {e}", exc_info=True)
+        """起動時のCog読み込み（同期処理）- 非同期版に委任"""
+        # 非同期版に委任（on_readyで実行される）
+        self._cogs_loaded = False
                 
     async def load_cogs(self):
         """Cogを読み込む（非同期版）"""
@@ -399,7 +371,7 @@ class YomiageBot(commands.Bot):
             "cogs.recording",
             "cogs.message_reader",
             "cogs.dictionary",
-            "cogs.user_settings",
+            # "cogs.user_settings",  # 一時的に無効化（.disabled ファイルのため）
         ]
         
         for cog in cogs:
@@ -409,8 +381,8 @@ class YomiageBot(commands.Bot):
                     logger.debug(f"Cog {cog} already loaded, skipping")
                     continue
                 
-                # discord.pyの非同期方法でCogを読み込み
-                await self.load_extension(cog)
+                # py-cordでは load_extension は同期メソッド
+                self.load_extension(cog)
                 logger.info(f"Loaded cog: {cog}")
             except Exception as e:
                 logger.error(f"Failed to load cog {cog}: {e}", exc_info=True)
@@ -446,14 +418,37 @@ class YomiageBot(commands.Bot):
             logger.info(f"  Command: {cmd.name} (type: {type(cmd).__name__})")
         
         # Cogのコマンド詳細確認
+        total_slash_commands = 0
         for cog_name, cog in self.cogs.items():
             cog_commands = cog.get_commands()
-            logger.info(f"Cog {cog_name}: {len(cog_commands)} commands")
+            slash_commands = [cmd for cmd in cog_commands if hasattr(cmd, 'type') and getattr(cmd, 'type', None) == discord.SlashCommandGroup or hasattr(cmd, '_callback')]
+            total_slash_commands += len(slash_commands)
+            logger.info(f"Cog {cog_name}: {len(cog_commands)} total commands, {len(slash_commands)} slash commands")
             for cmd in cog_commands:
-                logger.info(f"  - {cmd.name}")
+                cmd_type = "slash" if (hasattr(cmd, 'type') and getattr(cmd, 'type', None) == discord.SlashCommandGroup) or hasattr(cmd, '_callback') else "regular"
+                logger.info(f"  - {cmd.name} ({cmd_type})")
         
-        # py-cordではapp_commandsの同期は不要（自動的に同期される）
-        logger.info("py-cord detected - slash commands will sync automatically")
+        # py-cordのスラッシュコマンド同期確認
+        logger.info(f"py-cord detected - {total_slash_commands} slash commands found")
+        logger.info(f"Debug guilds configured: {self.debug_guilds}")
+        
+        # py-cordでは明示的にスラッシュコマンドを同期する必要がある
+        if total_slash_commands > 0 and self.debug_guilds:
+            try:
+                logger.info("Syncing slash commands to debug guilds...")
+                for guild_id in self.debug_guilds:
+                    guild = self.get_guild(guild_id)
+                    if guild:
+                        # py-cordでは引数なしでsync_commands()を呼び、debug_guildsで自動的に各ギルドに同期される
+                        await self.sync_commands()
+                        logger.info(f"Synced {total_slash_commands} slash commands to debug guilds")
+                        break  # 一度だけ実行すればすべてのdebug_guildsに同期される
+                    else:
+                        logger.warning(f"Guild {guild_id} not found for command sync")
+            except Exception as e:
+                logger.error(f"Failed to sync slash commands: {e}")
+        else:
+            logger.info("Slash commands will sync automatically to debug guilds")
         
         # ログクリーンアップタスクの開始
         asyncio.create_task(start_log_cleanup_task(self.config))

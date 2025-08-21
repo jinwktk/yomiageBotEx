@@ -210,6 +210,6 @@ class TTSCog(commands.Cog):
     
 
 
-async def setup(bot):
+def setup(bot):
     """Cogのセットアップ"""
-    await bot.add_cog(TTSCog(bot, bot.config))
+    bot.add_cog(TTSCog(bot, bot.config))

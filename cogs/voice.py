@@ -525,7 +525,7 @@ class VoiceCog(commands.Cog):
         """定期チェック開始前の待機"""
         await self.bot.wait_until_ready()
     
-    @tasks.loop(minutes=2)
+    @tasks.loop(minutes=1)
     async def recording_check(self):
         """2分ごとの録音状態チェック"""
         try:
@@ -816,7 +816,6 @@ class VoiceCog(commands.Cog):
             )
 
 
-async def setup(bot):
+def setup(bot):
     """Cogのセットアップ"""
-    cog = VoiceCog(bot, bot.config)
-    await bot.add_cog(cog)
+    bot.add_cog(VoiceCog(bot, bot.config))
