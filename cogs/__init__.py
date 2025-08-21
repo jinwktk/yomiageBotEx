@@ -1,1 +1,1 @@
-# Cogs module
+# cogs_v2パッケージ初期化

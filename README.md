@@ -1,221 +1,131 @@
-# yomiageBotEx - Discord読み上げボット
+# yomiageBotEx v2 - シンプル録音機能付き読み上げBot
 
-Discordボイスチャンネルで読み上げ機能を提供するボット（Python版）
+## 概要
 
-## 🚀 クイックスタート
+シンプルで理解しやすい録音機能付きDiscord読み上げBotです。
+複雑な機能を排除し、コア機能のみに特化した軽量設計。
 
-### 1. 必要なもの
-- Python 3.10以上（推奨: 3.11）
-- [uv](https://docs.astral.sh/uv/) - Pythonパッケージマネージャー
-- Discord Bot Token
-- FFmpeg（音声処理用）※Phase 3以降で必要
+## 主要機能
 
-### 2. uvのインストール
+### 🎵 コア機能（必須）
+- **読み上げ機能**: StyleBertVITS2による高品質音声合成
+- **録音・リプレイ機能**: ボイスチャンネルの音声録音と再生
+- **VC操作**: 自動・手動でのボイスチャンネル参加退出
 
+### 🔧 オプション機能
+- **辞書機能**: 単語の読み方変更
+
+## セットアップ
+
+### 1. 依存関係インストール
 ```bash
-# Linux/macOS
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+pip install -r requirements_v2.txt
 ```
 
-### 3. プロジェクトのセットアップ
-
-```bash
-# リポジトリのクローン
-git clone https://github.com/jinwktk/yomiageBotEx.git
-cd yomiageBotEx
-
-# 依存関係のインストール
-uv sync --no-install-project
+### 2. 環境設定
+`.env`ファイルを作成:
 ```
-
-### 4. 設定
-
-1. `.env`ファイルを作成し、Discordトークンを設定：
-```env
 DISCORD_TOKEN=your_discord_bot_token_here
 ```
 
-2. `config.yaml`で各種設定を調整（オプション）
+### 3. 設定ファイル
+`config_v2.yaml`で各種設定を調整（デフォルトのままでも動作）
 
-### 5. 起動
-
-#### 手動起動
+### 4. Bot起動
 ```bash
-uv run --no-project python bot.py
+python bot_v2.py
 ```
 
-#### スクリプトを使用（推奨）
+または
 ```bash
-# Linux/macOS
-./scripts/start.sh
-
-# Windows
-scripts\start.bat
+python test_v2.py  # テスト用
 ```
 
-## 📝 コマンド一覧
+## 利用可能コマンド
 
-| コマンド | 説明 |
-|---------|------|
-| `/join` | ボイスチャンネルに参加 |
-| `/leave` | ボイスチャンネルから退出 |
-| `/replay` | 最近の音声を録音してチャットに投稿（1-300秒） |
-| `/recordings` | 最近の録音リストを表示 |
-| `/reading` | チャット読み上げのON/OFFを切り替え |
-| `/dict_add` | 辞書に単語を追加 |
-| `/dict_remove` | 辞書から単語を削除 |
-| `/my_settings` | 現在の個人設定を表示 |
-| `/set_reading` | 読み上げ設定を変更 |
-| `/set_global_tts` | サーバー全体のTTS設定を変更（管理者限定） |
+### 基本操作
+- `/join` - ボイスチャンネルに参加
+- `/leave` - ボイスチャンネルから退出
+- `/reading on/off` - 読み上げ機能のON/OFF切り替え
 
-## 🔧 設定ファイル
+### 録音機能
+- `/replay [秒数]` - 録音した音声を再生（デフォルト30秒）
 
-`config.yaml`で以下の設定が可能：
-- ボットの基本設定（管理者ユーザーID、自動参加設定等）
-- TTS設定（APIサーバーURL、モデル/話者/スタイル設定）
-- ロギング設定
-- レート制限設定
-- 辞書設定
+### 辞書機能（オプション）
+- `/dict_add 単語 読み方` - 辞書に単語を追加
+- `/dict_remove 単語` - 辞書から単語を削除
 
-詳細は`config.yaml`のコメントを参照してください。
+## StyleBertVITS2設定
 
-## 📋 実装状況
+デフォルトで`http://localhost:5000`のTTS APIサーバーに接続します。
 
-- ✅ Phase 1: 基本機能（VC参加・退出）
-- ✅ Phase 2: 自動参加・退出機能  
-- ✅ Phase 3: TTS統合（Style-Bert-VITS2）
-- ✅ Phase 4: 録音・リプレイ機能
-
-## 🎵 主な機能
-
-### 基本機能
-- Discord ボイスチャンネルへの自動参加・退出
-- ユーザーの参加・退出時の挨拶音声再生
-
-### チャット読み上げ機能
-- リアルタイムでチャットメッセージを音声で読み上げ
-- URL、メンション、絵文字の自動変換
-- 読み上げON/OFF切り替え（`/reading`コマンド）
-- プレフィックス（!、/、.、?）で始まるメッセージは除外
-
-### 録音・リプレイ機能
-- 最大10分間の音声バッファリング
-- `/replay`コマンドで過去の音声を再生
-- 録音ファイルの自動管理（1時間後削除）
-- リアルタイム音声受信（フォールバック機能付き）
-
-### TTS機能（オプション）
-- Style-Bert-VITS2との連携
-- 音声キャッシュによる高速化
-- フォールバック機能（ビープ音での代替再生）
-
-## 🎵 Style-Bert-VITS2 TTS APIサーバーのセットアップ（オプション）
-
-実際の音声合成を使用する場合は、Style-Bert-VITS2 APIサーバーが必要です。
-
-### 1. Style-Bert-VITS2のインストール
-
+### APIサーバー起動方法
+1. [Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2)をインストール
+2. APIサーバーを起動:
 ```bash
-# Style-Bert-VITS2をクローン
-git clone https://github.com/litagin02/Style-Bert-VITS2.git
-cd Style-Bert-VITS2
-
-# 依存関係のインストール
-pip install -r requirements.txt
+python server_fastapi.py --port 5000
 ```
 
-### 2. 事前学習モデルのダウンロード
+## ファイル構成
 
+```
+yomiageBotEx/
+├── bot_v2.py              # メインBot
+├── config_v2.yaml         # 設定ファイル
+├── requirements_v2.txt    # 依存関係
+├── test_v2.py            # テスト起動スクリプト
+├── .env                  # Discordトークン
+├── cogs_v2/              # 機能モジュール
+│   ├── voice.py          # VC操作
+│   ├── tts.py            # 読み上げ機能
+│   ├── recording.py      # 録音機能
+│   └── dictionary.py     # 辞書機能
+└── utils_v2/             # ユーティリティ
+    ├── tts_client.py     # TTS API連携
+    └── audio_recorder.py # 音声録音処理
+```
+
+## v1からの主な変更点
+
+### ✅ 改善点
+- **シンプル化**: 複雑な機能を削除、コア機能に特化
+- **理解しやすさ**: コードの可読性とデバッグ性を向上
+- **保守性**: ファイル数を削減、依存関係を最小限に
+
+### ❌ 削除された機能
+- ユーザー個人設定システム
+- パフォーマンス監視
+- 複雑な音声処理（ノーマライズ等）
+- ログローテーション
+- ホットリロード機能
+- 複雑なエラーハンドリング
+
+## トラブルシューティング
+
+### よくある問題
+
+1. **スラッシュコマンドが表示されない**
+   - Bot再起動後、Discordクライアントも再起動
+   - コマンド同期に数分かかる場合があります
+
+2. **TTS APIに接続できない**
+   - StyleBertVITS2サーバーが起動しているか確認
+   - `config_v2.yaml`のapi_url設定を確認
+
+3. **録音機能が動作しない**
+   - py-cord[voice]がインストールされているか確認
+   - FFmpegがシステムにインストールされているか確認
+
+## 開発・デバッグ
+
+### ログ確認
 ```bash
-# 日本語モデルをダウンロード（約2GB）
-python -m style_bert_vits2.nlp.bert_models
+tail -f bot_v2.log
 ```
 
-### 3. APIサーバーの起動
+### 設定変更
+`config_v2.yaml`を編集後、Bot再起動
 
-```bash
-# APIサーバーを起動（デフォルトの127.0.0.1:8000で起動）
-python server_fastapi.py
-```
+## ライセンス
 
-### 4. 動作確認
-
-```bash
-# APIサーバーが起動しているか確認
-curl http://127.0.0.1:8000/status
-```
-
-成功すると、実際の音声合成での挨拶が再生されます。APIサーバーが動作していない場合は、自動的にフォールバック音声（ビープ音）が再生されます。
-
-## 🛠️ 開発者向け
-
-### 開発環境のセットアップ
-```bash
-# 開発用依存関係のインストール
-uv sync --dev --no-install-project
-
-# コードフォーマット
-uv run black .
-
-# リンター実行
-uv run flake8 .
-
-# テスト実行
-uv run pytest
-```
-
-## 🐛 トラブルシューティング
-
-### スラッシュコマンドが表示されない
-- Botを再起動後、Discordクライアントも再起動してください
-- コマンドの同期には数分かかることがあります
-
-### Invalid token エラー
-- `.env`ファイルのトークンを確認してください
-- トークンの前後に余分なスペースがないか確認してください
-
-### Opus library エラー（Windows）
-録音機能でOpusエラーが出る場合：
-```
-Could not find Opus library. Make sure it is installed.
-```
-
-**解決方法**：
-1. Windowsの場合、Opusライブラリは自動的にフォールバックモードで動作します
-2. 完全な音声受信機能が必要な場合は、以下をインストール：
-   - [Opus公式サイト](https://opus-codec.org/downloads/)からWindows用DLLをダウンロード
-   - システムのPATHに追加するか、ボットのディレクトリに配置
-
-**注意**: Opusライブラリがなくても基本的な録音機能は動作しますが、音質が低下する可能性があります。
-
-## 📄 ライセンス
-
-MIT License
-
-## PST.exe（Process Stoper Tool）との競合問題
-
-### 問題：
-Palworld ServerのPST.exeが9:00AMに自動でDiscord botを終了させる場合があります。
-
-### 解決策：
-1. **保護モードで起動**（推奨）
-   - `scripts/start.bat`を使用してbotを起動
-   - 自動的にシグナル保護機能が有効になります
-
-2. **環境変数で無効化**
-   ```batch
-   set ENABLE_PST=false
-   ```
-
-3. **PST.exe設定変更**
-   - `pst\yomiage_protection.txt`を作成
-   - 除外プロセスに`python.exe`、`YomiageBotEx`を追加
-
-### ログで確認：
-```
-SIGINT received - possibly from PST.exe. Checking source...
-Protected mode: Ignoring external termination signal for 5 seconds...
-```
+このプロジェクトはMITライセンスの下で公開されています。

@@ -1,3 +1,5 @@
+# yomiageBotEx v2 - シンプル版 .gitignore
+
 # 環境変数
 .env
 
@@ -7,38 +9,48 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 仮想環境
 venv/
+env/
 ENV/
 
-# uv
-.venv/
-.uv-cache/
-
-# ログファイル（重複削除・統合）
-logs/
+# ログファイル
 *.log
-*.log.*
+logs/
 
-# 録音関連（重複削除・統合）
+# 音声キャッシュ・録音データ
+cache/
 recordings/
-tmpwav/
 *.wav
 *.mp3
 
+# 設定・データファイル
+data/
+dictionary_v2.json
+sessions.json
+audio_buffers.json
+
 # 一時ファイル
-temp/
 *.tmp
 *.temp
 *.bak
-
-# TTSキャッシュ
-cache/
-
-
-# セッションファイル
-sessions.json
-recordings_buffer.pkl
+tmpwav/
 
 # IDE設定
 .vscode/
@@ -46,11 +58,14 @@ recordings_buffer.pkl
 *.swp
 *.swo
 
-# OS固有
+# OS生成ファイル
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# 開発用一時ファイル
-*_report.md
-debug_*.txt
-test_*.py
+# Windows固有
+*.lnk

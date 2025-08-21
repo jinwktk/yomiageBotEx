@@ -1,981 +1,149 @@
 """
-録音・リプレイ機能Cog
+RecordingCog v2 - シンプルな録音・リプレイ機能
+- リアルタイム音声録音
 - /replayコマンド
-- 音声バッファ管理
-- 録音ファイル自動クリーンアップ
 """
 
-import asyncio
-import io
 import logging
-import random
-from typing import Dict, Any, Optional
+import tempfile
+from pathlib import Path
 
 import discord
 from discord.ext import commands
 
-from utils.recording import RecordingManager, SimpleRecordingSink
-from utils.real_audio_recorder import RealTimeAudioRecorder
-from utils.audio_processor import AudioProcessor
+from utils.audio_recorder import AudioRecorderV2
 
+logger = logging.getLogger(__name__)
 
-class RecordingCog(commands.Cog):
-    """録音・リプレイ機能を提供するCog"""
+class RecordingCogV2(commands.Cog):
+    """録音機能Cog"""
     
-    def __init__(self, bot: commands.Bot, config: Dict[str, Any]):
+    def __init__(self, bot):
         self.bot = bot
-        self.config = config
-        self.logger = logging.getLogger(__name__)
-        self.recording_manager = RecordingManager(config)
-        self.recording_enabled = config.get("recording", {}).get("enabled", False)
+        self.config = bot.config.get('recording', {})
         
-        # 初期化時の設定値をログ出力
-        self.logger.info(f"Recording: Initializing with recording_enabled: {self.recording_enabled}")
-        self.logger.info(f"Recording: Config recording section: {config.get('recording', {})}")
+        # 録音機能が有効かチェック
+        self.enabled = self.config.get('enabled', True)
         
-        # ギルドごとの録音シンク（シミュレーション用）
-        self.recording_sinks: Dict[int, SimpleRecordingSink] = {}
+        # 録音マネージャー
+        self.recorder = None
+        if self.enabled:
+            self.recorder = AudioRecorderV2(self.config)
         
-        # リアルタイム音声録音管理
-        self.real_time_recorder = RealTimeAudioRecorder(self.recording_manager)
-        
-        # 録音開始のロック機構（Guild別）
-        self.recording_locks: Dict[int, asyncio.Lock] = {}
-        
-        # 音声処理
-        self.audio_processor = AudioProcessor(config)
-        
-        # クリーンアップタスクは後で開始
-        self.cleanup_task_started = False
+        logger.info(f"RecordingCog v2 initialized - Enabled: {self.enabled}")
     
-    def cog_unload(self):
-        """Cogアンロード時のクリーンアップ"""
-        for sink in self.recording_sinks.values():
-            sink.cleanup()
-        self.recording_sinks.clear()
+    @discord.slash_command(name="replay", description="録音した音声を再生")
+    async def replay_command(self, ctx: discord.ApplicationContext,
+                           duration: discord.Option(int, "再生する秒数（デフォルト: 30秒）", required=False, default=30)):
+        """録音リプレイコマンド"""
+        await ctx.defer(ephemeral=True)
         
-        # リアルタイム録音のクリーンアップ
-        self.real_time_recorder.cleanup()
-    
-    async def rate_limit_delay(self):
-        """レート制限対策の遅延"""
-        delay = random.uniform(*self.config["bot"]["rate_limit_delay"])
-        await asyncio.sleep(delay)
-    
-    def get_recording_sink(self, guild_id: int) -> SimpleRecordingSink:
-        """ギルド用の録音シンクを取得"""
-        if guild_id not in self.recording_sinks:
-            self.recording_sinks[guild_id] = SimpleRecordingSink(
-                self.recording_manager, guild_id
-            )
-        return self.recording_sinks[guild_id]
+        try:
+            if not self.enabled:
+                await ctx.followup.send("❌ 録音機能が無効になっています", ephemeral=True)
+                return
+            
+            # VoiceClientチェック
+            voice_cog = self.bot.get_cog('VoiceCogV2')
+            if not voice_cog:
+                await ctx.followup.send("❌ ボイス機能が利用できません", ephemeral=True)
+                return
+            
+            voice_client = voice_cog.get_voice_client(ctx.guild.id)
+            if not voice_client:
+                await ctx.followup.send("❌ ボイスチャンネルに接続していません", ephemeral=True)
+                return
+            
+            # 音声データ取得
+            audio_data = await self.recorder.get_recent_audio(ctx.guild.id, duration)
+            if not audio_data:
+                await ctx.followup.send("❌ 録音データが見つかりません", ephemeral=True)
+                return
+            
+            # 一時ファイルに保存
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
+                temp_file.write(audio_data.getvalue())
+                temp_file.flush()
+                
+                # Discordに送信
+                file = discord.File(temp_file.name, filename=f"replay_{duration}s.wav")
+                await ctx.followup.send(
+                    f"🎵 録音データ（{duration}秒）", 
+                    file=file, 
+                    ephemeral=True
+                )
+                
+                logger.info(f"Replay sent - Guild: {ctx.guild.name}, Duration: {duration}s")
+                
+                # 一時ファイル削除
+                Path(temp_file.name).unlink(missing_ok=True)
+                
+        except Exception as e:
+            logger.error(f"Replay command error: {e}", exc_info=True)
+            await ctx.followup.send("❌ リプレイ中にエラーが発生しました", ephemeral=True)
     
     @commands.Cog.listener()
-    async def on_ready(self):
-        """Bot準備完了時のクリーンアップタスク開始"""
-        if self.recording_enabled and not self.cleanup_task_started:
-            asyncio.create_task(self.recording_manager.start_cleanup_task())
-            self.cleanup_task_started = True
-            self.logger.info("Recording: Cleanup task started")
-    
-    @commands.Cog.listener()
-    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-        """ボイス状態変更時の録音管理"""
-        self.logger.info(f"Recording: Voice state update for {member.display_name}")
-        self.logger.info(f"Recording: Recording enabled: {self.recording_enabled}")
-        
-        if not self.recording_enabled:
-            self.logger.warning("Recording: Recording disabled in config")
-            return
-        
-        if member.bot:  # ボット自身の変更は無視
-            return
-        
-        guild = member.guild
-        voice_client = guild.voice_client
-        
-        self.logger.info(f"Recording: Voice client connected: {voice_client is not None and voice_client.is_connected()}")
-        
-        if not voice_client or not voice_client.is_connected():
-            self.logger.warning(f"Recording: No voice client or not connected for {guild.name}")
-            return
-        
-        # ボットと同じチャンネルでの変更のみ処理
-        bot_channel = voice_client.channel
-        self.logger.info(f"Recording: Bot channel: {bot_channel.name if bot_channel else 'None'}")
-        self.logger.info(f"Recording: Before channel: {before.channel.name if before.channel else 'None'}")
-        self.logger.info(f"Recording: After channel: {after.channel.name if after.channel else 'None'}")
-        
-        # ユーザーがボットのいるチャンネルに参加した場合は録音開始
-        if before.channel != bot_channel and after.channel == bot_channel:
-            self.logger.info(f"Recording: User {member.display_name} joined bot channel {bot_channel.name}")
-            
-            # リアルタイム録音を開始
-            try:
-                await self.real_time_recorder.start_recording(guild.id, voice_client)
-                self.logger.info(f"Recording: Started real-time recording for {bot_channel.name}")
-            except Exception as e:
-                self.logger.error(f"Recording: Failed to start real-time recording: {e}")
-                # フォールバック: シミュレーション録音
-                sink = self.get_recording_sink(guild.id)
-                if not sink.is_recording:
-                    sink.start_recording()
-                    self.logger.info(f"Recording: Started fallback simulation recording for {bot_channel.name}")
-        
-        # チャンネルが空になった場合は録音停止
-        elif before.channel == bot_channel and after.channel != bot_channel:
-            self.logger.info(f"Recording: User {member.display_name} left bot channel {bot_channel.name}")
-            # ボット以外のメンバー数をチェック
-            members_count = len([m for m in bot_channel.members if not m.bot])
-            self.logger.info(f"Recording: Members remaining: {members_count}")
-            if members_count == 0:
-                # リアルタイム録音を停止
-                try:
-                    await self.real_time_recorder.stop_recording(guild.id, voice_client)
-                    self.logger.info(f"Recording: Stopped real-time recording for {bot_channel.name}")
-                except Exception as e:
-                    self.logger.error(f"Recording: Failed to stop real-time recording: {e}")
-                
-                # シミュレーション録音も停止
-                sink = self.get_recording_sink(guild.id)
-                if sink.is_recording:
-                    sink.stop_recording()
-                    self.logger.info(f"Recording: Stopped simulation recording for {bot_channel.name}")
-    
-    async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
-        """ボットがVCに参加した際、既にいるユーザーがいる場合の録音開始処理"""
-        try:
-            # Guild別のロックを取得・作成
-            if guild.id not in self.recording_locks:
-                self.recording_locks[guild.id] = asyncio.Lock()
-            
-            # ロックを使用して同時実行を防ぐ
-            async with self.recording_locks[guild.id]:
-                # 録音が既に開始されているかチェック（最優先）
-                if self.real_time_recorder.recording_status.get(guild.id, False):
-                    self.logger.debug(f"Recording: Already recording for guild {guild.id}, skipping start")
-                    return
-                
-                # 複数回チェックして接続の安定性を確保
-                voice_client = None
-                for attempt in range(5):
-                    voice_client = guild.voice_client
-                    if voice_client and voice_client.is_connected():
-                        # 追加の安定性チェック
-                        await asyncio.sleep(0.2)
-                        if voice_client.is_connected():
-                            break
-                    await asyncio.sleep(0.5)
-                
-                if voice_client and voice_client.is_connected():
-                    # 再度録音状態をチェック（ダブルチェック）
-                    if self.real_time_recorder.recording_status.get(guild.id, False):
-                        self.logger.debug(f"Recording: Already recording detected after voice check for guild {guild.id}")
-                        return
-                    
-                    # py-cord側の録音状態もチェック
-                    if hasattr(voice_client, 'recording') and voice_client.recording:
-                        self.logger.debug(f"Recording: py-cord already recording for guild {guild.id}, skipping")
-                        return
-                    
-                    self.logger.info(f"Recording: Bot joined, starting recording for user {member.display_name}")
-                    
-                    # さらに短い安定化待機
-                    await asyncio.sleep(0.3)
-                    
-                    # 最終接続確認
-                    if not voice_client.is_connected():
-                        self.logger.warning(f"Recording: Voice client disconnected before starting recording for {member.display_name}")
-                        return
-                    
-                    # リアルタイム録音を開始
-                    try:
-                        await self.real_time_recorder.start_recording(guild.id, voice_client)
-                        self.logger.info(f"Recording: Started real-time recording for {voice_client.channel.name}")
-                        
-                        # 録音状況デバッグ（簡略化）
-                        await asyncio.sleep(0.5)
-                        recording_active = self.real_time_recorder.recording_status.get(guild.id, False)
-                        self.logger.debug(f"Recording: Status check - active: {recording_active}")
-                        
-                    except Exception as e:
-                        self.logger.debug(f"Recording: Failed to start real-time recording: {e}")
-                        # フォールバック: シミュレーション録音
-                        try:
-                            sink = self.get_recording_sink(guild.id)
-                            if not sink.is_recording:
-                                sink.start_recording()
-                                self.logger.info(f"Recording: Started fallback simulation recording for {voice_client.channel.name}")
-                        except Exception as fallback_error:
-                            self.logger.error(f"Recording: Fallback recording also failed: {fallback_error}")
-                else:
-                    self.logger.warning(f"Recording: No stable voice client when trying to start recording for {member.display_name}")
-        except Exception as e:
-            self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
-    
-    @discord.slash_command(name="replay", description="最近の音声を録音ファイルとして投稿します")
-    async def replay_command(
-        self, 
-        ctx: discord.ApplicationContext, 
-        duration: discord.Option(float, "録音する時間（秒）", default=30.0),
-        user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None
-    ):
-        """録音をリプレイ（簡素化版）"""
-        try:
-            # 即座に応答（タイムアウト防止）
-            await ctx.respond("🎵 録音データを処理中...", ephemeral=True)
-            
-            # バックグラウンドで実際の処理を実行
-            asyncio.create_task(self._process_replay_simple(ctx, duration, user))
-            
-        except Exception as e:
-            self.logger.error(f"Replay command error: {e}")
-            try:
-                await ctx.respond("❌ 録音処理中にエラーが発生しました。", ephemeral=True)
-            except:
-                pass
-    
-    async def _process_replay_simple(self, ctx, duration: float, user):
-        """簡素化されたreplay処理（高速・安定）"""
-        try:
-            import time
-            from datetime import datetime
-            
-            guild_id = ctx.guild.id
-            
-            # 基本チェック
-            if not self.recording_enabled:
-                await ctx.edit(content="⚠️ 録音機能が無効です。")
-                return
-            
-            voice_client = ctx.guild.voice_client
-            if not voice_client or not voice_client.is_connected():
-                await ctx.edit(content="⚠️ ボイスチャンネルに接続していません。")
-                return
-            
-            # 録音が開始されていない場合は自動で開始
-            is_recording = self.real_time_recorder.recording_status.get(guild_id, False)
-            if not is_recording:
-                await self.real_time_recorder.start_recording(guild_id, voice_client)
-                await asyncio.sleep(1.0)
-                is_recording = self.real_time_recorder.recording_status.get(guild_id, False)
-                if not is_recording:
-                    await ctx.edit(content="⚠️ 録音を開始できませんでした。")
-                    return
-            
-            # 簡素化：最新の音声バッファを直接取得
-            user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(guild_id, user.id if user else None)
-            
-            if not user_audio_buffers:
-                await ctx.edit(content="⚠️ 音声データが見つかりません。")
-                return
-            
-            # ファイル生成（簡単な結合処理）
-            timestamp = datetime.now().strftime('%H%M%S')
-            
-            if user:
-                # 特定ユーザーの音声
-                if user.id not in user_audio_buffers or not user_audio_buffers[user.id]:
-                    await ctx.edit(content=f"⚠️ {user.mention} の音声データが見つかりません。")
-                    return
-                
-                # 最新バッファのみ使用（高速化）
-                latest_buffer = user_audio_buffers[user.id][-1][0]
-                latest_buffer.seek(0)
-                
-                filename = f"recording_{user.id}_{timestamp}.wav"
-                
-                await ctx.edit(
-                    content=f"🎵 {user.mention} の録音です（{duration}秒分）",
-                    file=discord.File(latest_buffer, filename=filename)
-                )
-            else:
-                # 全員の音声（最初のユーザーのみ、高速化）
-                first_user_id = next(iter(user_audio_buffers.keys()))
-                if user_audio_buffers[first_user_id]:
-                    latest_buffer = user_audio_buffers[first_user_id][-1][0]
-                    latest_buffer.seek(0)
-                    
-                    filename = f"recording_all_{len(user_audio_buffers)}users_{timestamp}.wav"
-                    
-                    await ctx.edit(
-                        content=f"🎵 録音です（{len(user_audio_buffers)}人分、{duration}秒分）",
-                        file=discord.File(latest_buffer, filename=filename)
-                    )
-                else:
-                    await ctx.edit(content="⚠️ 有効な音声データがありません。")
-            
-        except Exception as e:
-            self.logger.error(f"Simplified replay failed: {e}")
-            try:
-                await ctx.edit(content="❌ 録音処理中にエラーが発生しました。")
-            except:
-                pass
-    
-    async def _process_replay_async(self, ctx, duration: float, user):
-        """replayコマンドの重い処理を非同期で実行"""
-        try:
-            # 処理開始をユーザーに通知
-            await ctx.followup.send("🎵 録音を処理中です...", ephemeral=True)
-            import time
-            from datetime import datetime, timedelta
-            
-            # リアルタイム録音データから直接バッファを取得（Guild別）
-            guild_id = ctx.guild.id
-            
-            # TTSManagerは不要になったため削除
-            
-            # 現在時刻を記録（録音期間計算用）
-            current_time = datetime.now()
-            start_time = current_time - timedelta(seconds=duration)
-            
-            # 時刻文字列を生成（日本時間表示用）
-            time_range_str = f"{start_time.strftime('%H:%M:%S')}-{current_time.strftime('%H:%M:%S')}"
-            date_str = current_time.strftime('%m/%d')
-            date_str_for_filename = current_time.strftime('%m%d')  # ファイル名用（スラッシュなし）
-            
-            # 録音中の場合は強制的にチェックポイントを作成
-            if guild_id in self.real_time_recorder.connections:
-                vc = self.real_time_recorder.connections[guild_id]
-                if hasattr(vc, 'recording') and vc.recording:
-                    self.logger.info(f"Recording is active, creating checkpoint before replay")
-                    checkpoint_success = await self.real_time_recorder.force_recording_checkpoint(guild_id)
-                    if checkpoint_success:
-                        self.logger.info(f"Checkpoint created successfully")
-                    else:
-                        self.logger.warning(f"Failed to create checkpoint, using existing buffers")
-            
-            # 時間範囲ベースの音声データ取得（優先処理）
-            time_range_audio = None
-            if hasattr(self.real_time_recorder, 'get_audio_for_time_range'):
-                # 連続バッファから指定時間分の音声を取得
-                time_range_audio = self.real_time_recorder.get_audio_for_time_range(guild_id, duration, user.id if user else None)
-                self.logger.info(f"Time range audio result: {len(time_range_audio) if time_range_audio else 0} users")
-            
-            # 時間範囲ベースで音声データが取得できた場合
-            if time_range_audio:
-                if user:
-                    # 特定ユーザーの音声
-                    if user.id not in time_range_audio or not time_range_audio[user.id]:
-                        # フォールバック前にエラーメッセージ
-                        self.logger.warning(f"No time-range audio for user {user.id}, checking if fallback should be used")
-                    else:
-                        audio_data = time_range_audio[user.id]
-                        audio_buffer = io.BytesIO(audio_data)
-                        
-                        # 一時ファイルに保存してノーマライズ処理
-                        filename = f"recording_user{user.id}_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
-                        
-                        processed_buffer = await self._process_individual_audio_buffer(audio_buffer, user.display_name)
-                        
-                        # 時間精度を向上：指定した時間分のみ切り出し
-                        trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
-                        
-                        # 音声ファイルを投稿
-                        await ctx.followup.send(
-                            f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、{duration}秒分、ノーマライズ済み）",
-                            file=discord.File(trimmed_buffer, filename=filename),
-                            ephemeral=True
-                        )
-                        return
-                
-                else:
-                    # 全員の音声をミキシング（混合）
-                    mixed_audio = await self._mix_multiple_audio_streams(time_range_audio)
-                    user_count = len(time_range_audio)
-                    
-                    if mixed_audio and len(mixed_audio.getvalue()) > 44:  # WAVヘッダーより大きい
-                        mixed_audio.seek(0)
-                        
-                        # 一時ファイルに保存してノーマライズ処理
-                        filename = f"recording_all_{user_count}users_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
-                        
-                        processed_buffer = await self._process_audio_buffer(mixed_audio)
-                        
-                        # 時間精度を向上：指定した時間分のみ切り出し
-                        trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
-                        
-                        # 音声ファイルを投稿
-                        await ctx.followup.send(
-                            f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人、{duration}秒分、ミキシング済み）",
-                            file=discord.File(trimmed_buffer, filename=filename),
-                            ephemeral=True
-                        )
-                        return
-                    else:
-                        await ctx.followup.send("⚠️ ミキシングできる音声データがありませんでした。", ephemeral=True)
-                        return
-            
-            # 時間範囲ベース処理が失敗した場合のみフォールバック
-            self.logger.warning(f"Time-range based audio extraction failed or returned empty, falling back to buffer-based method")
-            
-            # フォールバック：従来の方式（バッファベース）
-            user_audio_buffers = self.real_time_recorder.get_user_audio_buffers(guild_id, user.id if user else None)
-            
-            # バッファクリーンアップ（Guild別）
-            await self.real_time_recorder.clean_old_buffers(guild_id)
-            
-            if user:
-                # 特定ユーザーの音声
-                if user.id not in user_audio_buffers or not user_audio_buffers[user.id]:
-                    await ctx.followup.send(f"⚠️ {user.mention} の音声データが見つかりません。", ephemeral=True)
-                    return
-                
-                # 最新のバッファを取得
-                sorted_buffers = sorted(user_audio_buffers[user.id], key=lambda x: x[1])
-                if not sorted_buffers:
-                    await ctx.followup.send(f"⚠️ {user.mention} の音声データがありません。", ephemeral=True)
-                    return
-                
-                # 時間制限を考慮したバッファを結合
-                audio_buffer = io.BytesIO()
-                current_time = time.time()
-                cutoff_time = current_time - duration  # duration秒前のカットオフ時刻
-                
-                # カットオフ時刻より新しいバッファのみ使用
-                filtered_buffers = [
-                    (buffer, timestamp) for buffer, timestamp in sorted_buffers
-                    if timestamp >= cutoff_time
-                ]
-                
-                if not filtered_buffers:
-                    # カットオフ時刻内にバッファがない場合は最新1個のみ使用
-                    filtered_buffers = sorted_buffers[-1:]
-                    self.logger.warning(f"No buffers within {duration}s timeframe for user {user.id}, using latest buffer only")
-                else:
-                    self.logger.info(f"Using {len(filtered_buffers)} buffers within {duration}s timeframe for user {user.id}")
-                
-                for buffer, timestamp in filtered_buffers:
-                    buffer.seek(0)
-                    audio_buffer.write(buffer.read())
-                
-                audio_buffer.seek(0)
-                
-                # 一時ファイルに保存してノーマライズ処理
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"recording_user{user.id}_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
-                
-                processed_buffer = await self._process_audio_buffer(audio_buffer)
-                
-                # 時間精度を向上：指定した時間分のみ切り出し（フォールバック）
-                trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
-                
-                # 音声ファイルを投稿
-                await ctx.followup.send(
-                    f"🎵 {user.mention} の録音です（{date_str} {time_range_str}、{duration}秒分、ノーマライズ済み・フォールバック）",
-                    file=discord.File(trimmed_buffer, filename=filename),
-                    ephemeral=True
-                )
-                
-            else:
-                # 全員の音声をマージ
-                if not user_audio_buffers:
-                    await ctx.followup.send("⚠️ 録音データがありません。", ephemeral=True)
-                    return
-                
-                # 全ユーザーの音声データを収集してミキシング用に準備
-                fallback_audio_data = {}
-                user_count = 0
-                current_time = time.time()
-                cutoff_time = current_time - duration  # duration秒前のカットオフ時刻
-                
-                for user_id, buffers in user_audio_buffers.items():
-                    if not buffers:
-                        continue
-                    
-                    # 時間制限を考慮したバッファを取得
-                    sorted_buffers = sorted(buffers, key=lambda x: x[1])
-                    
-                    # カットオフ時刻より新しいバッファのみ使用
-                    filtered_buffers = [
-                        (buffer, timestamp) for buffer, timestamp in sorted_buffers
-                        if timestamp >= cutoff_time
-                    ]
-                    
-                    if not filtered_buffers:
-                        # カットオフ時刻内にバッファがない場合は最新1個のみ使用
-                        filtered_buffers = sorted_buffers[-1:]
-                        self.logger.warning(f"No buffers within {duration}s timeframe for user {user_id}, using latest buffer only")
-                    else:
-                        self.logger.info(f"Using {len(filtered_buffers)} buffers within {duration}s timeframe for user {user_id}")
-                    
-                    user_count += 1
-                    
-                    # ユーザーごとの音声データを結合
-                    user_audio = io.BytesIO()
-                    for buffer, timestamp in filtered_buffers:
-                        buffer.seek(0)
-                        user_audio.write(buffer.read())
-                    
-                    if user_audio.tell() > 0:  # データがある場合のみ追加
-                        user_audio.seek(0)
-                        fallback_audio_data[user_id] = user_audio.getvalue()
-                
-                if not fallback_audio_data:
-                    await ctx.followup.send("⚠️ 有効な録音データがありません。", ephemeral=True)
-                    return
-                
-                # フォールバック音声データをミキシング
-                mixed_audio = await self._mix_multiple_audio_streams(fallback_audio_data)
-                
-                if not mixed_audio or len(mixed_audio.getvalue()) <= 44:
-                    await ctx.followup.send("⚠️ ミキシングできる音声データがありませんでした（フォールバック）。", ephemeral=True)
-                    return
-                
-                mixed_audio.seek(0)
-                
-                # ミキシングした音声をノーマライズ処理
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"recording_all_{user_count}users_{date_str_for_filename}_{time_range_str.replace(':', '')}_{duration}s.wav"
-                
-                processed_buffer = await self._process_audio_buffer(mixed_audio)
-                
-                # 時間精度を向上：指定した時間分のみ切り出し（フォールバック）
-                trimmed_buffer = await self._trim_audio_to_duration(processed_buffer, duration)
-                
-                # 音声ファイルを投稿
-                await ctx.followup.send(
-                    f"🎵 全員の録音です（{date_str} {time_range_str}、{user_count}人分、{duration}秒分、ミキシング済み・フォールバック）",
-                    file=discord.File(trimmed_buffer, filename=filename),
-                    ephemeral=True
-                )
-            
-            self.logger.info(f"Replaying {duration}s audio (user: {user}) for {ctx.user} in {ctx.guild.name}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to replay audio: {e}", exc_info=True)
-            await ctx.followup.send(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
-    
-    @discord.slash_command(name="recordings", description="最近の録音リストを表示します")
-    async def recordings_command(self, ctx: discord.ApplicationContext):
-        """録音リストを表示するコマンド"""
-        
-        if not self.recording_enabled:
-            await ctx.respond(
-                "❌ 録音機能は現在無効になっています。",
-                ephemeral=True
-            )
+    async def on_voice_state_update(self, member, before, after):
+        """VC状態変更時の録音処理"""
+        if not self.enabled or member.bot:
             return
         
         try:
-            recordings = await self.recording_manager.list_recent_recordings(
-                guild_id=ctx.guild.id,
-                limit=5
-            )
+            # ユーザーがVCに参加した場合 - 録音開始
+            if after.channel and not before.channel:
+                await self.handle_user_joined(member, after.channel)
             
-            if not recordings:
-                await ctx.respond(
-                    "📂 録音ファイルはありません。",
-                    ephemeral=True
-                )
+            # ユーザーがVCから退出した場合 - 録音停止チェック
+            elif before.channel and not after.channel:
+                await self.handle_user_left(member, before.channel)
+                
+        except Exception as e:
+            logger.error(f"Recording voice state error: {e}", exc_info=True)
+    
+    async def handle_user_joined(self, member: discord.Member, channel: discord.VoiceChannel):
+        """ユーザーVC参加時の録音開始"""
+        try:
+            voice_cog = self.bot.get_cog('VoiceCogV2')
+            if not voice_cog:
                 return
             
-            # 録音リストを整形
-            embed = discord.Embed(
-                title="🎵 最近の録音",
-                color=discord.Color.blue()
-            )
+            voice_client = voice_cog.get_voice_client(member.guild.id)
+            if not voice_client:
+                return
             
-            for i, recording in enumerate(recordings, 1):
-                created_at = recording["created_at"][:19].replace("T", " ")
-                file_size_mb = recording["file_size"] / (1024 * 1024)
+            # 録音開始（既に録音中の場合はスキップ）
+            if not self.recorder.is_recording(member.guild.id):
+                await self.recorder.start_recording(voice_client)
+                logger.info(f"Started recording for {member.display_name} in {channel.name}")
                 
-                embed.add_field(
-                    name=f"{i}. 録音 {recording['id'][:8]}",
-                    value=f"時刻: {created_at}\n"
-                          f"長さ: {recording['duration']:.1f}秒\n"
-                          f"サイズ: {file_size_mb:.2f}MB",
-                    inline=True
-                )
-            
-            embed.set_footer(text="録音は1時間後に自動削除されます")
-            
-            await ctx.respond(embed=embed, ephemeral=True)
-            
         except Exception as e:
-            self.logger.error(f"Failed to list recordings: {e}")
-            await ctx.respond(
-                "❌ 録音リストの取得に失敗しました。",
-                ephemeral=True
-            )
+            logger.error(f"Handle user joined error: {e}", exc_info=True)
     
-    
-    async def _process_audio_buffer(self, audio_buffer):
-        """音声バッファをノーマライズ処理（ファイルサイズ制限付き）"""
+    async def handle_user_left(self, member: discord.Member, channel: discord.VoiceChannel):
+        """ユーザーVC退出時の録音停止チェック"""
         try:
-            import tempfile
-            import os
+            voice_cog = self.bot.get_cog('VoiceCogV2')
+            if not voice_cog:
+                return
             
-            # ファイルサイズ制限（Discordの上限: 25MB、余裕を持って20MB）
-            MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+            voice_client = voice_cog.get_voice_client(member.guild.id)
+            if not voice_client:
+                return
             
-            # 一時ファイルに保存
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
-                audio_buffer.seek(0)
-                original_data = audio_buffer.read()
-                
-                # ファイルサイズチェック
-                if len(original_data) > MAX_FILE_SIZE:
-                    self.logger.warning(f"Audio file too large: {len(original_data)/1024/1024:.1f}MB > 20MB limit")
-                    
-                    # 音声データを圧縮/切り取り
-                    compression_ratio = MAX_FILE_SIZE / len(original_data)
-                    compressed_size = int(len(original_data) * compression_ratio * 0.9)  # 90%まで圧縮
-                    
-                    # 単純に先頭部分を切り取り（より高度な処理も可能）
-                    compressed_data = original_data[:compressed_size]
-                    self.logger.info(f"Compressed audio from {len(original_data)/1024/1024:.1f}MB to {len(compressed_data)/1024/1024:.1f}MB")
-                    
-                    temp_input.write(compressed_data)
-                else:
-                    temp_input.write(original_data)
-                
-                temp_input_path = temp_input.name
-            
-            # ノーマライズ処理
-            normalized_path = await self.audio_processor.normalize_audio(temp_input_path)
-            
-            if normalized_path and normalized_path != temp_input_path:
-                # ノーマライズされたファイルを読み込み
-                with open(normalized_path, 'rb') as f:
-                    processed_data = f.read()
-                
-                # 再度サイズチェック
-                if len(processed_data) > MAX_FILE_SIZE:
-                    self.logger.warning(f"Normalized file still too large: {len(processed_data)/1024/1024:.1f}MB")
-                    # 圧縮比率を再計算
-                    compression_ratio = MAX_FILE_SIZE / len(processed_data)
-                    compressed_size = int(len(processed_data) * compression_ratio * 0.9)
-                    processed_data = processed_data[:compressed_size]
-                    self.logger.info(f"Re-compressed to {len(processed_data)/1024/1024:.1f}MB")
-                
-                # 処理済みファイルをクリーンアップ
-                self.audio_processor.cleanup_temp_files(normalized_path)
-            else:
-                # ノーマライズに失敗した場合は元のデータを使用
-                with open(temp_input_path, 'rb') as f:
-                    processed_data = f.read()
-                
-                # サイズチェック
-                if len(processed_data) > MAX_FILE_SIZE:
-                    compression_ratio = MAX_FILE_SIZE / len(processed_data)
-                    compressed_size = int(len(processed_data) * compression_ratio * 0.9)
-                    processed_data = processed_data[:compressed_size]
-                    self.logger.info(f"Final compression to {len(processed_data)/1024/1024:.1f}MB")
-            
-            # 入力ファイルをクリーンアップ
-            self.audio_processor.cleanup_temp_files(temp_input_path)
-            
-            # 最終サイズ確認
-            final_size_mb = len(processed_data) / 1024 / 1024
-            self.logger.info(f"Final audio file size: {final_size_mb:.1f}MB")
-            
-            if len(processed_data) > MAX_FILE_SIZE:
-                raise Exception(f"Audio file still too large after compression: {final_size_mb:.1f}MB")
-            
-            # 処理済みデータをBytesIOで返す
-            import io
-            return io.BytesIO(processed_data)
-            
-        except Exception as e:
-            self.logger.error(f"Audio processing failed: {e}")
-            # エラー時は元のバッファを返す（但しサイズ制限適用）
-            audio_buffer.seek(0)
-            original_data = audio_buffer.read()
-            
-            MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
-            if len(original_data) > MAX_FILE_SIZE:
-                # 緊急時の圧縮
-                compression_ratio = MAX_FILE_SIZE / len(original_data)
-                compressed_size = int(len(original_data) * compression_ratio * 0.8)
-                compressed_data = original_data[:compressed_size]
-                self.logger.warning(f"Emergency compression: {len(original_data)/1024/1024:.1f}MB -> {len(compressed_data)/1024/1024:.1f}MB")
-                return io.BytesIO(compressed_data)
-            
-            return io.BytesIO(original_data)
-    
-    async def _trim_audio_to_duration(self, audio_buffer, duration_seconds: float):
-        """音声を指定した時間長に正確に切り出し"""
-        try:
-            import tempfile
-            import os
-            
-            # 一時ファイルに保存
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
-                audio_buffer.seek(0)
-                temp_input.write(audio_buffer.read())
-                temp_input_path = temp_input.name
-            
-            # AudioProcessorの時間切り出し機能を使用
-            if hasattr(self.audio_processor, 'extract_time_range'):
-                trimmed_path = await self.audio_processor.extract_time_range(temp_input_path, 0, duration_seconds)
-                
-                if trimmed_path and trimmed_path != temp_input_path:
-                    # 切り出された音声を読み込み
-                    with open(trimmed_path, 'rb') as f:
-                        trimmed_data = f.read()
-                    
-                    # 一時ファイルをクリーンアップ
-                    self.audio_processor.cleanup_temp_files(temp_input_path)
-                    self.audio_processor.cleanup_temp_files(trimmed_path)
-                    
-                    self.logger.info(f"Successfully trimmed audio to {duration_seconds} seconds")
-                    return io.BytesIO(trimmed_data)
-                else:
-                    self.logger.warning("Audio trimming failed, returning original audio")
-                    # 元の音声データを使用
-                    with open(temp_input_path, 'rb') as f:
-                        original_data = f.read()
-                    self.audio_processor.cleanup_temp_files(temp_input_path)
-                    return io.BytesIO(original_data)
-            else:
-                self.logger.warning("extract_time_range method not available, returning original audio")
-                # AudioProcessorに時間切り出し機能がない場合は元の音声を返す
-                with open(temp_input_path, 'rb') as f:
-                    original_data = f.read()
-                self.audio_processor.cleanup_temp_files(temp_input_path)
-                return io.BytesIO(original_data)
+            # チャンネルにBot以外のユーザーがいなくなった場合は録音停止
+            human_members = [m for m in channel.members if not m.bot]
+            if not human_members:
+                await self.recorder.stop_recording(voice_client)
+                logger.info(f"Stopped recording in {channel.name} (no users)")
                 
         except Exception as e:
-            self.logger.error(f"Audio trimming failed: {e}")
-            # エラー時は元の音声を返す
-            return audio_buffer
+            logger.error(f"Handle user left error: {e}", exc_info=True)
     
-    async def _mix_multiple_audio_streams(self, time_range_audio: Dict[int, bytes]) -> Optional[io.BytesIO]:
-        """複数ユーザーの音声データをミキシング（混合）して同時再生可能な音声を作成"""
-        try:
-            import tempfile
-            import os
-            import struct
-            import wave
-            
-            if not time_range_audio:
-                self.logger.warning("No audio data to mix")
-                return None
-            
-            # 有効な音声データをフィルタリング
-            valid_audio_data = {}
-            for user_id, audio_data in time_range_audio.items():
-                if not audio_data:
-                    self.logger.warning(f"User {user_id}: No audio data (None)")
-                    continue
-                
-                if len(audio_data) <= 44:  # WAVヘッダー以下
-                    self.logger.warning(f"User {user_id}: Audio data too small ({len(audio_data)} bytes)")
-                    continue
-                    
-                if len(audio_data) < 1000:  # 1KB未満は実質無音
-                    self.logger.warning(f"User {user_id}: Audio data very small ({len(audio_data)} bytes)")
-                
-                valid_audio_data[user_id] = audio_data
-                self.logger.info(f"User {user_id}: Will mix {len(audio_data)} bytes of audio data")
-            
-            if not valid_audio_data:
-                self.logger.warning("No valid audio data to mix")
-                return None
-            
-            if len(valid_audio_data) == 1:
-                # 1人だけの場合はミキシング不要
-                user_id, audio_data = next(iter(valid_audio_data.items()))
-                self.logger.info(f"Only one user ({user_id}), returning audio as-is")
-                return io.BytesIO(audio_data)
-            
-            # 複数人の音声をFFmpegでミキシング
-            temp_files = []
-            try:
-                # 各ユーザーの音声を一時ファイルに保存
-                for user_id, audio_data in valid_audio_data.items():
-                    temp_file = tempfile.NamedTemporaryFile(suffix=f'_user{user_id}.wav', delete=False)
-                    temp_file.write(audio_data)
-                    temp_file.close()
-                    temp_files.append(temp_file.name)
-                    self.logger.info(f"User {user_id}: Saved to temp file {temp_file.name}")
-                
-                # FFmpegで音声をミキシング（同時再生）
-                output_temp = tempfile.NamedTemporaryFile(suffix='_mixed.wav', delete=False)
-                output_temp.close()
-                
-                # FFmpegコマンド構築（複数入力をミックス）
-                input_args = []
-                for temp_file in temp_files:
-                    input_args.extend(['-i', temp_file])
-                
-                # フィルタで音声をミックス（amix: 音声をミキシング）
-                filter_complex = f"amix=inputs={len(temp_files)}:duration=longest:dropout_transition=2"
-                
-                # FFmpeg実行用のコマンド
-                cmd = ['ffmpeg', '-y'] + input_args + [
-                    '-filter_complex', filter_complex,
-                    '-ac', '2',  # ステレオ出力
-                    '-ar', '44100',  # サンプリングレート
-                    '-f', 'wav',
-                    output_temp.name
-                ]
-                
-                self.logger.info(f"Mixing {len(temp_files)} audio streams with FFmpeg")
-                self.logger.info(f"Command: {' '.join(cmd)}")
-                
-                # セマフォでFFmpeg実行を制限
-                if hasattr(self.audio_processor, '_process_semaphore'):
-                    async with self.audio_processor._process_semaphore:
-                        process = await asyncio.create_subprocess_exec(
-                            *cmd,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
-                        )
-                        stdout, stderr = await process.communicate()
-                else:
-                    # フォールバック（セマフォなし）
-                    process = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-                    stdout, stderr = await process.communicate()
-                
-                if process.returncode != 0:
-                    self.logger.error(f"FFmpeg mixing failed: {stderr.decode()}")
-                    return None
-                
-                # ミキシング結果を読み込み
-                if os.path.exists(output_temp.name) and os.path.getsize(output_temp.name) > 44:
-                    with open(output_temp.name, 'rb') as f:
-                        mixed_data = f.read()
-                    
-                    self.logger.info(f"Successfully mixed {len(temp_files)} audio streams")
-                    self.logger.info(f"Mixed audio size: {len(mixed_data)/1024/1024:.1f}MB")
-                    
-                    # クリーンアップ
-                    for temp_file in temp_files:
-                        if os.path.exists(temp_file):
-                            os.unlink(temp_file)
-                    if os.path.exists(output_temp.name):
-                        os.unlink(output_temp.name)
-                    
-                    return io.BytesIO(mixed_data)
-                else:
-                    self.logger.error("FFmpeg mixing produced no output")
-                    return None
-                
-            except Exception as e:
-                self.logger.error(f"Audio mixing failed: {e}")
-                # クリーンアップ
-                for temp_file in temp_files:
-                    if os.path.exists(temp_file):
-                        os.unlink(temp_file)
-                if 'output_temp' in locals() and os.path.exists(output_temp.name):
-                    os.unlink(output_temp.name)
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"Audio mixing setup failed: {e}")
-            return None
-    
-    async def _process_individual_audio_buffer(self, audio_buffer, user_name: str = "Unknown"):
-        """個別音声バッファの高度処理（ノーマライズ + 無音カット）"""
-        try:
-            import tempfile
-            import os
-            
-            # ファイルサイズ制限（Discordの上限: 25MB、余裕を持って20MB）
-            MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
-            
-            # 一時ファイルに保存
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
-                audio_buffer.seek(0)
-                original_data = audio_buffer.read()
-                
-                # ファイルサイズチェック
-                if len(original_data) > MAX_FILE_SIZE:
-                    self.logger.warning(f"Audio file too large: {len(original_data)/1024/1024:.1f}MB > 20MB limit")
-                    
-                    # 音声データを圧縮/切り取り
-                    compression_ratio = MAX_FILE_SIZE / len(original_data)
-                    compressed_size = int(len(original_data) * compression_ratio * 0.9)  # 90%まで圧縮
-                    
-                    # 単純に先頭部分を切り取り（より高度な処理も可能）
-                    compressed_data = original_data[:compressed_size]
-                    self.logger.info(f"Compressed audio from {len(original_data)/1024/1024:.1f}MB to {len(compressed_data)/1024/1024:.1f}MB")
-                    
-                    temp_input.write(compressed_data)
-                else:
-                    temp_input.write(original_data)
-                
-                temp_input_path = temp_input.name
-            
-            # ステップ1: 無音カット処理
-            silence_removed_path = await self.audio_processor.remove_silence(
-                temp_input_path, 
-                silence_threshold="-45dB",  # 比較的緩い無音判定
-                min_silence_duration=0.3   # 0.3秒以上の無音をカット
-            )
-            
-            # ステップ2: ノーマライズ処理
-            if silence_removed_path != temp_input_path:
-                # 無音カットが成功した場合、そのファイルをノーマライズ
-                normalized_path = await self.audio_processor.normalize_audio(silence_removed_path)
-                # 中間ファイルをクリーンアップ
-                if os.path.exists(temp_input_path):
-                    os.unlink(temp_input_path)
-            else:
-                # 無音カットが失敗した場合、元ファイルをノーマライズ
-                normalized_path = await self.audio_processor.normalize_audio(temp_input_path)
-            
-            # 最終ファイルを読み込み
-            if normalized_path and os.path.exists(normalized_path):
-                with open(normalized_path, 'rb') as f:
-                    processed_data = f.read()
-                
-                # 最終ファイルサイズ確認
-                if len(processed_data) > MAX_FILE_SIZE:
-                    # 最終圧縮
-                    compression_ratio = MAX_FILE_SIZE / len(processed_data)
-                    compressed_size = int(len(processed_data) * compression_ratio * 0.9)
-                    processed_data = processed_data[:compressed_size]
-                    self.logger.info(f"Final compression to {len(processed_data)/1024/1024:.1f}MB")
-                
-                # クリーンアップ
-                if silence_removed_path and silence_removed_path != temp_input_path and os.path.exists(silence_removed_path):
-                    os.unlink(silence_removed_path)
-                if normalized_path and normalized_path != silence_removed_path and os.path.exists(normalized_path):
-                    os.unlink(normalized_path)
-                
-                # 最終サイズ確認
-                final_size_mb = len(processed_data) / 1024 / 1024
-                self.logger.info(f"Individual audio processing completed for {user_name}: {final_size_mb:.1f}MB (silence removed + normalized)")
-                
-                if len(processed_data) > MAX_FILE_SIZE:
-                    raise Exception(f"Audio file still too large after processing: {final_size_mb:.1f}MB")
-                
-                # 処理済みデータをBytesIOで返す
-                return io.BytesIO(processed_data)
-                
-            else:
-                self.logger.warning(f"Audio processing failed for {user_name}, returning original")
-                # 処理に失敗した場合は元のデータを返す（サイズ制限適用）
-                return self._fallback_audio_processing(original_data)
-            
-        except Exception as e:
-            self.logger.error(f"Individual audio processing failed for {user_name}: {e}")
-            # エラー時は元のバッファを返す（サイズ制限適用）
-            audio_buffer.seek(0)
-            original_data = audio_buffer.read()
-            return self._fallback_audio_processing(original_data)
-    
-    def _fallback_audio_processing(self, audio_data: bytes):
-        """フォールバック音声処理（サイズ制限のみ）"""
-        MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
-        if len(audio_data) > MAX_FILE_SIZE:
-            # 緊急時の圧縮
-            compression_ratio = MAX_FILE_SIZE / len(audio_data)
-            compressed_size = int(len(audio_data) * compression_ratio * 0.8)
-            compressed_data = audio_data[:compressed_size]
-            self.logger.warning(f"Fallback compression: {len(audio_data)/1024/1024:.1f}MB -> {len(compressed_data)/1024/1024:.1f}MB")
-            return io.BytesIO(compressed_data)
-        
-        return io.BytesIO(audio_data)
-
+    def is_recording(self, guild_id: int) -> bool:
+        """録音中かチェック"""
+        if not self.enabled or not self.recorder:
+            return False
+        return self.recorder.is_recording(guild_id)
 
 def setup(bot):
-    """Cogのセットアップ"""
-    bot.add_cog(RecordingCog(bot, bot.config))
+    bot.add_cog(RecordingCogV2(bot))

@@ -1,22 +1,14 @@
-# yomiageBotEx 必要ライブラリ
-# Discord関連
-discord.py[voice]>=2.3.0
+# yomiageBotEx v2 最小限の依存関係
 
-# 音声処理
-PyNaCl==1.5.0
-audioop-lts
+# Discord
+py-cord[voice]>=2.6.0
 
-# 非同期処理・HTTP
-aiofiles
-aiohttp
+# 設定・環境変数
+PyYAML>=6.0
+python-dotenv>=1.0.0
 
-# 設定ファイル
-pyyaml
-python-dotenv
+# HTTP通信
+aiohttp>=3.9.0
 
-# システム要件
-# - Python 3.10以上（3.13推奨）
-# - FFmpeg（システムパッケージ）
-# - libopus-dev（システムパッケージ）
-# - libsodium-dev（システムパッケージ）
-# - build-essential（システムパッケージ）
+# 音声処理（録音用）
+PyNaCl>=1.5.0

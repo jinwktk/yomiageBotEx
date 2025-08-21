@@ -1,63 +1,27 @@
-# yomiageBotEx 設定ファイル
+# yomiageBotEx v2 設定ファイル - シンプル版
 
 bot:
-  command_prefix: "/"
-  auto_join: true   # 音声接続を再有効化
-  auto_leave: true
-  rate_limit_delay: [0.1, 0.3]  # API呼び出し時のランダム遅延を短縮（高速化）
-  admin_user_id: 372768430149074954  # 管理者ユーザーID
+  auto_join: true      # VC自動参加
+  auto_leave: true     # VC自動退出
 
-# TTS設定は data/tts_config.json に移動しました
-# /set_global_tts コマンドで動的に変更されるため、Git管理下から除外
-
-audio_processing:
-  normalize: true           # 音声ノーマライズ機能の有効/無効
-  target_level: -16.0       # ターゲットレベル（dBFS）
-  max_concurrent_processes: 6  # 最大並列処理数
-  ffmpeg_timeout: 20        # FFmpeg処理タイムアウト（秒）
-  filters:                  # 適用するフィルター
-    - "highpass=f=80"       # ローカットフィルター
-    - "lowpass=f=8000"      # ハイカットフィルター
+tts:
+  api_url: "http://localhost:5000"    # StyleBertVITS2 APIサーバー
+  enabled: true                       # TTS機能有効/無効
+  default_model: "jvnv-F1-jp"        # デフォルトモデル
+  default_speaker: 0                  # デフォルト話者
+  timeout: 30                         # API接続タイムアウト（秒）
+  max_length: 100                     # 読み上げ最大文字数
 
 recording:
-  enabled: true       # 録音機能の有効/無効
-  max_duration: 300   # 最大録音時間（秒）
-  cleanup_hours: 1    # 録音ファイルの自動削除時間
+  enabled: true        # 録音機能有効/無効
+  max_duration: 300    # 最大録音時間（秒）
   default_duration: 30 # デフォルト録音時間（秒）
-  max_file_size_mb: 50 # 最大ファイルサイズ（MB）
-  buffer_save_interval: 30  # バッファ保存間隔（秒）
-  max_buffers_per_user: 5   # ユーザーあたり最大バッファ数
-  memory_buffer_limit: 100  # メモリバッファ制限（MB）
+  buffer_size: 10      # 保持するバッファ数
 
-message_reading:
-  enabled: true                           # チャット読み上げ機能の有効/無効
-  max_length: 100                         # 読み上げる最大文字数
-  ignore_prefixes: ["!", "/", ".", "?"]   # 読み上げしないプレフィックス
-  ignore_bots: true                       # ボットのメッセージを無視
+dictionary:
+  enabled: true        # 辞書機能有効/無効
+  max_words: 1000      # 最大単語数
 
 logging:
-  level: "INFO"
-  file: "logs/yomiage.log"
-  rotation:                    # ログローテーション設定
-    max_bytes: 10485760        # ファイルサイズ上限（10MB）
-    backup_count: 5            # 保持するバックアップ数
-    compression: true          # gzip圧縮の有効/無効
-    rotate_on_startup: true    # 起動時のログローテーション
-  cleanup:                     # 古いログファイルのクリーンアップ
-    enabled: true              # クリーンアップ機能の有効/無効
-    max_days: 30               # ログファイルの保持日数
-
-# 辞書機能（読み上げ時の単語置換）
-dictionary:
-  enabled: true                # 辞書機能の有効/無効
-  max_words_per_guild: 1000    # ギルドあたりの最大単語数
-  max_word_length: 50          # 単語の最大文字数
-  max_reading_length: 100      # 読み方の最大文字数
-
-# パフォーマンス監視機能
-performance:
-  monitoring_enabled: true     # パフォーマンス監視の有効/無効
-  monitoring_interval: 60      # 監視間隔（秒）
-  cpu_alert_threshold: 80.0    # CPU使用率アラート閾値（%）
-  memory_alert_threshold: 85.0 # メモリ使用率アラート閾値（%）
-  disk_alert_threshold: 90.0   # ディスク使用率アラート閾値（%）
+  level: "INFO"        # ログレベル
+  file: "bot_v2.log"   # ログファイル名

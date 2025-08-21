@@ -1,821 +1,186 @@
 """
-ボイスチャンネル管理Cog
-- スラッシュコマンド（/join, /leave）
-- 自動参加・退出機能
+VoiceCog v2 - シンプルなVC操作機能
+- 自動参加・退出
+- 手動参加・退出コマンド
 """
 
-import asyncio
-import random
 import logging
-from typing import Dict, Any, Optional
-import json
-from pathlib import Path
+import asyncio
+from typing import Optional
 
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 
+logger = logging.getLogger(__name__)
 
-class VoiceCog(commands.Cog):
-    """ボイスチャンネル管理機能"""
+class VoiceCogV2(commands.Cog):
+    """ボイスチャンネル操作Cog"""
     
-    def __init__(self, bot: commands.Bot, config: Dict[str, Any]):
+    def __init__(self, bot):
         self.bot = bot
-        self.config = config
-        self.logger = logging.getLogger(__name__)
-        self.sessions_file = Path("sessions.json")
-        self.saved_sessions = self.load_sessions()
+        self.config = bot.config.get('bot', {})
         
-        # 定期チェックタスクを開始
-        if not self.empty_channel_check.is_running():
-            self.empty_channel_check.start()
-            
-        if not self.recording_check.is_running():
-            self.recording_check.start()
+        # 接続状態管理
+        self.connected_channels = {}  # guild_id: voice_client
         
-        # 起動時自動参加チェックのタスクを開始
-        if not self.startup_auto_join_check.is_running():
-            self.startup_auto_join_check.start()
+        logger.info("VoiceCog v2 initialized")
     
-    def cog_unload(self):
-        """Cogアンロード時のクリーンアップ"""
-        self.empty_channel_check.cancel()
-        self.recording_check.cancel()
-        self.startup_auto_join_check.cancel()
-    
-    def load_sessions(self) -> Dict[int, int]:
-        """保存されたセッション情報を読み込み"""
-        try:
-            if self.sessions_file.exists():
-                with open(self.sessions_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-        except Exception as e:
-            self.logger.error(f"Failed to load sessions: {e}")
-        return {}
-    
-    def save_sessions(self):
-        """現在のセッション情報を保存"""
-        try:
-            sessions = {}
-            for guild in self.bot.guilds:
-                if guild.voice_client and guild.voice_client.channel:
-                    sessions[guild.id] = guild.voice_client.channel.id
-            
-            with open(self.sessions_file, "w", encoding="utf-8") as f:
-                json.dump(sessions, f, indent=2)
-                
-        except Exception as e:
-            self.logger.error(f"Failed to save sessions: {e}")
-    
-    async def rate_limit_delay(self):
-        """レート制限対策の遅延"""
-        delay = random.uniform(*self.config["bot"]["rate_limit_delay"])
-        await asyncio.sleep(delay)
-    
-    @commands.Cog.listener()
-    async def on_ready(self):
-        """Bot起動時の処理"""
-        # 保存されたセッションの復元
-        await self.restore_saved_sessions()
-    
-    async def restore_saved_sessions(self):
-        """保存されたセッションを復元"""
-        if not self.saved_sessions:
-            return
-        
-        for guild_id, channel_id in self.saved_sessions.items():
-            try:
-                guild = self.bot.get_guild(guild_id)
-                if not guild:
-                    continue
-                
-                channel = guild.get_channel(channel_id)
-                if not channel or not isinstance(channel, discord.VoiceChannel):
-                    continue
-                
-                # チャンネルにユーザーがいるかチェック
-                if len(channel.members) == 0:
-                    self.logger.info(f"Skipping empty channel: {channel.name} in {guild.name}")
-                    continue
-                
-                # 既に接続している場合はスキップ
-                if guild.voice_client:
-                    continue
-                
-                # カスタムVoiceClientで接続
-                await self.bot.connect_to_voice(channel)
-                self.logger.info(f"Restored session: {channel.name} in {guild.name}")
-                
-                # セッション復元後に他のCogに通知（起動時フラグを設定）
-                await self.notify_bot_joined_channel(guild, channel, is_startup=True)
-                
-            except Exception as e:
-                self.logger.error(f"Failed to restore session for guild {guild_id}: {e}")
-        
-        # セッション復元後は一度保存
-        self.save_sessions()
-    
-    
-    @tasks.loop(count=1)  # 1回だけ実行
-    async def startup_auto_join_check(self):
-        """起動時自動参加チェック（1回限り実行）"""
-        # Bot起動直後に実行されるので、少し待つ
-        await asyncio.sleep(15)
-        
-        self.logger.info("Starting startup auto-join check...")
-        await self.check_startup_auto_join()
-    
-    @startup_auto_join_check.before_loop
-    async def before_startup_auto_join_check(self):
-        """startup_auto_join_check開始前の処理"""
-        await self.bot.wait_until_ready()
-        self.logger.info("Bot is ready, preparing startup auto-join check")
-        
-        # Guild情報が完全に同期されるまで短縮待機
-        await asyncio.sleep(2)
-        self.logger.info("Guild sync wait completed")
-    
-    async def check_startup_auto_join(self):
-        """起動時の自動VC参加処理"""
-        self.logger.info("VoiceCog.check_startup_auto_join() called")
-        
-        auto_join_enabled = self.config.get("bot", {}).get("auto_join", True)
-        self.logger.info(f"Auto-join setting: {auto_join_enabled}")
-        
-        if not auto_join_enabled:
-            self.logger.info("Auto-join disabled in config, skipping startup check")
-            return
-        
-        self.logger.info("Starting voice channel check on startup...")
-        
-        guild_count = len(self.bot.guilds)
-        self.logger.info(f"Found {guild_count} guilds to check")
-        
-        # Discord仕様: 1つのボットは同時に1つのボイスチャンネルにしか接続できない
-        # 最適なチャンネルを選択するため、全ギルドを調査してから接続
-        
-        # Step 1: 全ギルドの候補チャンネルを調査
-        candidates = []
-        for guild in self.bot.guilds:
-            try:
-                candidate = await self._find_best_channel_in_guild(guild)
-                if candidate:
-                    candidates.append(candidate)
-            except Exception as e:
-                self.logger.error(f"Error scanning guild {guild.name}: {e}", exc_info=True)
-        
-        # Step 2: 最適なチャンネルを選択（ユーザー数が多い順）
-        if candidates:
-            # ユーザー数で降順ソート
-            candidates.sort(key=lambda x: x['user_count'], reverse=True)
-            
-            self.logger.info(f"Found {len(candidates)} candidate channels:")
-            for candidate in candidates:
-                self.logger.info(f"  - {candidate['guild_name']}.{candidate['channel_name']}: {candidate['user_count']}人")
-            
-            # 最適なチャンネルに接続
-            best_candidate = candidates[0]
-            try:
-                await self._connect_to_candidate_channel(best_candidate)
-                self.logger.info(f"Successfully connected to {best_candidate['guild_name']}.{best_candidate['channel_name']} ({best_candidate['user_count']}人)")
-                
-                # 他の候補について説明
-                if len(candidates) > 1:
-                    skipped = candidates[1:]
-                    skipped_info = [f"{c['guild_name']}.{c['channel_name']}({c['user_count']}人)" for c in skipped]
-                    self.logger.info(f"Discord仕様により1つのチャンネルのみ接続可能。スキップ: {', '.join(skipped_info)}")
-                
-            except Exception as e:
-                self.logger.error(f"Failed to connect to best candidate: {e}", exc_info=True)
-        else:
-            self.logger.info("No suitable voice channels found in any guild")
-        
-        self.logger.info("Startup voice channel check completed")
-    
-    async def _find_best_channel_in_guild(self, guild):
-        """ギルド内で最適なチャンネルを見つける"""
-        self.logger.debug(f"Scanning guild: {guild.name} (ID: {guild.id})")
+    @discord.slash_command(name="join", description="ボイスチャンネルに参加")
+    async def join_command(self, ctx: discord.ApplicationContext):
+        """手動VC参加コマンド"""
+        await ctx.defer(ephemeral=True)
         
         try:
-            # 権限チェック
-            bot_member = guild.get_member(self.bot.user.id)
-            if not bot_member:
-                self.logger.warning(f"Bot is not a member of guild {guild.name}")
-                return None
-                
-            if not bot_member.guild_permissions.connect:
-                self.logger.warning(f"Bot lacks CONNECT permission in guild {guild.name}")
-                return None
+            # ユーザーがVCにいるかチェック
+            if not ctx.author.voice:
+                await ctx.followup.send("ボイスチャンネルに参加してからコマンドを実行してください", ephemeral=True)
+                return
             
-            # 既に接続している場合（グローバルチェック）
-            for g in self.bot.guilds:
-                if g.voice_client and g.voice_client.is_connected():
-                    current_channel = g.voice_client.channel
-                    self.logger.info(f"Already connected to {current_channel.name} in {g.name}")
-                    # 既存接続を候補として返す（優先度最高）
-                    members = [m for m in current_channel.members if not m.bot]
-                    return {
-                        'guild': g,
-                        'channel': current_channel,
-                        'guild_name': g.name,
-                        'channel_name': current_channel.name,
-                        'user_count': len(members) + 1000,  # 既存接続は最高優先度
-                        'members': members,
-                        'already_connected': True
-                    }
+            channel = ctx.author.voice.channel
+            result = await self.join_voice_channel(channel)
             
-            # 最適なチャンネルを探す
-            best_channel = None
-            max_users = 0
-            
-            for channel in guild.voice_channels:
-                # チャンネル固有権限チェック
-                channel_perms = channel.permissions_for(bot_member)
-                if not channel_perms.connect:
-                    self.logger.debug(f"No CONNECT permission for {channel.name} in {guild.name}")
-                    continue
-                
-                # ユーザー数をチェック
-                non_bot_members = [m for m in channel.members if not m.bot]
-                user_count = len(non_bot_members)
-                
-                if user_count > 0:
-                    self.logger.debug(f"Channel {channel.name}: {user_count}人")
-                    if user_count > max_users:
-                        max_users = user_count
-                        best_channel = {
-                            'guild': guild,
-                            'channel': channel,
-                            'guild_name': guild.name,
-                            'channel_name': channel.name,
-                            'user_count': user_count,
-                            'members': non_bot_members,
-                            'already_connected': False
-                        }
-            
-            if best_channel:
-                self.logger.debug(f"Best channel in {guild.name}: {best_channel['channel_name']} ({best_channel['user_count']}人)")
+            if result:
+                await ctx.followup.send(f"✅ {channel.name} に参加しました", ephemeral=True)
             else:
-                self.logger.debug(f"No suitable channels found in {guild.name}")
+                await ctx.followup.send("❌ ボイスチャンネルへの参加に失敗しました", ephemeral=True)
                 
-            return best_channel
-            
         except Exception as e:
-            self.logger.error(f"Error scanning guild {guild.name}: {e}", exc_info=True)
-            return None
+            logger.error(f"Join command error: {e}", exc_info=True)
+            await ctx.followup.send("❌ エラーが発生しました", ephemeral=True)
     
-    async def _connect_to_candidate_channel(self, candidate):
-        """候補チャンネルに接続"""
-        if candidate['already_connected']:
-            self.logger.info(f"Already connected to {candidate['channel_name']}, ensuring recording is active")
+    @discord.slash_command(name="leave", description="ボイスチャンネルから退出")
+    async def leave_command(self, ctx: discord.ApplicationContext):
+        """手動VC退出コマンド"""
+        await ctx.defer(ephemeral=True)
+        
+        try:
+            result = await self.leave_voice_channel(ctx.guild.id)
             
-            # 録音が開始されているか確認
-            recording_cog = self.bot.get_cog("RecordingCog")
-            if recording_cog and candidate['members']:
-                try:
-                    is_recording = recording_cog.real_time_recorder.recording_status.get(candidate['guild'].id, False)
-                    if not is_recording:
-                        self.logger.info(f"Starting recording for existing connection")
-                        await recording_cog.handle_bot_joined_with_user(candidate['guild'], candidate['members'][0])
-                    else:
-                        self.logger.debug(f"Recording already active for existing connection")
-                except Exception as e:
-                    self.logger.error(f"Failed to start recording: {e}", exc_info=True)
-            return True
-        else:
-            # 新規接続
-            await self.bot.connect_to_voice(candidate['channel'])
-            
-            # 他のCogに接続を通知
-            await self.notify_bot_joined_channel(candidate['guild'], candidate['channel'], is_startup=True)
-            
-            # セッション保存
-            self.save_sessions()
-            return True
-
+            if result:
+                await ctx.followup.send("✅ ボイスチャンネルから退出しました", ephemeral=True)
+            else:
+                await ctx.followup.send("❌ ボイスチャンネルに接続していません", ephemeral=True)
+                
+        except Exception as e:
+            logger.error(f"Leave command error: {e}", exc_info=True)
+            await ctx.followup.send("❌ エラーが発生しました", ephemeral=True)
+    
     @commands.Cog.listener()
-    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-        """ボイスステート変更時の自動参加・退出処理"""
-        if member.bot:  # ボット自身の変更は無視
+    async def on_voice_state_update(self, member, before, after):
+        """VC状態変更時の自動処理"""
+        if not self.config.get('auto_join', True):
+            return
+        
+        # Botの状態変更は無視
+        if member.bot:
             return
         
         guild = member.guild
         
-        # ユーザーがチャンネルに参加した場合
-        if before.channel is None and after.channel is not None:
-            await self.handle_user_join(guild, after.channel)
-        
-        # ユーザーがチャンネルから退出した場合
-        if before.channel is not None and after.channel is None:
-            await self.handle_user_leave(guild, before.channel)
-        
-        # ユーザーがチャンネル間を移動した場合
-        if before.channel is not None and after.channel is not None and before.channel != after.channel:
-            await self.handle_user_move(guild, before.channel, after.channel)
+        try:
+            # ユーザーがVCに参加した場合
+            if after.channel and not before.channel:
+                await self.handle_user_joined(member, after.channel)
+            
+            # ユーザーがVCから退出した場合
+            elif before.channel and not after.channel:
+                await self.handle_user_left(member, before.channel)
+                
+        except Exception as e:
+            logger.error(f"Voice state update error: {e}", exc_info=True)
     
-    async def handle_user_join(self, guild: discord.Guild, channel: discord.VoiceChannel):
-        """ユーザー参加時の処理"""
-        if not self.config["bot"]["auto_join"]:
+    async def handle_user_joined(self, member: discord.Member, channel: discord.VoiceChannel):
+        """ユーザーのVC参加処理"""
+        guild_id = member.guild.id
+        
+        # Botが接続していない場合は自動参加
+        if guild_id not in self.connected_channels:
+            logger.info(f"User {member.display_name} joined {channel.name}, auto-joining...")
+            await self.join_voice_channel(channel)
+    
+    async def handle_user_left(self, member: discord.Member, channel: discord.VoiceChannel):
+        """ユーザーのVC退出処理"""
+        if not self.config.get('auto_leave', True):
             return
         
-        # 既に接続している場合
-        if guild.voice_client and guild.voice_client.is_connected():
-            # 同じチャンネルの場合、録音が開始されているか確認
-            if guild.voice_client.channel == channel:
-                # 新しいユーザーが参加した時の録音開始処理
-                self.logger.info(f"User joined same channel as bot: {channel.name}")
-                
-                # RecordingCogに録音開始を通知（ユーザー参加時）
-                recording_cog = self.bot.get_cog("RecordingCog")
-                if recording_cog:
-                    try:
-                        # 録音状態を正確にチェック
-                        is_recording = recording_cog.real_time_recorder.recording_status.get(guild.id, False)
-                        if not is_recording:
-                            self.logger.info(f"Starting recording for user join: {channel.name}")
-                            await recording_cog.real_time_recorder.start_recording(guild.id, guild.voice_client)
-                            # 録音開始を確認
-                            await asyncio.sleep(0.5)
-                            new_status = recording_cog.real_time_recorder.recording_status.get(guild.id, False)
-                            if new_status:
-                                self.logger.info(f"Successfully started recording in {channel.name}")
-                            else:
-                                self.logger.warning(f"Failed to start recording in {channel.name}")
-                        else:
-                            self.logger.debug(f"Recording already active in {channel.name}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to start recording on user join: {e}", exc_info=True)
-                return
+        guild_id = member.guild.id
+        
+        # Botが接続している場合のみチェック
+        if guild_id in self.connected_channels:
+            # 5秒後にチャンネルユーザー数をチェック
+            await asyncio.sleep(5)
+            await self.check_empty_channel(guild_id)
+    
+    async def check_empty_channel(self, guild_id: int):
+        """空チャンネルチェックと自動退出"""
+        if guild_id not in self.connected_channels:
+            return
+        
+        voice_client = self.connected_channels[guild_id]
+        if not voice_client or not voice_client.channel:
+            return
+        
+        # Bot以外のユーザーがいるかチェック
+        human_members = [m for m in voice_client.channel.members if not m.bot]
+        
+        if not human_members:
+            logger.info(f"No users in {voice_client.channel.name}, auto-leaving...")
+            await self.leave_voice_channel(guild_id)
+    
+    async def join_voice_channel(self, channel: discord.VoiceChannel) -> bool:
+        """ボイスチャンネルに参加"""
+        try:
+            guild_id = channel.guild.id
             
-            # 別のチャンネルに移動
-            try:
-                await guild.voice_client.move_to(channel)
-                self.logger.info(f"Moved to voice channel: {channel.name} in {guild.name}")
-                self.save_sessions()
-                # 移動後に他のCogに通知
-                await self.notify_bot_joined_channel(guild, channel)
-            except Exception as e:
-                self.logger.error(f"Failed to move to voice channel: {e}")
-        else:
+            # 既に接続している場合
+            if guild_id in self.connected_channels:
+                current_channel = self.connected_channels[guild_id].channel
+                if current_channel.id == channel.id:
+                    logger.debug(f"Already connected to {channel.name}")
+                    return True
+                else:
+                    # 別のチャンネルに移動
+                    await self.connected_channels[guild_id].move_to(channel)
+                    logger.info(f"Moved to {channel.name}")
+                    return True
+            
             # 新規接続
-            try:
-                await self.bot.connect_to_voice(channel)
-                self.logger.info(f"Auto-joined voice channel: {channel.name} in {guild.name}")
-                self.save_sessions()
-                # 接続後に他のCogに通知
-                await self.notify_bot_joined_channel(guild, channel)
-            except Exception as e:
-                self.logger.error(f"Failed to auto-join voice channel: {e}")
-    
-    async def notify_bot_joined_channel(self, guild: discord.Guild, channel: discord.VoiceChannel, is_startup: bool = False):
-        """ボットがチャンネルに接続した際の他Cogへの通知"""
-        try:
-            # 音声接続が完全に確立されるまで待機
-            self.logger.info("Waiting for voice connection to stabilize...")
+            voice_client = await channel.connect(timeout=30.0, reconnect=True)
+            self.connected_channels[guild_id] = voice_client
             
-            stable_connection = False
-            for attempt in range(10):  # 最大10回試行（3秒間）に短縮
-                await asyncio.sleep(0.3)
-                
-                voice_client = guild.voice_client
-                if voice_client and voice_client.is_connected():
-                    # 追加の安定性チェック：WebSocketの状態も確認
-                    try:
-                        # ボイスクライアントの内部状態をチェック
-                        if hasattr(voice_client, '_connected') and voice_client._connected:
-                            self.logger.info(f"Voice connection confirmed after {(attempt + 1) * 0.3}s")
-                            stable_connection = True
-                            break
-                        elif hasattr(voice_client, 'is_connected') and voice_client.is_connected():
-                            self.logger.info(f"Voice connection stable after {(attempt + 1) * 0.3}s")
-                            stable_connection = True
-                            break
-                    except Exception as e:
-                        self.logger.debug(f"Connection stability check failed: {e}")
-                        continue
-                
-                if attempt >= 9:
-                    self.logger.warning("Voice connection not stable after 3s, aborting")
-                    return
+            logger.info(f"Connected to {channel.name} in {channel.guild.name}")
+            return True
             
-            if not stable_connection:
-                self.logger.warning("Voice connection stability could not be verified")
-                return
-            
-            # 追加の安定化待機
-            await asyncio.sleep(1.5)
-            
-            # 最終確認：接続がまだ有効か
-            voice_client = guild.voice_client
-            if not voice_client or not voice_client.is_connected():
-                self.logger.warning("Voice client disconnected during stabilization wait")
-                return
-            
-            # チャンネルにいる全メンバーを取得（ボット以外）
-            members = [m for m in channel.members if not m.bot]
-            self.logger.info(f"Bot joined channel with {len(members)} members: {[m.display_name for m in members]}")
-            
-            # TTS処理は並列実行、録音処理は最初の1回のみ実行
-            if members:
-                # TTS挨拶処理は並列実行
-                tts_tasks = []
-                for member in members:
-                    task = asyncio.create_task(self._process_member_tts(guild, member, is_startup))
-                    tts_tasks.append(task)
-                
-                # TTS処理を並列実行
-                await asyncio.gather(*tts_tasks, return_exceptions=True)
-                
-                # 録音処理は最初のメンバーでのみ実行（重複を防ぐ）
-                first_member = members[0]
-                await self._process_member_recording(guild, first_member)
-                    
         except Exception as e:
-            self.logger.error(f"Failed to notify other cogs: {e}")
+            logger.error(f"Failed to join voice channel: {e}", exc_info=True)
+            return False
     
-    async def _process_member_tts(self, guild: discord.Guild, member: discord.Member, is_startup: bool = False):
-        """個別メンバーのTTS処理"""
+    async def leave_voice_channel(self, guild_id: int) -> bool:
+        """ボイスチャンネルから退出"""
         try:
-            # 接続確認
-            current_voice_client = guild.voice_client
-            if not current_voice_client or not current_voice_client.is_connected():
-                self.logger.warning(f"Voice client disconnected before TTS processing for {member.display_name}")
-                return
+            if guild_id not in self.connected_channels:
+                return False
             
-            # TTSCogに挨拶を依頼（起動時情報を渡す）
-            tts_cog = self.bot.get_cog("TTSCog")
-            if tts_cog:
-                await tts_cog.handle_bot_joined_with_user(guild, member, is_startup=is_startup)
+            voice_client = self.connected_channels[guild_id]
+            channel_name = voice_client.channel.name if voice_client.channel else "Unknown"
             
-                
+            await voice_client.disconnect()
+            del self.connected_channels[guild_id]
+            
+            logger.info(f"Disconnected from {channel_name}")
+            return True
+            
         except Exception as e:
-            self.logger.error(f"Failed to process member TTS for {member.display_name}: {e}")
+            logger.error(f"Failed to leave voice channel: {e}", exc_info=True)
+            return False
     
-    async def _process_member_recording(self, guild: discord.Guild, member: discord.Member):
-        """個別メンバーの録音処理（最初の1名のみ）"""
-        try:
-            # 接続確認
-            current_voice_client = guild.voice_client
-            if not current_voice_client or not current_voice_client.is_connected():
-                self.logger.warning(f"Voice client disconnected before recording processing for {member.display_name}")
-                return
-            
-            # 短い間隔を置いてから録音処理
-            await asyncio.sleep(0.5)
-            
-            # RecordingCogに録音開始を依頼（代表のメンバーで1回のみ）
-            recording_cog = self.bot.get_cog("RecordingCog")
-            if recording_cog:
-                await recording_cog.handle_bot_joined_with_user(guild, member)
-                
-        except Exception as e:
-            self.logger.error(f"Failed to process member recording for {member.display_name}: {e}")
+    def get_voice_client(self, guild_id: int) -> Optional[discord.VoiceClient]:
+        """指定ギルドのVoiceClientを取得"""
+        return self.connected_channels.get(guild_id)
     
-    async def handle_user_leave(self, guild: discord.Guild, channel: discord.VoiceChannel):
-        """ユーザー退出時の処理"""
-        self.logger.info(f"VoiceCog: User left channel {channel.name} in {guild.name}")
-        
-        if not self.config["bot"]["auto_leave"]:
-            self.logger.info("VoiceCog: Auto-leave disabled in config")
-            return
-        
-        # ボットが接続していない場合は何もしない
-        if not guild.voice_client or guild.voice_client.channel != channel:
-            self.logger.info(f"VoiceCog: Bot not connected to {channel.name} or connected to different channel")
-            return
-        
-        # チャンネルが空かチェック
-        members_count = len(channel.members)
-        non_bot_members = len([m for m in channel.members if not m.bot])
-        self.logger.info(f"VoiceCog: Channel {channel.name} has {members_count} total members, {non_bot_members} non-bot members")
-        
-        if len(channel.members) <= 1:  # ボット自身のみ
-            try:
-                await guild.voice_client.disconnect()
-                self.logger.info(f"Auto-left empty voice channel: {channel.name} in {guild.name}")
-                self.save_sessions()
-            except Exception as e:
-                self.logger.error(f"Failed to auto-leave voice channel: {e}")
-    
-    async def handle_user_move(self, guild: discord.Guild, old_channel: discord.VoiceChannel, new_channel: discord.VoiceChannel):
-        """ユーザー移動時の処理"""
-        # 退出処理
-        await self.handle_user_leave(guild, old_channel)
-        # 参加処理
-        await self.handle_user_join(guild, new_channel)
-    
-    @tasks.loop(minutes=5)
-    async def empty_channel_check(self):
-        """5分ごとの空チャンネルチェック"""
-        try:
-            for guild in self.bot.guilds:
-                if not guild.voice_client:
-                    continue
-                
-                channel = guild.voice_client.channel
-                if len(channel.members) <= 1:  # ボット自身のみ
-                    await guild.voice_client.disconnect()
-                    self.logger.info(f"Left empty channel during periodic check: {channel.name} in {guild.name}")
-                    self.save_sessions()
-                    
-        except Exception as e:
-            self.logger.error(f"Error in empty channel check: {e}")
-    
-    @empty_channel_check.before_loop
-    async def before_empty_channel_check(self):
-        """定期チェック開始前の待機"""
-        await self.bot.wait_until_ready()
-    
-    @tasks.loop(minutes=1)
-    async def recording_check(self):
-        """2分ごとの録音状態チェック"""
-        try:
-            recording_cog = self.bot.get_cog("RecordingCog")
-            if not recording_cog:
-                return
-                
-            for guild in self.bot.guilds:
-                if not guild.voice_client or not guild.voice_client.is_connected():
-                    continue
-                
-                channel = guild.voice_client.channel
-                # チャンネルにユーザーがいるか確認
-                non_bot_members = [m for m in channel.members if not m.bot]
-                if not non_bot_members:
-                    continue
-                
-                # 録音状態を確認
-                is_recording = recording_cog.real_time_recorder.recording_status.get(guild.id, False)
-                if not is_recording:
-                    self.logger.info(f"Recording not active in {channel.name}, attempting to start...")
-                    try:
-                        await recording_cog.real_time_recorder.start_recording(guild.id, guild.voice_client)
-                        await asyncio.sleep(1.0)  # 録音開始を待機
-                        new_status = recording_cog.real_time_recorder.recording_status.get(guild.id, False)
-                        if new_status:
-                            self.logger.info(f"Successfully restarted recording in {channel.name}")
-                        else:
-                            self.logger.warning(f"Failed to restart recording in {channel.name}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to restart recording in {channel.name}: {e}")
-                else:
-                    self.logger.debug(f"Recording is active in {channel.name}")
-                    
-        except Exception as e:
-            self.logger.error(f"Error in recording check: {e}", exc_info=True)
-    
-    @recording_check.before_loop
-    async def before_recording_check(self):
-        """録音チェック開始前の待機"""
-        await self.bot.wait_until_ready()
-    
-    @discord.slash_command(name="join", description="ボイスチャンネルに参加します")
-    async def join_command(self, ctx: discord.ApplicationContext):
-        """VCに参加するコマンド"""
-        self.logger.info(f"/join command called by {ctx.author} in {ctx.guild.name}")
-        await self.rate_limit_delay()
-        
-        # ユーザーがVCに接続しているか確認
-        if not ctx.author.voice:
-            await ctx.respond(
-                "❌ ボイスチャンネルに接続してから実行してください。",
-                ephemeral=True
-            )
-            self.logger.warning(f"Join failed: {ctx.author} is not in a voice channel")
-            return
-        
-        channel = ctx.author.voice.channel
-        self.logger.info(f"User {ctx.author} is in channel: {channel.name}")
-        
-        # グローバル接続チェック（Discord仕様: 1ボット=1接続）
-        current_connection = None
-        connected_guild = None
-        
-        for guild in self.bot.guilds:
-            if guild.voice_client and guild.voice_client.is_connected():
-                current_connection = guild.voice_client
-                connected_guild = guild
-                break
-        
-        if current_connection:
-            current_channel = current_connection.channel
-            self.logger.info(f"Bot is currently connected to {current_channel.name} in {connected_guild.name}")
-            
-            # 同じチャンネルの場合
-            if connected_guild.id == ctx.guild.id and current_channel.id == channel.id:
-                await ctx.respond(
-                    f"✅ 既に {channel.name} に接続しています。",
-                    ephemeral=True
-                )
-                return
-            
-            # 異なるチャンネル/サーバーの場合は強制移動
-            try:
-                self.logger.info(f"Disconnecting from {current_channel.name} in {connected_guild.name} to move to {channel.name} in {ctx.guild.name}")
-                await current_connection.disconnect()
-                
-                # 短い待機時間
-                await asyncio.sleep(1.0)
-                
-                # 新しいチャンネルに接続
-                await self.bot.connect_to_voice(channel)
-                
-                await ctx.respond(
-                    f"🔄 {connected_guild.name}.{current_channel.name} から {ctx.guild.name}.{channel.name} に移動しました。",
-                    ephemeral=True
-                )
-                self.logger.info(f"Successfully moved from {connected_guild.name}.{current_channel.name} to {ctx.guild.name}.{channel.name}")
-                self.save_sessions()
-                
-                # 移動後に他のCogに通知
-                await self.notify_bot_joined_channel(ctx.guild, channel)
-                return
-                
-            except Exception as e:
-                self.logger.error(f"Failed to move between servers: {e}", exc_info=True)
-                await ctx.respond(
-                    f"❌ {connected_guild.name}から{ctx.guild.name}への移動に失敗しました。",
-                    ephemeral=True
-                )
-                return
-        
-        # 接続が切れたVoiceClientのクリーンアップ
-        if ctx.guild.voice_client and not ctx.guild.voice_client.is_connected():
-            self.logger.info(f"Cleaning up disconnected voice client for {ctx.guild.name}")
-            try:
-                await ctx.guild.voice_client.disconnect()
-            except:
-                pass  # エラーは無視
-        
-        # 新規接続
-        try:
-            self.logger.info(f"Attempting to connect to voice channel: {channel.name}")
-            await self.bot.connect_to_voice(channel)
-            self.logger.info(f"Successfully connected to voice channel: {channel.name}")
-            
-            await ctx.respond(
-                f"✅ {channel.name} に接続しました！",
-                ephemeral=True
-            )
-            self.logger.info(f"Connected to voice channel: {channel.name} in {ctx.guild.name}")
-            self.save_sessions()
-            
-            # 接続後に他のCogに通知
-            await self.notify_bot_joined_channel(ctx.guild, channel)
-        except asyncio.TimeoutError:
-            await ctx.respond(
-                "❌ 接続がタイムアウトしました。",
-                ephemeral=True
-            )
-            self.logger.error("Voice connection timeout")
-        except Exception as e:
-            await ctx.respond(
-                "❌ 接続に失敗しました。",
-                ephemeral=True
-            )
-            self.logger.error(f"Failed to connect to voice channel: {e}", exc_info=True)
-    
-    @discord.slash_command(name="leave", description="ボイスチャンネルから退出します")
-    async def leave_command(self, ctx: discord.ApplicationContext):
-        """VCから退出するコマンド"""
-        
-        # ボットが接続しているか確認
-        if not ctx.guild.voice_client:
-            await ctx.respond(
-                "❌ ボイスチャンネルに接続していません。",
-                ephemeral=True
-            )
-            return
-        
-        try:
-            channel_name = ctx.guild.voice_client.channel.name
-            await ctx.guild.voice_client.disconnect()
-            await ctx.respond(
-                f"👋 {channel_name} から退出しました。",
-                ephemeral=True
-            )
-            self.logger.info(f"Disconnected from voice channel: {channel_name} in {ctx.guild.name}")
-            self.save_sessions()
-        except Exception as e:
-            await ctx.respond(
-                "❌ 退出に失敗しました。",
-                ephemeral=True
-            )
-            self.logger.error(f"Failed to disconnect from voice channel: {e}")
-    
-    @discord.slash_command(name="vc_status", description="ボイスチャンネル接続状況をデバッグ表示します")
-    async def vc_status_command(self, ctx: discord.ApplicationContext):
-        """VCのデバッグ情報表示コマンド"""
-        try:
-            guild = ctx.guild
-            self.logger.info(f"/vc_status command called by {ctx.user} in {guild.name}")
-            
-            # 基本情報
-            status_lines = [
-                f"🏰 **サーバー**: {guild.name}",
-                f"🤖 **Bot ID**: {self.bot.user.id}",
-                f"📊 **ギルドID**: {guild.id}",
-                ""
-            ]
-            
-            # 音声接続状況
-            voice_client = guild.voice_client
-            if voice_client:
-                if voice_client.is_connected():
-                    channel_name = voice_client.channel.name
-                    channel_id = voice_client.channel.id
-                    member_count = len(voice_client.channel.members)
-                    member_names = [m.display_name for m in voice_client.channel.members]
-                    
-                    status_lines.extend([
-                        "🔊 **音声接続**: ✅ 接続中",
-                        f"📍 **チャンネル**: {channel_name} (ID: {channel_id})",
-                        f"👥 **メンバー数**: {member_count}人",
-                        f"👤 **メンバー**: {', '.join(member_names)}",
-                        ""
-                    ])
-                else:
-                    status_lines.extend([
-                        "🔊 **音声接続**: ⚠️ 切断状態",
-                        f"📍 **前回のチャンネル**: {voice_client.channel.name if voice_client.channel else '不明'}",
-                        ""
-                    ])
-            else:
-                status_lines.extend([
-                    "🔊 **音声接続**: ❌ 未接続",
-                    ""
-                ])
-            
-            # 全ボイスチャンネルの状況
-            status_lines.append("📋 **全ボイスチャンネル情報**:")
-            voice_channels = guild.voice_channels
-            if voice_channels:
-                for channel in voice_channels:
-                    member_count = len(channel.members)
-                    if member_count > 0:
-                        member_names = [f"{m.display_name}({'bot' if m.bot else 'user'})" for m in channel.members]
-                        status_lines.append(f"  🎤 **{channel.name}**: {member_count}人 - {', '.join(member_names)}")
-                    else:
-                        status_lines.append(f"  🔇 **{channel.name}**: 空室")
-            else:
-                status_lines.append("  ❌ ボイスチャンネルなし")
-            
-            # 自動参加設定
-            auto_join_enabled = self.config.get("bot", {}).get("auto_join", True)
-            auto_leave_enabled = self.config.get("bot", {}).get("auto_leave", True)
-            
-            status_lines.extend([
-                "",
-                "⚙️ **設定情報**:",
-                f"  🔄 **自動参加**: {'有効' if auto_join_enabled else '無効'}",
-                f"  🚪 **自動退出**: {'有効' if auto_leave_enabled else '無効'}"
-            ])
-            
-            # セッション情報
-            saved_session = self.saved_sessions.get(guild.id)
-            if saved_session:
-                try:
-                    saved_channel = guild.get_channel(saved_session)
-                    saved_channel_name = saved_channel.name if saved_channel else f"不明 (ID: {saved_session})"
-                    status_lines.extend([
-                        "",
-                        "💾 **保存済みセッション**:",
-                        f"  📍 **チャンネル**: {saved_channel_name}"
-                    ])
-                except:
-                    status_lines.extend([
-                        "",
-                        "💾 **保存済みセッション**: エラー"
-                    ])
-            else:
-                status_lines.extend([
-                    "",
-                    "💾 **保存済みセッション**: なし"
-                ])
-            
-            response = "\n".join(status_lines)
-            
-            # 長すぎる場合は分割
-            if len(response) > 2000:
-                # 最初の部分を送信
-                first_part = response[:1900] + "\n...(続く)"
-                await ctx.respond(first_part, ephemeral=True)
-                
-                # 残りの部分を送信
-                remaining = response[1900:]
-                if len(remaining) > 1900:
-                    remaining = remaining[:1900] + "\n...(省略)"
-                await ctx.followup.send(f"...(続き)\n{remaining}", ephemeral=True)
-            else:
-                await ctx.respond(response, ephemeral=True)
-                
-        except Exception as e:
-            self.logger.error(f"Failed to show VC status: {e}", exc_info=True)
-            await ctx.respond(
-                f"❌ ステータス情報の取得に失敗しました: {str(e)}",
-                ephemeral=True
-            )
-
+    def cog_unload(self):
+        """Cog終了時の処理"""
+        logger.info("VoiceCog v2 unloading...")
 
 def setup(bot):
-    """Cogのセットアップ"""
-    bot.add_cog(VoiceCog(bot, bot.config))
+    bot.add_cog(VoiceCogV2(bot))
