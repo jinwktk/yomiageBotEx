@@ -1,0 +1,16 @@
+{
+  "api_url": "http://192.168.0.99:5000",
+  "timeout": 30,
+  "cache_size": 20,
+  "cache_hours": 24,
+  "max_text_length": 100,
+  "model_id": 7,
+  "speaker_id": 0,
+  "style": "Neutral",
+  "greeting": {
+    "enabled": true,
+    "skip_on_startup": true,
+    "join_message": "さん、こんちゃ！",
+    "leave_message": "さん、またね！"
+  }
+}

@@ -74,10 +74,10 @@ def rotate_log_on_startup(log_file: str):
             # 元のファイルを削除
             backup_file.unlink()
             
-            print(f"✅ Log rotated on startup: {compressed_file}")
+            print(f"[OK] Log rotated on startup: {compressed_file}")
         
     except Exception as e:
-        print(f"⚠️ Failed to rotate log on startup: {e}")
+        print(f"[WARNING] Failed to rotate log on startup: {e}")
 
 
 def setup_logging(config: Dict[str, Any]) -> logging.Logger:

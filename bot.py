@@ -16,7 +16,12 @@ import discord
 from discord.ext import commands
 import yaml
 from dotenv import load_dotenv
-from cogwatch import watch
+try:
+    from cogwatch import watch
+    COGWATCH_AVAILABLE = True
+except ImportError:
+    COGWATCH_AVAILABLE = False
+    watch = None
 import fnmatch
 
 from utils.logger import setup_logging, start_log_cleanup_task
@@ -24,10 +29,10 @@ from utils.logger import setup_logging, start_log_cleanup_task
 # 音声受信クライアントのインポート（py-cord統合版のみ使用）
 try:
     from utils.real_audio_recorder import RealEnhancedVoiceClient as EnhancedVoiceClient
-    print("✅ Using py-cord real audio recording")
+    print("[OK] Using py-cord real audio recording")
     VOICE_CLIENT_TYPE = "py-cord"
 except Exception as e:
-    print(f"❌ Could not import RealEnhancedVoiceClient: {e}")
+    print(f"[ERROR] Could not import RealEnhancedVoiceClient: {e}")
     print("   Please ensure py-cord[voice] and required dependencies are installed")
     sys.exit(1)
 
@@ -207,13 +212,15 @@ class YomiageBot(discord.Bot):
         """Cogを読み込む（非同期版）"""
         self.load_cogs_sync()
     
-    @watch(path="cogs", preload=True, debug=False)
     async def on_ready(self):
         """Bot準備完了時のイベント"""
         logger.info(f"Bot is ready! Logged in as {self.user} (ID: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guild(s)")
         logger.info(f"Voice client type: {VOICE_CLIENT_TYPE}")
-        logger.info("🔄 Cogwatch enabled - Cogs will auto-reload on file changes")
+        if COGWATCH_AVAILABLE:
+            logger.info("[COGWATCH] Cogwatch enabled - Cogs will auto-reload on file changes")
+        else:
+            logger.info("[INFO] Cogwatch not available - manual Cog management only")
         
         # Cogが読み込まれていない場合は手動で読み込み
         if len(self.cogs) == 0:
@@ -316,6 +323,10 @@ class YomiageBot(discord.Bot):
     
 # Botインスタンスの作成
 bot = YomiageBot()
+
+# cogwatchが利用可能な場合、動的にwatchデコレータを適用
+if COGWATCH_AVAILABLE:
+    bot.on_ready = watch(path="cogs", preload=True, debug=False)(bot.on_ready)
 
 # Cogの初期読み込み
 bot.setup_cogs()

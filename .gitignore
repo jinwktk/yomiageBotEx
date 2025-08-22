@@ -1,53 +1,28 @@
-# 環境変数
+# 環境変数（秘密情報）
 .env
 
-# Python
+# Python関連
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
-.Python
-env/
-venv/
-ENV/
-
-# uv
 .venv/
-.uv-cache/
 
-# ログファイル
+# キャッシュ・一時ファイル
+cache/
 logs/
+recordings/
+temp/
+tmpwav/
+*.tmp
 *.log
 
-# 録音ファイル
-recordings/
-
-# 一時ファイル
-temp/
-*.tmp
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# セッションファイル
+# セッション・データファイル（自動生成）
 sessions.json
 recordings_buffer.pkl
+data/audio_buffers.json
 
-# TTSキャッシュ
-cache/
-
-# 録音ファイル
-recordings/
-
-# 一時録音ファイル
-tmpwav/
-
-# データファイル
-data/*
+# OS・IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
