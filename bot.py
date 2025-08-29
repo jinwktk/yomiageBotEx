@@ -109,24 +109,79 @@ class YomiageBot(discord.Bot):
     
     async def connect_voice_safely(self, channel):
         """安全な音声接続（WebSocketエラー対応強化版）"""
-        max_retries = 3
-        retry_delay = 2.0
+        max_retries = 5  # リトライ回数を増加
+        retry_delay = 5.0  # 初期待機時間を延長
+        
+        # 既存の接続を完全にクリーンアップ
+        if channel.guild.voice_client:
+            try:
+                logger.info(f"Disconnecting existing voice client from {channel.guild.voice_client.channel.name if channel.guild.voice_client.channel else 'unknown'}")
+                await channel.guild.voice_client.disconnect()
+                await asyncio.sleep(3.0)  # より長い待機時間で完全な切断を待機
+                logger.info("Existing voice client disconnected successfully")
+            except Exception as e:
+                logger.warning(f"Failed to disconnect existing voice client: {e}")
+                # 切断に失敗した場合、強制的にリセット
+                try:
+                    channel.guild._voice_client = None
+                    logger.info("Forced voice client reset")
+                except Exception as reset_error:
+                    logger.error(f"Failed to force reset voice client: {reset_error}")
         
         for attempt in range(max_retries):
             try:
                 logger.info(f"Voice connection attempt {attempt + 1}/{max_retries} to {channel.name}")
                 
-                # タイムアウトとreconnectで接続の安定性を向上
+                # 音声接続の設定を調整
                 vc = await channel.connect(
-                    timeout=45.0,  # タイムアウトを延長
-                    reconnect=True
+                    timeout=60.0,  # タイムアウトを延長
+                    reconnect=True,
+                    self_deaf=True,
+                    self_mute=False
                 )
                 
-                # 接続成功後の安定化待機
-                await asyncio.sleep(1.0)
+                # WebSocket接続の安定化待機
+                await asyncio.sleep(3.0)  # 接続後の待機時間を延長
                 
-                # 接続状態の確認
-                if vc and vc.is_connected():
+                # 接続状態の詳細確認
+                if vc and hasattr(vc, 'is_connected') and vc.is_connected():
+                    # WebSocketの状態確認
+                    if hasattr(vc, 'ws') and vc.ws:
+                        if hasattr(vc.ws, 'open') and vc.ws.open:
+                            logger.info(f"Voice connection successful to {channel.name} (WebSocket open)")
+                        else:
+                            logger.warning("WebSocket not open, waiting...")
+                            await asyncio.sleep(2.0)
+                            # 再度WebSocket状態を確認
+                            if hasattr(vc.ws, 'open') and vc.ws.open:
+                                logger.info("WebSocket now open after waiting")
+                            else:
+                                logger.warning("WebSocket still not open")
+                    else:
+                        logger.warning("No WebSocket object found, but connection appears stable")
+                    
+                    # 接続の安定性を追加で確認
+                    try:
+                        # 音声状態の確認
+                        if hasattr(vc, 'channel') and vc.channel:
+                            logger.info(f"Voice client channel: {vc.channel.name}")
+                        
+                        # 接続状態の再確認
+                        if vc.is_connected():
+                            logger.info("Voice client connection confirmed stable")
+                        else:
+                            logger.warning("Voice client connection not stable")
+                            raise Exception("Connection not stable after confirmation")
+                            
+                    except Exception as stability_error:
+                        logger.error(f"Connection stability check failed: {stability_error}")
+                        if vc:
+                            try:
+                                await vc.disconnect()
+                            except:
+                                pass
+                        raise stability_error
+                    
                     logger.info(f"Voice connection successful to {channel.name}")
                     
                     try:
@@ -137,6 +192,14 @@ class YomiageBot(discord.Bot):
                             self_mute=False
                         )
                         logger.info("Voice state (self_deaf=True) set successfully")
+                        
+                        # 接続の最終確認
+                        await asyncio.sleep(1.0)
+                        if vc.is_connected():
+                            logger.info("Final connection stability check passed")
+                        else:
+                            logger.warning("Final connection stability check failed")
+                            
                     except Exception as state_error:
                         logger.warning(f"Failed to set voice state, but connection is OK: {state_error}")
                     
@@ -144,26 +207,46 @@ class YomiageBot(discord.Bot):
                 else:
                     logger.warning(f"Connection established but not stable, attempt {attempt + 1}")
                     if vc:
-                        await vc.disconnect()
+                        try:
+                            await vc.disconnect()
+                        except:
+                            pass
                     raise Exception("Connection not stable")
                     
+            except discord.errors.ClientException as e:
+                if "Already connected" in str(e):
+                    logger.warning(f"Already connected to voice channel, attempting to disconnect and reconnect")
+                    try:
+                        if channel.guild.voice_client:
+                            await channel.guild.voice_client.disconnect()
+                            await asyncio.sleep(3.0)  # 切断後の待機時間を延長
+                    except Exception as disconnect_error:
+                        logger.error(f"Failed to disconnect existing connection: {disconnect_error}")
+                    
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise e
+                        
             except Exception as e:
                 logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
                 
-                # WebSocket 4000 エラーの特別な処理
-                if "4000" in str(e) or "WebSocket" in str(e):
+                # WebSocket 4000/4006 エラーの特別な処理
+                if any(code in str(e) for code in ["4000", "4006", "WebSocket", "ConnectionClosed"]):
                     logger.warning(f"WebSocket error detected: {e}")
                     if attempt < max_retries - 1:
-                        logger.info(f"Retrying after {retry_delay}s due to WebSocket error...")
-                        await asyncio.sleep(retry_delay)
-                        retry_delay *= 1.5  # 指数バックオフ
+                        # WebSocketエラーの場合はより長い待機時間
+                        webSocket_delay = retry_delay * 2 if "4006" in str(e) else retry_delay
+                        logger.info(f"Retrying after {webSocket_delay}s due to WebSocket error...")
+                        await asyncio.sleep(webSocket_delay)
+                        retry_delay *= 1.8  # より緩やかな指数バックオフ
                         continue
                 
                 # 最後の試行でない場合はリトライ
                 if attempt < max_retries - 1:
                     logger.info(f"Retrying connection after {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
-                    retry_delay *= 1.2
+                    retry_delay *= 1.3  # より緩やかな指数バックオフ
                 else:
                     # 最後の試行：フォールバック
                     logger.error("All connection attempts failed, trying basic connect")
@@ -265,14 +348,29 @@ class YomiageBot(discord.Bot):
     
     async def on_application_command_error(self, ctx, error):
         """スラッシュコマンドのエラーハンドリング"""
-        logger.error(f"Application command error in {ctx.command.name}: {error}", exc_info=True)
+        # HTTPException 40060 (Interaction already acknowledged) は警告レベルでログ
+        if hasattr(error, 'status') and error.status == 400 and "40060" in str(error):
+            logger.warning(f"Interaction already acknowledged in {ctx.command.name}: {error}")
+        else:
+            logger.error(f"Application command error in {ctx.command.name}: {error}", exc_info=True)
         
-        # ユーザーへのエラー通知
+        # ユーザーへのエラー通知（重複応答を防ぐ）
         try:
+            # HTTPException 40060 の場合は応答を試行しない
+            if hasattr(error, 'status') and error.status == 400 and "40060" in str(error):
+                logger.debug("Skipping error response due to interaction already acknowledged")
+                return
+                
             if ctx.response.is_done():
+                # フォローアップメッセージも同様にチェック
                 await ctx.followup.send(f"❌ コマンドの実行中にエラーが発生しました: {str(error)}", ephemeral=True)
             else:
                 await ctx.respond(f"❌ コマンドの実行中にエラーが発生しました: {str(error)}", ephemeral=True)
+        except discord.HTTPException as http_error:
+            if http_error.status == 400 and "40060" in str(http_error):
+                logger.debug("Failed to send error response: interaction already acknowledged")
+            else:
+                logger.error(f"Failed to send error message to user: {http_error}")
         except Exception as e:
             logger.error(f"Failed to send error message to user: {e}")
     
@@ -283,6 +381,15 @@ class YomiageBot(discord.Bot):
     async def close(self):
         """Bot終了時のクリーンアップ"""
         logger.info("Bot is shutting down, cleaning up resources...")
+        
+        # 音声接続のクリーンアップ
+        try:
+            for vc in self.voice_clients:
+                if vc.is_connected():
+                    await vc.disconnect()
+                    logger.info(f"Disconnected voice client from {vc.channel.name}")
+        except Exception as e:
+            logger.error(f"Failed to cleanup voice clients: {e}")
         
         # TTSセッションのクリーンアップ（全Cog）
         tts_cog = self.get_cog("TTSCog")
@@ -302,16 +409,44 @@ class YomiageBot(discord.Bot):
             except Exception as e:
                 logger.error(f"Failed to cleanup MessageReaderCog session: {e}")
         
-        logger.info("TTS session cleanup completed")
+        # HTTPセッションのクリーンアップ
+        try:
+            # 全体的なHTTPセッション情報をクリア（可能であれば）
+            if hasattr(self, '_http') and self._http:
+                if hasattr(self._http, '__aenter__'):
+                    # aiohttp session があれば閉じる
+                    await self._http._HTTPClient__session.close()
+                    logger.info("HTTP session cleanup completed")
+        except Exception as e:
+            logger.error(f"Failed to cleanup HTTP sessions: {e}")
+        
+        logger.info("All cleanup completed")
         
         # 親クラスのクリーンアップを呼び出し
         await super().close()
     
     async def connect_to_voice(self, channel: discord.VoiceChannel) -> discord.VoiceClient:
         """カスタムVoiceClientで接続"""
-        # 既存の接続をチェック
+        # 既存の接続を確認・クリーンアップ
         if channel.guild.voice_client:
-            await channel.guild.voice_client.disconnect()
+            try:
+                if channel.guild.voice_client.is_connected():
+                    if channel.guild.voice_client.channel == channel:
+                        # 既に同じチャンネルに接続済み
+                        logger.info(f"Already connected to {channel.name}, reusing connection")
+                        return channel.guild.voice_client
+                    else:
+                        # 他のチャンネルに接続中の場合は切断
+                        logger.info(f"Disconnecting from {channel.guild.voice_client.channel.name}")
+                        await channel.guild.voice_client.disconnect()
+                        await asyncio.sleep(1.0)
+                else:
+                    # 接続状態が不整合の場合はクリーンアップ
+                    logger.warning("Voice client exists but not connected, cleaning up")
+                    await channel.guild.voice_client.disconnect()
+                    await asyncio.sleep(1.0)
+            except Exception as cleanup_error:
+                logger.error(f"Failed to cleanup existing voice connection: {cleanup_error}")
         
         # 安全な接続を試行
         try:
@@ -319,7 +454,15 @@ class YomiageBot(discord.Bot):
         except Exception as e:
             logger.error(f"Safe connection failed, trying EnhancedVoiceClient: {e}")
             # フォールバック：EnhancedVoiceClientを使用
-            return await channel.connect(cls=EnhancedVoiceClient)
+            try:
+                return await channel.connect(cls=EnhancedVoiceClient)
+            except discord.errors.ClientException as client_error:
+                if "Already connected" in str(client_error):
+                    # 最終的に重複接続エラーが発生した場合は既存の接続を返す
+                    logger.warning("Final connection attempt failed due to duplicate connection, returning existing client")
+                    if channel.guild.voice_client:
+                        return channel.guild.voice_client
+                raise client_error
     
 # Botインスタンスの作成
 bot = YomiageBot()

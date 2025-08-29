@@ -209,10 +209,6 @@ class VoiceCog(commands.Cog):
                     self.logger.info(f"Channel {channel.name} members: {', '.join(member_info)}")
                 
                 if len(non_bot_members) > 0:
-                    # ユーザー名をログ出力
-                    user_names = [m.display_name for m in non_bot_members]
-                    self.logger.info(f"Found users in {channel.name} ({guild.name}): {', '.join(user_names)}")
-                    
                     # 既に接続中かチェック
                     if guild.voice_client:
                         self.logger.info(f"Already connected to {guild.voice_client.channel.name} in {guild.name}, skipping join")
@@ -224,6 +220,15 @@ class VoiceCog(commands.Cog):
                     
                     try:
                         self.logger.info(f"Attempting to join {channel.name}...")
+                        
+                        # 既存の接続をチェック
+                        if guild.voice_client and guild.voice_client.is_connected():
+                            self.logger.info(f"Already connected to {guild.voice_client.channel.name}, disconnecting first")
+                            try:
+                                await guild.voice_client.disconnect()
+                                await asyncio.sleep(2.0)  # 切断完了を待機
+                            except Exception as disconnect_error:
+                                self.logger.warning(f"Failed to disconnect existing connection: {disconnect_error}")
                         
                         # カスタムVoiceClientで接続
                         await self.bot.connect_to_voice(channel)
@@ -472,6 +477,11 @@ class VoiceCog(commands.Cog):
         self.logger.info(f"/join command called by {ctx.author} in {ctx.guild.name}")
         await self.rate_limit_delay()
         
+        # 重複応答を防ぐためのチェック
+        if ctx.response.is_done():
+            self.logger.warning(f"Interaction already acknowledged for /join by {ctx.author}")
+            return
+        
         # ユーザーがVCに接続しているか確認
         if not ctx.author.voice:
             await ctx.respond(
@@ -486,33 +496,45 @@ class VoiceCog(commands.Cog):
         
         # 既に接続している場合
         if ctx.guild.voice_client:
-            if ctx.guild.voice_client.channel == channel:
+            if ctx.guild.voice_client.is_connected() and ctx.guild.voice_client.channel == channel:
                 await ctx.respond(
                     f"✅ 既に {channel.name} に接続しています。",
                     ephemeral=True
                 )
                 return
             else:
-                # 別のチャンネルに移動
+                # 別のチャンネルに移動または再接続
                 try:
-                    await ctx.guild.voice_client.move_to(channel)
-                    await ctx.respond(
-                        f"🔄 {channel.name} に移動しました。",
-                        ephemeral=True
-                    )
-                    self.logger.info(f"Moved to voice channel: {channel.name} in {ctx.guild.name}")
-                    self.save_sessions()
-                    
-                    # 移動後に他のCogに通知
-                    await self.notify_bot_joined_channel(ctx.guild, channel)
-                    return
+                    if ctx.guild.voice_client.is_connected():
+                        await ctx.guild.voice_client.move_to(channel)
+                        await ctx.respond(
+                            f"🔄 {channel.name} に移動しました。",
+                            ephemeral=True
+                        )
+                        self.logger.info(f"Moved to voice channel: {channel.name} in {ctx.guild.name}")
+                        self.save_sessions()
+                        
+                        # 移動後に他のCogに通知
+                        await self.notify_bot_joined_channel(ctx.guild, channel)
+                        return
+                    else:
+                        # 接続状態が不整合の場合はクリーンアップ
+                        self.logger.warning("Voice client exists but not connected, cleaning up")
+                        await ctx.guild.voice_client.disconnect()
+                        await asyncio.sleep(1.0)
                 except Exception as e:
                     self.logger.error(f"Failed to move to voice channel: {e}")
-                    await ctx.respond(
-                        "❌ チャンネルの移動に失敗しました。",
-                        ephemeral=True
-                    )
-                    return
+                    try:
+                        if not ctx.response.is_done():
+                            await ctx.respond(
+                                "❌ チャンネルの移動に失敗しました。再接続を試行します。",
+                                ephemeral=True
+                            )
+                        # 移動に失敗した場合は切断して再接続を試行
+                        await ctx.guild.voice_client.disconnect()
+                        await asyncio.sleep(1.0)
+                    except Exception as cleanup_error:
+                        self.logger.error(f"Failed to cleanup after move error: {cleanup_error}")
         
         # 新規接続
         try:
