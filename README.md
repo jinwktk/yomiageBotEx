@@ -5,8 +5,8 @@ Discordボイスチャンネルで読み上げ機能を提供するボット（P
 ## 🚀 クイックスタート
 
 ### 1. 必要なもの
-- Python 3.9以上（推奨: 3.11）
-- [uv](https://docs.astral.sh/uv/) - Pythonパッケージマネージャー
+- Python 3.10以上（推奨: 3.13）
+- [uv](https://docs.astral.sh/uv/) - Pythonパッケージマネージャー（推奨）または pip
 - Discord Bot Token
 - FFmpeg（音声処理用）※Phase 3以降で必要
 
@@ -27,8 +27,12 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 git clone https://github.com/jinwktk/yomiageBotEx.git
 cd yomiageBotEx
 
-# 依存関係のインストール
+# 依存関係のインストール（推奨: uv）
 uv sync --no-install-project
+
+# または、pipを使用する場合:
+# pip install -r requirements.txt           # 開発ツール込み
+# pip install -r requirements-minimal.txt   # 最小限のみ
 ```
 
 ### 4. 設定

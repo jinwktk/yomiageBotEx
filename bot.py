@@ -121,23 +121,24 @@ class YomiageBot(discord.Bot):
                 logger.info("Existing voice client disconnected successfully")
             except Exception as e:
                 logger.warning(f"Failed to disconnect existing voice client: {e}")
-                # 切断に失敗した場合、強制的にリセット
+            finally:
+                # 強制的にリセット（接続状態不整合を解決）
                 try:
                     channel.guild._voice_client = None
-                    logger.info("Forced voice client reset")
+                    logger.info("Forced voice client reset to resolve state inconsistency")
                 except Exception as reset_error:
                     logger.error(f"Failed to force reset voice client: {reset_error}")
+                # 追加の待機で状態をクリア
+                await asyncio.sleep(2.0)
         
         for attempt in range(max_retries):
             try:
                 logger.info(f"Voice connection attempt {attempt + 1}/{max_retries} to {channel.name}")
                 
-                # 音声接続の設定を調整
+                # 音声接続の設定を調整（py-cordではself_deaf/self_muteは接続後に設定）
                 vc = await channel.connect(
                     timeout=60.0,  # タイムアウトを延長
-                    reconnect=True,
-                    self_deaf=True,
-                    self_mute=False
+                    reconnect=True
                 )
                 
                 # WebSocket接続の安定化待機
@@ -432,9 +433,21 @@ class YomiageBot(discord.Bot):
             try:
                 if channel.guild.voice_client.is_connected():
                     if channel.guild.voice_client.channel == channel:
-                        # 既に同じチャンネルに接続済み
-                        logger.info(f"Already connected to {channel.name}, reusing connection")
-                        return channel.guild.voice_client
+                        # 実際にDiscordで参加しているか再検証
+                        try:
+                            # 音声状態を確認して実際の接続状態をテスト
+                            members_in_channel = channel.members
+                            bot_in_channel = any(member.id == channel.guild.me.id for member in members_in_channel)
+                            if bot_in_channel:
+                                logger.info(f"Already connected to {channel.name}, reusing connection")
+                                return channel.guild.voice_client
+                            else:
+                                logger.warning(f"Bot not actually in {channel.name}, resetting connection")
+                        except Exception:
+                            logger.warning("Failed to verify actual channel membership, resetting connection")
+                        # 状態不整合の場合は強制リセット
+                        await channel.guild.voice_client.disconnect()
+                        await asyncio.sleep(1.0)
                     else:
                         # 他のチャンネルに接続中の場合は切断
                         logger.info(f"Disconnecting from {channel.guild.voice_client.channel.name}")
@@ -447,6 +460,13 @@ class YomiageBot(discord.Bot):
                     await asyncio.sleep(1.0)
             except Exception as cleanup_error:
                 logger.error(f"Failed to cleanup existing voice connection: {cleanup_error}")
+            finally:
+                # 強制的に状態をリセット
+                try:
+                    channel.guild._voice_client = None
+                    logger.info("Forced voice client state reset")
+                except Exception:
+                    pass
         
         # 安全な接続を試行
         try:

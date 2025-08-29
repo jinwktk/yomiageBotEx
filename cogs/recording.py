@@ -203,8 +203,6 @@ class RecordingCog(commands.Cog):
         user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None
     ):
         """録音をリプレイ（bot_simple.pyの実装を統合）"""
-        await ctx.defer(ephemeral=True)
-        
         if not self.recording_enabled:
             await ctx.respond("⚠️ 録音機能が無効です。", ephemeral=True)
             return
@@ -213,11 +211,11 @@ class RecordingCog(commands.Cog):
             await ctx.respond("⚠️ 現在録音中ではありません。", ephemeral=True)
             return
         
+        # 処理中であることを即座に応答
+        await ctx.respond("🎵 録音を処理中です...", ephemeral=True)
+        
         # 重い処理を別タスクで実行してボットのブロックを回避
         asyncio.create_task(self._process_replay_async(ctx, duration, user))
-        
-        # すぐにユーザーに応答
-        await ctx.respond("🎵 録音を処理中です...", ephemeral=True)
     
     async def _process_replay_async(self, ctx, duration: float, user):
         """replayコマンドの重い処理を非同期で実行"""

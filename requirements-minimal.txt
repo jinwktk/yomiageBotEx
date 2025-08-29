@@ -1,0 +1,21 @@
+# yomiageBotEx - 最小限必要ライブラリ（プロダクション用）
+# ========================================================
+# Minimal Production Requirements (No Development Tools)
+# ========================================================
+
+# Core Discord Bot Libraries
+git+https://github.com/Pycord-Development/pycord.git@2ae01b7
+
+# Audio Processing 
+PyNaCl>=1.5.0
+numpy>=1.24.0
+
+# Configuration and File Management
+python-dotenv>=1.0.0
+PyYAML>=6.0
+aiofiles>=23.0.0
+
+# HTTP Client
+aiohttp>=3.8.0
+
+# Installation: pip install -r requirements-minimal.txt

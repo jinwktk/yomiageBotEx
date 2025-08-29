@@ -100,6 +100,10 @@ class RealTimeAudioRecorder:
             voice_client.start_recording(sink, callback)
             # 録音状態を設定
             self.recording_status[guild_id] = True
+            
+            # 定期的なチェックポイント作成タスクを開始
+            checkpoint_task = asyncio.create_task(self._periodic_checkpoint_task(guild_id, voice_client))
+            self.active_recordings[guild_id] = checkpoint_task
             logger.info(f"RealTimeRecorder: Started recording for guild {guild_id} with channel {voice_client.channel.name}")
             logger.info(f"RealTimeRecorder: Recording start time: {recording_start_time}")
             logger.info(f"RealTimeRecorder: Voice client recording status: {voice_client.recording}")
@@ -129,11 +133,87 @@ class RealTimeAudioRecorder:
                 if hasattr(vc, 'recording') and vc.recording:
                     vc.stop_recording()
                 del self.connections[guild_id]
+                
+                # チェックポイントタスクをキャンセル
+                if guild_id in self.active_recordings:
+                    self.active_recordings[guild_id].cancel()
+                    del self.active_recordings[guild_id]
+                
                 # 録音状態をクリア
                 self.recording_status[guild_id] = False
                 logger.info(f"RealTimeRecorder: Stopped recording for guild {guild_id}")
         except Exception as e:
             logger.error(f"RealTimeRecorder: Failed to stop recording: {e}")
+    
+    async def _periodic_checkpoint_task(self, guild_id: int, voice_client):
+        """定期的にチェックポイントを作成してリアルタイム音声データを取得"""
+        logger.info(f"RealTimeRecorder: Starting periodic checkpoint task for guild {guild_id}")
+        checkpoint_interval = 10.0  # 10秒ごとにチェックポイント作成
+        
+        try:
+            while self.recording_status.get(guild_id, False):
+                await asyncio.sleep(checkpoint_interval)
+                
+                # 録音がまだ有効か確認
+                if not self.recording_status.get(guild_id, False):
+                    break
+                    
+                # チェックポイント作成（一時停止→再開）
+                if voice_client and voice_client.is_connected() and getattr(voice_client, 'recording', False):
+                    try:
+                        logger.debug(f"RealTimeRecorder: Creating checkpoint for guild {guild_id}")
+                        # 現在の録音を一時停止してデータを取得
+                        old_sink = getattr(voice_client, 'sink', None)
+                        if old_sink and hasattr(old_sink, 'audio_data') and old_sink.audio_data:
+                            # 既存のデータを処理
+                            await self._process_checkpoint_data(guild_id, old_sink.audio_data)
+                        
+                        # 新しいSinkで録音を再開
+                        new_sink = WaveSink()
+                        async def new_callback(sink_obj):
+                            await self._finished_callback(sink_obj, guild_id)
+                        
+                        # 録音を再開
+                        voice_client.stop_recording()
+                        await asyncio.sleep(0.1)  # 少し待機
+                        voice_client.start_recording(new_sink, new_callback)
+                        
+                    except Exception as e:
+                        logger.warning(f"RealTimeRecorder: Checkpoint creation failed: {e}")
+                
+        except asyncio.CancelledError:
+            logger.info(f"RealTimeRecorder: Checkpoint task cancelled for guild {guild_id}")
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Error in checkpoint task: {e}")
+    
+    async def _process_checkpoint_data(self, guild_id: int, audio_data: dict):
+        """チェックポイントで取得した音声データを処理"""
+        try:
+            current_time = time.time()
+            logger.debug(f"RealTimeRecorder: Processing checkpoint data for guild {guild_id}")
+            
+            for user_id, audio in audio_data.items():
+                if audio.file:
+                    audio.file.seek(0)
+                    wav_data = audio.file.read()
+                    
+                    if len(wav_data) > 44:  # WAVヘッダー + 音声データが存在
+                        # continuous_buffersに追加
+                        self._add_to_continuous_buffer(guild_id, user_id, wav_data, current_time)
+                        
+                        # 従来のバッファにも追加
+                        buffer = io.BytesIO(wav_data)
+                        if guild_id not in self.guild_user_buffers:
+                            self.guild_user_buffers[guild_id] = {}
+                        if user_id not in self.guild_user_buffers[guild_id]:
+                            self.guild_user_buffers[guild_id][user_id] = []
+                        self.guild_user_buffers[guild_id][user_id].append((buffer, current_time))
+                        logger.info(f"RealTimeRecorder: Added audio buffer for guild {guild_id}, user {user_id} ({len(wav_data)} bytes)")
+                        
+                        logger.debug(f"RealTimeRecorder: Added checkpoint data for user {user_id} in guild {guild_id}")
+                        
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Error processing checkpoint data: {e}")
     
     async def _finished_callback(self, sink: WaveSink, guild_id: int):
         """録音完了時のコールバック（bot_simple.pyから移植）"""
@@ -200,10 +280,15 @@ class RealTimeAudioRecorder:
             
             logger.info(f"RealTimeRecorder: Processed {audio_count} audio files in callback")
             
-            # バッファを永続化（非同期タスクとして実行）
+            # バッファを永続化（頻度を下げて最小限のみ保存）
             if audio_count > 0:
-                # save_buffers()は内部で非同期タスクを作成するので、awaitは不要
-                self.save_buffers()
+                # 10回に1回のみ保存（頻繁な保存を避ける）
+                if not hasattr(self, '_finished_save_counter'):
+                    self._finished_save_counter = 0
+                self._finished_save_counter += 1
+                if self._finished_save_counter >= 10:
+                    self._finished_save_counter = 0
+                    self.save_buffers()
             
             # 録音状態をクリア
             self.recording_status[guild_id] = False
@@ -247,8 +332,13 @@ class RealTimeAudioRecorder:
                 if not self.guild_user_buffers[gid]:
                     del self.guild_user_buffers[gid]
         
-        # バッファが変更された場合は保存（save_buffers内で非同期化される）
-        self.save_buffers()
+        # バッファ保存頻度を下げる（10回に1回のみ保存）
+        if not hasattr(self, '_save_counter'):
+            self._save_counter = 0
+        self._save_counter += 1
+        if self._save_counter >= 10:
+            self._save_counter = 0
+            self.save_buffers()
     
     def _add_to_continuous_buffer(self, guild_id: int, user_id: int, audio_data: bytes, timestamp: float):
         """連続音声バッファに音声データを追加"""
@@ -476,8 +566,8 @@ class RealTimeAudioRecorder:
             simplified_buffers[str(guild_id)] = {}
             
             for user_id, buffers in users.items():
-                # 最新3件のみ保存（I/O負荷を軽減）
-                recent_buffers = sorted(buffers, key=lambda x: x[1])[-3:]
+                # 最新2件のみ保存（ファイルサイズ削減）
+                recent_buffers = sorted(buffers, key=lambda x: x[1])[-2:]
                 encoded_buffers = []
                 
                 for buffer, timestamp in recent_buffers:
