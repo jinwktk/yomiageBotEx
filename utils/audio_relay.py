@@ -73,8 +73,17 @@ class RealtimeRelaySink(discord.sinks.Sink):
             if len(self.processed_packets) > 1000:
                 self.processed_packets.clear()
             
-            # リアルタイム音声転送を非同期で実行
-            asyncio.create_task(self._relay_audio_realtime(data, user))
+            # イベントループを取得してタスクをスケジュール
+            try:
+                loop = asyncio.get_event_loop()
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        self._relay_audio_realtime(data, user), loop
+                    )
+                else:
+                    self.logger.warning("No running event loop found for audio relay")
+            except Exception as loop_error:
+                self.logger.error(f"Error scheduling audio relay task: {loop_error}")
             
         except Exception as e:
             self.logger.error(f"Error in RealtimeRelaySink.write: {e}")
