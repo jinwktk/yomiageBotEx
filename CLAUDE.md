@@ -42,7 +42,7 @@ Botを再起動する前に以下を必ず実行:
 ## プロジェクト概要
 Discord読み上げボット（Python版）の実装。TypeScript版の失敗を踏まえ、段階的に機能を追加していく方針で開発。
 
-**現在の状態**: 全機能完成・動作確認済み（2025-08-30）
+**現在の状態**: 音声リレー・TTS機能完全動作、リプレイ機能py-cordバグにより要再実装（2025-08-30）
 
 ## フォルダ構成
 
@@ -963,6 +963,45 @@ yomiageBotEx/
 
 **プロジェクト状態**: 完全動作・運用可能（全機能テスト済み）
 
+## 2025-08-30 リプレイ機能py-cordバグ問題分析・再実装計画策定
+
+### 🚨 重大問題の確認
+- **py-cord WaveSink致命的バグ**: PCMデータが0バイトで実際の音声データが取得できない
+- **現在のリプレイ機能**: 接続は正常だがWAVファイルにヘッダーのみ、音声データ無し
+- **影響範囲**: `/replay`コマンド完全機能停止、録音・再生不可
+
+### 🎯 完全再実装計画
+#### Phase 1: 音声リレー機能連携アプローチ
+- **戦略**: 正常動作中のSmoothAudioRelayシステムから音声データを流用
+- **技術方針**: py-cord WaveSinkバグを完全回避、音声リレー機能への影響ゼロ
+- **実装アーキテクチャ**:
+  ```
+  [SmoothAudioRelay] (既存・完璧動作)
+      ↓ (コールバック追加)
+  [RecordingCallbackManager] (新規作成)
+      ↓ (音声データ流用)
+  [ReplayBufferManager] (新規作成)
+      ↓ (時系列管理・ユーザー分離)
+  [ReplayCommandProcessor] (既存置き換え)
+  ```
+
+#### 要件仕様
+- **基本機能**: 指定時間分の音声録音・ユーザー別/全体再生
+- **品質要求**: 44.1kHz/16bit/ステレオ、Discord 25MB制限内
+- **技術要求**: Guild別・ユーザー別分離、5分遡及、リアルタイムバッファリング
+- **安全要求**: 音声リレー機能への影響完全ゼロ
+
+#### 段階的実装計画
+1. **Phase 1**: RecordingCallbackManager実装・基盤構築（1-2日）
+2. **Phase 2**: ReplayBufferManager実装・バッファ管理（2-3日）  
+3. **Phase 3**: 既存replayコマンド置き換え・品質処理（2日）
+4. **Phase 4**: 最適化・テスト・動作確認（1-2日）
+
+#### リスク評価・対策
+- **High Risk**: 音声リレー機能への影響 → 慎重な独立実装で回避
+- **Medium Risk**: メモリ使用量増加 → バッファサイズ制限で管理
+- **Low Risk**: 音声品質・応答性能 → 既存システム流用で問題なし
+
 ## プロセス重複管理ルール
 
 ### 重要なルール（ユーザーから2回指摘された）
@@ -977,6 +1016,45 @@ yomiageBotEx/
 2. 必要に応じてプロセス停止: `taskkill /PID [PID番号] /F`
 3. bot.py起動: `python bot.py`
 4. プロセス数確認: 1つのPythonプロセスのみ動作していることを確認
+
+### 2025-08-30 py-cordのApplicationContextエラー修正完了（最終安定版）
+- **ApplicationContext 'created_at'エラーの修正**: py-cordのApplicationContextオブジェクトには'created_at'属性が存在しないため、`datetime.now().strftime('%Y-%m-%d %H:%M:%S')`を使用するよう修正
+- **ApplicationContext 'edit_original_response'エラーの修正**: py-cordでは`edit_original_response`メソッドが存在しないため、`ctx.followup.send()`に変更してpy-cord完全対応を完了
+- **py-cord WaveSinkバグの詳細調査完了**: PCMデータが0バイトで音声データが取得できない根本的バグを確認。`sink.audio_data keys: []`で音声データが全く流れない状況
+- **リプレイ機能以外の全機能完全動作確認**:
+  - ✅ 音声リレー機能（Valworld → にめいやサーバー）
+  - ✅ TTS読み上げ機能（Style-Bert-VITS2統合）
+  - ✅ 自動参加・退出機能
+  - ✅ 辞書機能・ユーザー設定機能
+  - ✅ RecordingCallbackManager・ReplayBufferManagerシステム
+  - ⚠️ リプレイ機能（py-cord WaveSinkバグによりPCMデータ0バイト問題）
+
+## 最終動作確認済み機能（2025-08-30 安定版）
+- ✅ **自動参加・退出**: ユーザー参加時の自動VC参加、退出時の自動VC離脱
+- ✅ **TTS読み上げ**: チャットメッセージの音声読み上げ（Style-Bert-VITS2統合）
+- ✅ **音声横流し（リレー）**: サーバー間音声リレー機能（自動開始対応）
+- ✅ **辞書機能**: 単語置換による読み上げカスタマイズ（18語登録済み）
+- ✅ **ユーザー設定**: 個人別TTS設定管理
+- ✅ **自動再接続**: 接続切断時の自動復旧機能
+- ⚠️ **リプレイ機能**: py-cord WaveSinkバグによりPCMデータ取得不可（次期バージョンで修復予定）
+
+## 技術的詳細（安定版）
+### システム構成
+- **メインボット**: bot.py（7 Cogs、15スラッシュコマンド）
+- **音声リレーシステム**: SmoothAudioRelay（完全動作）
+- **TTS統合**: Style-Bert-VITS2 API（192.168.0.99:5000）
+- **録音システム**: RecordingCallbackManager + ReplayBufferManager（基盤完成、データ不足のみ）
+
+### 既知の問題と対応
+- **py-cord WaveSinkバグ**: PCMデータが0バイトでリプレイ機能影響、次期バージョンで根本解決予定
+- **プロセス重複管理**: bot.lockファイルによる単一プロセス実行制御
+
+### 次期開発予定
+- py-cord WaveSinkバグの根本的解決策実装
+- 音声リレーシステムからの直接音声データ取得機能
+- discord.py移行の検討
+
+**プロジェクト状態**: 安定版・運用可能（リプレイ機能を除く全機能正常動作）
 
 ## 参考リンク
 - [TypeScript版（参考）](https://github.com/jinwktk/yomiageBotTS)
