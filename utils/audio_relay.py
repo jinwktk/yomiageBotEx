@@ -117,7 +117,8 @@ class RealtimeRelaySink(discord.sinks.Sink):
                 # FFmpegでPCMをDiscord対応形式に変換
                 audio_source = discord.FFmpegPCMAudio(
                     temp_pcm_path,
-                    options='-f s16le -ar 48000 -ac 2'
+                    before_options='-f s16le -ar 48000 -ac 2',
+                    options='-vn'
                 )
                 
                 # ボリューム調整
@@ -250,7 +251,8 @@ class AudioRelay:
                 # FFmpegでPCMをDiscord対応形式に変換
                 audio_source = discord.FFmpegPCMAudio(
                     temp_pcm_path,
-                    options='-f s16le -ar 48000 -ac 2'
+                    before_options='-f s16le -ar 48000 -ac 2',
+                    options='-vn'
                 )
                 
                 # ボリューム調整
@@ -353,7 +355,9 @@ class AudioRelay:
             
             # ソースチャンネルに接続（既に接続していない場合）
             source_voice_client = source_guild.voice_client
-            if not source_voice_client:
+            
+            # 音声クライアントの接続状態を確実にチェック
+            if not source_voice_client or not source_voice_client.is_connected():
                 # 接続していない場合のみ新規接続
                 source_voice_client = await source_channel.connect()
                 self.logger.debug(f"Connected to source channel: {source_channel.name}")
@@ -375,7 +379,9 @@ class AudioRelay:
             
             # ターゲットチャンネルに接続（既に接続していない場合）
             target_voice_client = target_guild.voice_client
-            if not target_voice_client:
+            
+            # 音声クライアントの接続状態を確実にチェック
+            if not target_voice_client or not target_voice_client.is_connected():
                 # 接続していない場合のみ新規接続
                 target_voice_client = await target_channel.connect()
                 self.logger.debug(f"Connected to target channel: {target_channel.name}")

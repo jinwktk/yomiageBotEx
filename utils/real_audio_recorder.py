@@ -28,6 +28,7 @@ class RealTimeAudioRecorder:
     
     def __init__(self, recording_manager):
         self.recording_manager = recording_manager
+        self.relay_callbacks = {}  # Guild ID -> callback function for audio relay
         self.connections: Dict[int, discord.VoiceClient] = {}
         # Guild別のユーザー音声バッファ: {guild_id: {user_id: [(buffer, timestamp), ...]}}
         self.guild_user_buffers: Dict[int, Dict[int, list]] = {}
@@ -51,6 +52,17 @@ class RealTimeAudioRecorder:
         
         # 起動時にバッファを復元（サイズチェック付き）
         self.load_buffers_safe()
+    
+    def register_relay_callback(self, guild_id: int, callback_func: Callable):
+        """音声リレー用コールバック関数の登録"""
+        self.relay_callbacks[guild_id] = callback_func
+        logger.info(f"RealTimeRecorder: Registered relay callback for guild {guild_id}")
+    
+    def unregister_relay_callback(self, guild_id: int):
+        """音声リレー用コールバック関数の登録解除"""
+        if guild_id in self.relay_callbacks:
+            del self.relay_callbacks[guild_id]
+            logger.info(f"RealTimeRecorder: Unregistered relay callback for guild {guild_id}")
         
     async def start_recording(self, guild_id: int, voice_client: discord.VoiceClient):
         """録音開始"""
@@ -274,6 +286,14 @@ class RealTimeAudioRecorder:
                     logger.warning(f"RealTimeRecorder: No audio.file for user {user_id}")
             
             logger.info(f"RealTimeRecorder: Processed {audio_count} audio files in callback")
+            
+            # リレーコールバック呼び出し（音声リレー機能）
+            if guild_id in self.relay_callbacks and audio_count > 0:
+                try:
+                    logger.info(f"RealTimeRecorder: Calling relay callback for guild {guild_id}")
+                    await self.relay_callbacks[guild_id](sink)
+                except Exception as e:
+                    logger.error(f"RealTimeRecorder: Error in relay callback for guild {guild_id}: {e}")
             
             # バッファを永続化（頻度を下げて最小限のみ保存）
             if audio_count > 0:

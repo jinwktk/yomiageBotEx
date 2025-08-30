@@ -380,6 +380,11 @@ class VoiceCog(commands.Cog):
                 # 録音処理は最初のメンバーでのみ実行（重複を防ぐ）
                 first_member = members[0]
                 await self._process_member_recording(guild, first_member)
+            
+            # RelayCogへ音声接続完了を通知（リレー自動開始用）
+            relay_cog = self.bot.get_cog("RelayCog")
+            if relay_cog:
+                await relay_cog.handle_voice_connected(guild.id, channel.id)
                     
         except Exception as e:
             self.logger.error(f"Failed to notify other cogs: {e}")

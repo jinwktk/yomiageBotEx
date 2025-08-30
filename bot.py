@@ -10,12 +10,55 @@ import logging
 from pathlib import Path
 import signal
 import time
+import atexit
 
 import discord
 import yaml
 from dotenv import load_dotenv
 
 from utils.logger import setup_logging, start_log_cleanup_task
+
+# プロセス重複防止機能（CLAUDE.mdルール遵守）
+LOCK_FILE = "bot.lock"
+
+def cleanup_lock_file():
+    """ロックファイルのクリーンアップ"""
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.unlink(LOCK_FILE)
+            print(f"Lock file {LOCK_FILE} removed")
+    except Exception as e:
+        print(f"Warning: Could not remove lock file: {e}")
+
+def check_single_process():
+    """単一プロセス実行を確認"""
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, 'r') as f:
+                existing_pid = f.read().strip()
+            print(f"Bot is already running (PID: {existing_pid})!")
+            print("Multiple process execution is prohibited by CLAUDE.md rules.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Lock file exists but unreadable: {e}")
+            # 壊れたロックファイルを削除
+            cleanup_lock_file()
+    
+    # ロックファイル作成
+    try:
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        print(f"Process lock created: {LOCK_FILE} (PID: {os.getpid()})")
+        
+        # 終了時のクリーンアップを登録
+        atexit.register(cleanup_lock_file)
+        
+    except Exception as e:
+        print(f"Failed to create lock file: {e}")
+        sys.exit(1)
+
+# 単一プロセス実行チェック実行
+check_single_process()
 
 try:
     from utils.real_audio_recorder import RealEnhancedVoiceClient as EnhancedVoiceClient
