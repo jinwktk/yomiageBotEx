@@ -6,7 +6,9 @@ TypeScript版のstartAudioStreaming()機能をPythonに移植
 import asyncio
 import logging
 import time
-from typing import Dict, Optional, Set, Tuple, Any
+import queue
+import threading
+from typing import Dict, Optional, Set, Tuple, Any, NamedTuple
 from dataclasses import dataclass
 from enum import Enum
 import io
@@ -15,6 +17,14 @@ import os
 
 import discord
 from discord import PCMVolumeTransformer
+
+
+class AudioPacket(NamedTuple):
+    """音声パケットデータ構造"""
+    data: bytes
+    user_id: int
+    session_id: str
+    timestamp: float
 
 
 class RelayStatus(Enum):
@@ -43,7 +53,7 @@ class RelaySession:
 class RealtimeRelaySink(discord.sinks.Sink):
     """リアルタイム音声リレー用Sink"""
     
-    def __init__(self, session, target_voice_client, logger, relay_config, bot):
+    def __init__(self, session, target_voice_client, logger, relay_config, bot, audio_queue):
         super().__init__()
         self.session = session
         self.target_voice_client = target_voice_client
@@ -51,15 +61,13 @@ class RealtimeRelaySink(discord.sinks.Sink):
         self.volume = relay_config.get("volume", 0.5)
         self.processed_packets = set()
         self.bot = bot
+        self.audio_queue = audio_queue
         
     def write(self, data, user):
-        """音声データを受信してリアルタイムでターゲットに転送"""
+        """音声データを受信してキューに転送（同期処理、DecodeManagerスレッドで実行）"""
         try:
             if user == self.bot.user.id:
                 return  # ボット自身の音声は除外
-            
-            # デバッグ: 音声データ受信をログ出力（重要な転送のみ）
-            self.logger.debug(f"RealtimeRelaySink received audio data from user {user}, size: {len(data)} bytes")
             
             # パケットIDを生成（重複防止）
             current_time = time.time()
@@ -73,17 +81,20 @@ class RealtimeRelaySink(discord.sinks.Sink):
             if len(self.processed_packets) > 1000:
                 self.processed_packets.clear()
             
-            # イベントループを取得してタスクをスケジュール
+            # 音声パケットをキューに投入（同期処理、asyncio不要）
+            audio_packet = AudioPacket(
+                data=data,
+                user_id=user,
+                session_id=self.session.session_id,
+                timestamp=current_time
+            )
+            
             try:
-                loop = asyncio.get_event_loop()
-                if loop and loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        self._relay_audio_realtime(data, user), loop
-                    )
-                else:
-                    self.logger.warning("No running event loop found for audio relay")
-            except Exception as loop_error:
-                self.logger.error(f"Error scheduling audio relay task: {loop_error}")
+                # ノンブロッキングでキューに投入
+                self.audio_queue.put_nowait(audio_packet)
+                self.logger.debug(f"Audio packet queued from user {user}, size: {len(data)} bytes")
+            except queue.Full:
+                self.logger.warning(f"Audio queue full, dropping packet from user {user}")
             
         except Exception as e:
             self.logger.error(f"Error in RealtimeRelaySink.write: {e}")
@@ -136,6 +147,11 @@ class AudioRelay:
         self.active_sessions: Dict[str, RelaySession] = {}
         self.user_audio_sources: Dict[Tuple[int, int], discord.AudioSource] = {}  # (guild_id, user_id) -> AudioSource
         
+        # キューベース音声転送システム
+        self.audio_queue: queue.Queue = queue.Queue(maxsize=1000)  # 音声パケットキュー
+        self.queue_processor_task: Optional[asyncio.Task] = None
+        self.queue_processor_running = False
+        
         # レート制限
         self.last_stream_switch: Dict[int, float] = {}  # user_id -> timestamp
         self.stream_switch_cooldown = 2.0  # 2秒のクールダウン
@@ -160,6 +176,101 @@ class AudioRelay:
         except RuntimeError:
             # イベントループが存在しない場合は後で開始
             pass
+    
+    def _start_queue_processor(self):
+        """キュー処理タスクの開始"""
+        try:
+            if not self.queue_processor_running and (self.queue_processor_task is None or self.queue_processor_task.done()):
+                self.queue_processor_running = True
+                self.queue_processor_task = asyncio.create_task(self._process_audio_queue())
+                self.logger.info("Audio queue processor started")
+        except RuntimeError:
+            # イベントループが存在しない場合は後で開始
+            pass
+    
+    async def _process_audio_queue(self):
+        """音声キューを処理してリアルタイム転送を実行"""
+        self.logger.debug("Audio queue processor started")
+        
+        while self.queue_processor_running:
+            try:
+                # キューから音声パケットを取得（0.01秒タイムアウト）
+                try:
+                    audio_packet = self.audio_queue.get(timeout=0.01)
+                except queue.Empty:
+                    await asyncio.sleep(0.01)  # 短時間待機してループ継続
+                    continue
+                
+                # セッションが存在するかチェック
+                if audio_packet.session_id not in self.active_sessions:
+                    continue
+                
+                session = self.active_sessions[audio_packet.session_id]
+                
+                # セッションがアクティブかチェック
+                if session.status != RelayStatus.ACTIVE:
+                    continue
+                
+                # ターゲット音声クライアントを取得
+                target_guild = self.bot.get_guild(session.target_guild_id)
+                if not target_guild or not target_guild.voice_client:
+                    continue
+                
+                target_voice_client = target_guild.voice_client
+                
+                # 音声転送を実行
+                await self._relay_audio_realtime_from_queue(
+                    audio_packet.data, 
+                    audio_packet.user_id, 
+                    target_voice_client,
+                    session
+                )
+                
+            except Exception as e:
+                self.logger.error(f"Error in audio queue processor: {e}")
+                await asyncio.sleep(0.1)  # エラー時は少し長めに待機
+        
+        self.logger.debug("Audio queue processor stopped")
+    
+    async def _relay_audio_realtime_from_queue(self, data: bytes, user_id: int, target_voice_client: discord.VoiceClient, session: RelaySession):
+        """キューから受信した音声データをリアルタイム転送"""
+        try:
+            if not target_voice_client.is_connected():
+                return
+            
+            # PCMデータを一時ファイルに書き込み
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pcm') as temp_pcm:
+                temp_pcm.write(data)
+                temp_pcm_path = temp_pcm.name
+            
+            try:
+                # FFmpegでPCMをDiscord対応形式に変換
+                audio_source = discord.FFmpegPCMAudio(
+                    temp_pcm_path,
+                    options='-f s16le -ar 48000 -ac 2'
+                )
+                
+                # ボリューム調整
+                volume = self.relay_config.get("volume", 0.5)
+                audio_source = PCMVolumeTransformer(audio_source, volume=volume)
+                
+                # 既存再生を停止して新しい音声を再生
+                if target_voice_client.is_playing():
+                    target_voice_client.stop()
+                
+                target_voice_client.play(audio_source)
+                self.logger.info(f"🎵 LIVE RELAY: User {user_id} audio streamed to target channel")
+                
+                # セッションのアクティビティを更新
+                session.last_activity = time.time()
+                session.active_users.add(user_id)
+                
+            finally:
+                # クリーンアップを遅延実行
+                asyncio.get_event_loop().call_later(2.0, lambda: os.unlink(temp_pcm_path) if os.path.exists(temp_pcm_path) else None)
+                
+        except Exception as e:
+            self.logger.error(f"Error relaying queued audio: {e}")
     
     async def _periodic_cleanup(self):
         """定期的なクリーンアップ"""
@@ -303,8 +414,11 @@ class AudioRelay:
     ):
         """リアルタイム音声ストリーミング処理"""
         try:
-            # リアルタイムリレー用Sinkを作成
-            sink = RealtimeRelaySink(session, target_voice_client, self.logger, self.relay_config, self.bot)
+            # キュープロセッサを開始
+            self._start_queue_processor()
+            
+            # リアルタイムリレー用Sinkを作成（audio_queueを渡す）
+            sink = RealtimeRelaySink(session, target_voice_client, self.logger, self.relay_config, self.bot, self.audio_queue)
             
             # 録音完了時のコールバック
             def after_recording(sink, error=None):
@@ -370,6 +484,15 @@ class AudioRelay:
         session_ids = list(self.active_sessions.keys())
         for session_id in session_ids:
             await self.stop_relay_session(session_id)
+        
+        # キュープロセッサ停止
+        self.queue_processor_running = False
+        if self.queue_processor_task and not self.queue_processor_task.done():
+            self.queue_processor_task.cancel()
+            try:
+                await self.queue_processor_task
+            except asyncio.CancelledError:
+                pass
         
         # クリーンアップタスク停止
         if self._cleanup_task and not self._cleanup_task.done():
