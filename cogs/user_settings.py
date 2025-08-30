@@ -5,7 +5,7 @@
 import asyncio
 import logging
 import random
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 
 import discord
 from discord.ext import commands

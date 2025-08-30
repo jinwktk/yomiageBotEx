@@ -31,10 +31,16 @@ class RelayCog(commands.Cog):
         self.auto_relay_pairs = config.get("audio_relay", {}).get("auto_relay_pairs", [])
         
         self.logger.info("RelayCog initialized")
+        self.logger.info(f"Audio relay enabled: {self.audio_relay.enabled}")
+        self.logger.info(f"Auto start config: {self.auto_start_config}")
+        self.logger.info(f"Auto relay pairs: {len(self.auto_relay_pairs)} pairs")
         
         # 自動開始タスク
         if self.auto_start_config and self.audio_relay.enabled:
+            self.logger.info("Auto start conditions met, will start relay on bot ready")
             self._start_auto_relay_task()
+        else:
+            self.logger.info(f"Auto start NOT triggered - enabled: {self.audio_relay.enabled}, auto_start: {self.auto_start_config}")
     
     def _start_auto_relay_task(self):
         """自動リレー開始タスクの開始（on_readyで実行）"""
@@ -46,8 +52,8 @@ class RelayCog(commands.Cog):
         # Botの準備完了まで待機
         await self.bot.wait_until_ready()
         
-        # ギルド情報の同期待機
-        await asyncio.sleep(5)
+        # ボットのVC接続完了まで十分に待機（VoiceCogの自動参加完了後）
+        await asyncio.sleep(20)
         
         self.logger.info("Starting auto relay sessions...")
         
@@ -70,13 +76,18 @@ class RelayCog(commands.Cog):
                 
                 # ソースギルドでボットが現在接続しているチャンネルを動的取得
                 source_guild = self.bot.get_guild(source_guild_id)
-                if source_guild and source_guild.voice_client:
-                    source_channel_id = source_guild.voice_client.channel.id
-                    self.logger.info(f"Using bot's current voice channel as source: {source_channel_id}")
+                if configured_source_channel_id == 0:
+                    # 動的チャンネル取得モード
+                    if source_guild and source_guild.voice_client:
+                        source_channel_id = source_guild.voice_client.channel.id
+                        self.logger.info(f"Using bot's current voice channel as source: {source_channel_id} ({source_guild.voice_client.channel.name})")
+                    else:
+                        self.logger.warning(f"Bot not connected in source guild {source_guild_id}, cannot use dynamic channel selection")
+                        continue
                 else:
-                    # ボットが接続していない場合は設定値を使用
+                    # 設定値を使用
                     source_channel_id = configured_source_channel_id
-                    self.logger.warning(f"Bot not connected in source guild {source_guild_id}, using configured channel: {source_channel_id}")
+                    self.logger.info(f"Using configured source channel: {source_channel_id}")
                 
                 # IDの妥当性チェック
                 if not all([source_guild_id, source_channel_id, target_guild_id, target_channel_id]):
@@ -174,9 +185,15 @@ class RelayCog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         """ボット準備完了時にクリーンアップタスクと自動リレーを開始"""
+        self.logger.info("RelayCog on_ready triggered")
         self.audio_relay._start_cleanup_task()
-        if self.config.get("audio_relay", {}).get("auto_start", False):
+        auto_start_enabled = self.config.get("audio_relay", {}).get("auto_start", False)
+        self.logger.info(f"Auto start check in on_ready: {auto_start_enabled}")
+        if auto_start_enabled:
+            self.logger.info("Creating auto start task...")
             asyncio.create_task(self._auto_start_relay_sessions())
+        else:
+            self.logger.info("Auto start disabled in on_ready")
     
     # @discord.slash_command(name="relay_start", description="音声横流し（リレー）を開始します")
     async def relay_start_command(

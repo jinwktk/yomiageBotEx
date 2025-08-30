@@ -36,10 +36,10 @@ audio_relay:
   # 自動開始設定
   auto_start: true    # ボット起動時の自動リレー開始
   auto_relay_pairs:   # 自動開始するリレーペア一覧
-    - source_guild_id: 995627275074666568        # 転送元サーバーID
-      source_channel_id: 0                       # 0=ボットの現在接続チャンネルを動的取得
-      target_guild_id: 813783748566581249        # 転送先サーバーID
-      target_channel_id: 813783749153259606      # 転送先チャンネルID
+    - source_guild_id: 995627275074666568        # 転送元サーバーID（Valworld）
+      source_channel_id: 0                       # 0=ボットの現在接続チャンネルを動的取得（おもちだいすきクラブ）
+      target_guild_id: 813783748566581249        # 転送先サーバーID（にめいやサーバー）
+      target_channel_id: 813783749153259606      # 転送先チャンネルID（ロビー）
       enabled: true                              # このペアを有効
 
 message_reading:

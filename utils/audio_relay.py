@@ -217,7 +217,7 @@ class AudioRelay:
         """実際の音声ストリーミング処理"""
         try:
             # 録音開始（ソースチャンネルから）
-            def after_recording(error):
+            async def after_recording(error):
                 if error:
                     self.logger.error(f"Recording error in session {session.session_id}: {error}")
                 else:
@@ -272,24 +272,47 @@ class AudioRelay:
     ):
         """音声データの処理とリレー"""
         try:
-            # WaveSinkから音声データを取得
-            for user_id, audio_data in sink.audio_data.items():
-                if user_id == self.bot.user.id:
-                    continue  # ボット自身の音声は除外
+            # 音声データの確認（処理済みデータを追跡）
+            if hasattr(sink, 'audio_data') and sink.audio_data:
+                # セッションに処理済みユーザーを追跡するセットを初期化
+                if not hasattr(session, 'processed_users'):
+                    session.processed_users = set()
                 
-                # レート制限チェック
-                if not self._check_rate_limit(user_id):
-                    continue
+                current_users = set(sink.audio_data.keys())
+                new_users = current_users - session.processed_users
                 
-                # 音声データをターゲットチャンネルで再生
-                if audio_data.file and audio_data.file.readable():
-                    await self._play_audio_to_target(
-                        session, user_id, audio_data.file, target_voice_client
-                    )
-                    session.active_users.add(user_id)
+                if new_users:
+                    self.logger.info(f"Found new audio data from {len(new_users)} users: {new_users}")
+                    
+                    for user_id in new_users:
+                        if user_id == self.bot.user.id:
+                            continue  # ボット自身の音声は除外
+                        
+                        audio_data = sink.audio_data[user_id]
+                        self.logger.debug(f"Processing new audio for user {user_id}")
+                        
+                        # レート制限チェック
+                        if not self._check_rate_limit(user_id):
+                            continue
+                        
+                        # 音声データをターゲットチャンネルで再生
+                        if hasattr(audio_data, 'file') and audio_data.file and audio_data.file.readable():
+                            self.logger.info(f"Playing audio from user {user_id} to target")
+                            await self._play_audio_to_target(
+                                session, user_id, audio_data.file, target_voice_client
+                            )
+                            session.active_users.add(user_id)
+                        else:
+                            self.logger.warning(f"No readable audio file for user {user_id}")
+                    
+                    # 処理済みユーザーを更新
+                    session.processed_users.update(new_users)
+                else:
+                    # デバッグログは頻繁すぎるため削減
+                    pass
             
         except Exception as e:
-            self.logger.error(f"Error processing audio data for session {session.session_id}: {e}")
+            self.logger.error(f"Error processing audio data for session {session.session_id}: {e}", exc_info=True)
     
     def _check_rate_limit(self, user_id: int) -> bool:
         """レート制限チェック"""
@@ -313,25 +336,69 @@ class AudioRelay:
         try:
             if target_voice_client.is_playing():
                 target_voice_client.stop()
+                await asyncio.sleep(0.1)  # 停止を確認
             
             # ファイルポインタを先頭に戻す
             audio_file.seek(0)
             
-            # FFmpegPCMAudioソースを作成
-            audio_source = discord.FFmpegPCMAudio(audio_file, pipe=True)
+            # ファイルサイズとフォーマットを確認
+            file_size = audio_file.seek(0, 2)  # ファイル末尾に移動してサイズ確認
+            audio_file.seek(0)  # 先頭に戻す
             
-            # ボリューム調整
-            volume = self.relay_config.get("volume", 0.5)
-            audio_source = PCMVolumeTransformer(audio_source, volume=volume)
+            self.logger.debug(f"Audio file size: {file_size} bytes")
+            
+            if file_size < 44:  # WAVヘッダーの最小サイズ
+                self.logger.warning(f"Audio file too small: {file_size} bytes")
+                return
+            
+            # WAVファイルを一時ファイルとして保存してFFmpegで処理
+            import tempfile
+            import os
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_wav:
+                audio_file.seek(0)
+                temp_wav.write(audio_file.read())
+                temp_wav_path = temp_wav.name
+            
+            try:
+                # FFmpegPCMAudioソースを作成（一時ファイルから）
+                audio_source = discord.FFmpegPCMAudio(
+                    temp_wav_path,
+                    options='-f wav -ar 48000 -ac 2'  # Discord対応フォーマットに変換
+                )
+                
+                # ボリューム調整
+                volume = self.relay_config.get("volume", 0.5)
+                audio_source = PCMVolumeTransformer(audio_source, volume=volume)
+                
+                self.logger.debug(f"Created audio source from temp file: {temp_wav_path}")
+            finally:
+                # 一時ファイルをクリーンアップ（少し遅らせて削除）
+                def cleanup_temp_file():
+                    try:
+                        os.unlink(temp_wav_path)
+                    except:
+                        pass
+                asyncio.get_event_loop().call_later(10.0, cleanup_temp_file)
             
             # 音声再生
-            def after_play(error):
+            def after_play(error):  # 同期関数に変更
                 if error:
                     self.logger.error(f"Playback error for user {user_id} in session {session.session_id}: {error}")
+                else:
+                    self.logger.info(f"Playback completed successfully for user {user_id} in session {session.session_id}")
+            
+            # VoiceClientが接続されているか確認
+            if not target_voice_client.is_connected():
+                self.logger.warning(f"Target voice client not connected for session {session.session_id}")
+                return
             
             target_voice_client.play(audio_source, after=after_play)
             
-            self.logger.debug(f"Playing audio from user {user_id} in session {session.session_id}")
+            self.logger.info(f"Started playing audio from user {user_id} to target channel in session {session.session_id}")
+            
+            # 再生開始を少し待つ
+            await asyncio.sleep(0.5)
             
         except Exception as e:
             self.logger.error(f"Failed to play audio to target for session {session.session_id}: {e}")

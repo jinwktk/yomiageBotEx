@@ -257,34 +257,31 @@ class RecordingCog(commands.Cog):
                     return
                 
                 else:
-                    # 全員の音声をマージ
+                    # 全員の音声をミキシング（重ね合わせ）
                     if not time_range_audio:
                         await ctx.followup.send(f"⚠️ 過去{duration}秒間の録音データがありません。", ephemeral=True)
                         return
                     
-                    # 全ユーザーの音声データを1つのWAVファイルに結合
-                    combined_audio = io.BytesIO()
-                    user_count = len(time_range_audio)
-                    first_user = True
-                    
-                    for user_id, audio_data in time_range_audio.items():
-                        if not audio_data:
-                            continue
+                    # 音声ミキシング処理
+                    try:
+                        mixed_audio = self._mix_multiple_audio_streams(time_range_audio)
+                        if not mixed_audio:
+                            await ctx.followup.send(f"⚠️ 音声ミキシング処理に失敗しました。", ephemeral=True)
+                            return
                         
-                        if first_user:
-                            # 最初のユーザーはヘッダー込みで追加
-                            combined_audio.write(audio_data)
-                            first_user = False
+                        combined_audio = io.BytesIO(mixed_audio)
+                        user_count = len(time_range_audio)
+                        
+                    except Exception as mix_error:
+                        self.logger.error(f"Audio mixing failed: {mix_error}")
+                        # フォールバック: 最初のユーザーのみを使用
+                        if time_range_audio:
+                            first_audio = list(time_range_audio.values())[0]
+                            combined_audio = io.BytesIO(first_audio)
+                            user_count = 1
+                            await ctx.followup.send(f"⚠️ ミキシングに失敗、最初のユーザーのみ再生します。", ephemeral=True)
                         else:
-                            # 2番目以降はヘッダーを除いて音声データのみ追加
-                            if len(audio_data) > 44:
-                                combined_audio.write(audio_data[44:])
-                    
-                    if combined_audio.tell() == 0:
-                        await ctx.followup.send(f"⚠️ 過去{duration}秒間の有効な音声データがありません。", ephemeral=True)
-                        return
-                    
-                    combined_audio.seek(0)
+                            return
                     
                     # 一時ファイルに保存してノーマライズ処理
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -369,13 +366,18 @@ class RecordingCog(commands.Cog):
                     await ctx.followup.send("⚠️ 有効な録音データがありません。", ephemeral=True)
                     return
                 
-                # 全員の音声を1つのファイルに結合
-                merged_audio = io.BytesIO()
-                for audio in all_audio_data:
-                    audio.seek(0)
-                    merged_audio.write(audio.read())
-                
-                merged_audio.seek(0)
+                # 全員の音声を正しくミックス
+                try:
+                    mixed_audio = self._mix_multiple_audio_streams(all_audio_data)
+                    if mixed_audio is None:
+                        await ctx.followup.send("⚠️ 音声ミキシング処理に失敗しました。", ephemeral=True)
+                        return
+                    
+                    merged_audio = io.BytesIO(mixed_audio)
+                except Exception as e:
+                    self.logger.error(f"Audio mixing failed: {e}", exc_info=True)
+                    await ctx.followup.send("⚠️ 音声ミキシング処理に失敗しました。", ephemeral=True)
+                    return
                 
                 # マージした音声をノーマライズ処理
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -543,6 +545,130 @@ class RecordingCog(commands.Cog):
                 return io.BytesIO(compressed_data)
             
             return io.BytesIO(original_data)
+    
+    def _mix_multiple_audio_streams(self, user_audio_dict: dict) -> bytes:
+        """複数ユーザーの音声をミキシング（重ね合わせ）"""
+        import numpy as np
+        import wave
+        import io
+        
+        try:
+            self.logger.info(f"Mixing audio from {len(user_audio_dict)} users")
+            
+            # 各ユーザーの音声データを取得し、numpy配列に変換
+            audio_arrays = []
+            max_length = 0
+            sample_rate = None
+            channels = None
+            
+            for user_id, audio_data in user_audio_dict.items():
+                if not audio_data or len(audio_data) < 44:  # WAVヘッダーサイズチェック
+                    self.logger.warning(f"User {user_id}: Invalid audio data (size: {len(audio_data)})")
+                    continue
+                
+                try:
+                    # WAVデータの先頭部分をデバッグ出力
+                    header = audio_data[:12] if len(audio_data) >= 12 else audio_data
+                    self.logger.info(f"User {user_id}: Audio header: {header[:8]} (first 8 bytes)")
+                    self.logger.info(f"User {user_id}: Audio size: {len(audio_data)} bytes")
+                    
+                    # RIFFヘッダーチェック
+                    if not audio_data.startswith(b'RIFF'):
+                        self.logger.error(f"User {user_id}: Invalid WAV format - missing RIFF header")
+                        self.logger.debug(f"User {user_id}: Data starts with: {audio_data[:16]}")
+                        continue
+                    
+                    # WAVデータを解析
+                    audio_io = io.BytesIO(audio_data)
+                    with wave.open(audio_io, 'rb') as wav:
+                        frames = wav.readframes(-1)
+                        params = wav.getparams()
+                        self.logger.info(f"User {user_id}: WAV params - frames: {len(frames)} bytes, rate: {params.framerate}, channels: {params.nchannels}, frames_total: {params.nframes}")
+                        
+                        if sample_rate is None:
+                            sample_rate = params.framerate
+                            channels = params.nchannels
+                        elif sample_rate != params.framerate or channels != params.nchannels:
+                            self.logger.warning(f"User {user_id}: Audio format mismatch (sr: {params.framerate}, ch: {params.nchannels})")
+                            continue
+                        
+                        # バイトデータをnumpy配列に変換（16bit前提）
+                        audio_array = np.frombuffer(frames, dtype=np.int16)
+                        
+                        # ステレオの場合はモノラルに変換
+                        if channels == 2:
+                            audio_array = audio_array.reshape(-1, 2)
+                            audio_array = np.mean(audio_array, axis=1).astype(np.int16)
+                        
+                        audio_arrays.append(audio_array)
+                        max_length = max(max_length, len(audio_array))
+                        
+                        self.logger.info(f"User {user_id}: {len(audio_array)} samples, {params.framerate}Hz")
+                
+                except Exception as wav_error:
+                    self.logger.error(f"Failed to process audio for user {user_id}: {wav_error}")
+                    continue
+            
+            if not audio_arrays:
+                self.logger.error("No valid audio arrays to mix")
+                return b""
+            
+            if len(audio_arrays) == 1:
+                # 1人だけの場合はそのまま返す
+                mixed_array = audio_arrays[0]
+            else:
+                # 全配列を同じ長さにパディング
+                padded_arrays = []
+                for arr in audio_arrays:
+                    if len(arr) < max_length:
+                        padded = np.zeros(max_length, dtype=np.int16)
+                        padded[:len(arr)] = arr
+                        padded_arrays.append(padded)
+                    else:
+                        padded_arrays.append(arr[:max_length])
+                
+                # 音声をミキシング（平均値を取って音量調整）
+                mixed_array = np.zeros(max_length, dtype=np.float32)
+                
+                for arr in padded_arrays:
+                    mixed_array += arr.astype(np.float32)
+                
+                # 平均値を取って音量を調整（クリッピング防止）
+                mixed_array = mixed_array / len(padded_arrays)
+                
+                # 音量を少し上げる（70%程度）
+                mixed_array *= 0.7
+                
+                # クリッピング防止
+                mixed_array = np.clip(mixed_array, -32767, 32767)
+                mixed_array = mixed_array.astype(np.int16)
+            
+            # WAVファイルとして出力
+            output = io.BytesIO()
+            with wave.open(output, 'wb') as wav_out:
+                wav_out.setnchannels(1)  # モノラル
+                wav_out.setsampwidth(2)  # 16bit
+                wav_out.setframerate(sample_rate)
+                wav_out.writeframes(mixed_array.tobytes())
+            
+            mixed_wav = output.getvalue()
+            self.logger.info(f"Mixed audio created: {len(mixed_wav)} bytes, {len(mixed_array)} samples")
+            
+            return mixed_wav
+            
+        except ImportError:
+            self.logger.error("NumPy not available, audio mixing disabled")
+            # フォールバック: 最初のユーザーの音声のみ返す
+            if user_audio_dict:
+                return list(user_audio_dict.values())[0]
+            return b""
+        
+        except Exception as e:
+            self.logger.error(f"Audio mixing failed: {e}", exc_info=True)
+            # フォールバック: 最初のユーザーの音声のみ返す
+            if user_audio_dict:
+                return list(user_audio_dict.values())[0]
+            return b""
 
 
 def setup(bot):

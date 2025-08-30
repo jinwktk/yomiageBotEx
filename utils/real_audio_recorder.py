@@ -264,9 +264,7 @@ class RealTimeAudioRecorder:
                         # 連続バッファにも追加（時間情報付き）
                         self._add_to_continuous_buffer(guild_id, user_id, audio_data, current_time)
                         
-                        # RecordingManagerにも追加
-                        if self.recording_manager:
-                            self.recording_manager.add_audio_data(guild_id, audio_data, user_id)
+                        # continuous_bufferにデータを追加（RecordingManagerへの参照は削除）
                         
                         logger.debug(f"RealTimeRecorder: Added audio buffer for guild {guild_id}, user {user_id}")
                         audio_count += 1
@@ -442,32 +440,62 @@ class RealTimeAudioRecorder:
         # 時系列順にソート
         matching_chunks.sort(key=lambda x: x[1])
         
-        # WAVヘッダーと音声データを結合
-        combined_audio = io.BytesIO()
-        first_chunk = True
-        total_data_size = 0
+        # WAVファイルを正しく結合
+        if not matching_chunks:
+            logger.warning("RealTimeRecorder: No chunks to combine")
+            return b''
+        
+        # 最初のチャンクからWAVヘッダー情報を取得
+        first_audio_data = matching_chunks[0][0]
+        if len(first_audio_data) < 44:
+            logger.error(f"RealTimeRecorder: First chunk too small for WAV header: {len(first_audio_data)} bytes")
+            return b''
+            
+        # WAVヘッダーを解析
+        try:
+            import wave
+            with wave.open(io.BytesIO(first_audio_data), 'rb') as first_wave:
+                framerate = first_wave.getframerate()
+                sampwidth = first_wave.getsampwidth()
+                nchannels = first_wave.getnchannels()
+                logger.debug(f"RealTimeRecorder: WAV params - {nchannels}ch, {sampwidth}bytes, {framerate}Hz")
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Failed to parse WAV header: {e}")
+            return b''
+        
+        # 全チャンクの音声データ部分を結合
+        combined_pcm_data = io.BytesIO()
+        total_frames = 0
         
         for i, (audio_data, chunk_start, chunk_end) in enumerate(matching_chunks):
-            logger.debug(f"  - Processing chunk {i}: {len(audio_data)} bytes, {chunk_start:.1f} to {chunk_end:.1f}")
-            if first_chunk:
-                # 最初のチャンクはヘッダー込みで追加
-                combined_audio.write(audio_data)
-                total_data_size += len(audio_data)
-                first_chunk = False
-                logger.debug(f"    -> Added with header: {len(audio_data)} bytes")
-            else:
-                # 2番目以降はヘッダーを除いて音声データのみ追加
-                if len(audio_data) > 44:
-                    data_only = audio_data[44:]
-                    combined_audio.write(data_only)
-                    total_data_size += len(data_only)
-                    logger.debug(f"    -> Added data only: {len(data_only)} bytes")
-                else:
-                    logger.warning(f"    -> Chunk too small: {len(audio_data)} bytes")
+            try:
+                with wave.open(io.BytesIO(audio_data), 'rb') as chunk_wave:
+                    pcm_data = chunk_wave.readframes(chunk_wave.getnframes())
+                    combined_pcm_data.write(pcm_data)
+                    total_frames += chunk_wave.getnframes()
+                    logger.debug(f"  - Chunk {i}: {len(pcm_data)} PCM bytes, {chunk_wave.getnframes()} frames")
+            except Exception as e:
+                logger.warning(f"  - Chunk {i}: Failed to extract PCM data: {e}")
+                continue
         
-        result = combined_audio.getvalue()
-        logger.info(f"RealTimeRecorder: Combined {len(matching_chunks)} chunks into {len(result)} bytes")
-        return result
+        # 新しいWAVファイルを作成
+        combined_audio = io.BytesIO()
+        try:
+            with wave.open(combined_audio, 'wb') as output_wave:
+                output_wave.setnchannels(nchannels)
+                output_wave.setsampwidth(sampwidth)
+                output_wave.setframerate(framerate)
+                pcm_data = combined_pcm_data.getvalue()
+                output_wave.writeframes(pcm_data)
+                
+            result = combined_audio.getvalue()
+            logger.info(f"RealTimeRecorder: Combined {len(matching_chunks)} chunks into {len(result)} bytes")
+            logger.info(f"  - Total frames: {total_frames}, PCM data: {len(pcm_data)} bytes")
+            return result
+            
+        except Exception as e:
+            logger.error(f"RealTimeRecorder: Failed to create combined WAV: {e}")
+            return b''
     
     def get_user_audio_buffers(self, guild_id: int, user_id: Optional[int] = None) -> Dict[int, list]:
         """ユーザーの音声バッファを取得（Guild別対応）"""
