@@ -5,6 +5,9 @@
 import asyncio
 import logging
 import random
+import time
+import io
+from datetime import datetime
 from typing import Dict, Any
 
 import discord
@@ -187,32 +190,44 @@ class RecordingCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
     
-    @discord.slash_command(name="replay", description="最近の音声を録音ファイルとして投稿します")
+    @discord.slash_command(name="replay", description="最近の音声を録音ファイルとして投稿します（新システム）")
     async def replay_command(
         self, 
         ctx: discord.ApplicationContext, 
         duration: discord.Option(float, "録音する時間（秒）", default=30.0, min_value=5.0, max_value=300.0) = 30.0,
-        user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None
+        user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None,
+        normalize: discord.Option(bool, "音声正規化の有効/無効", default=True, required=False) = True
     ):
-        """録音をリプレイ（bot_simple.pyの実装を統合）"""
+        """新システムによる録音をリプレイ（RecordingCallbackManager + ReplayBufferManager）"""
         if not self.recording_enabled:
             await ctx.respond("⚠️ 録音機能が無効です。", ephemeral=True)
             return
         
-        if not ctx.guild.voice_client:
-            await ctx.respond("⚠️ 現在録音中ではありません。", ephemeral=True)
+        # 新システムでは音声リレーからデータを取得するため、voice_clientチェックを削除
+        
+        # ReplayBufferManagerの確認
+        try:
+            from utils.replay_buffer_manager import replay_buffer_manager
+            if not replay_buffer_manager:
+                await ctx.respond("❌ ReplayBufferManagerが初期化されていません。", ephemeral=True)
+                return
+        except ImportError:
+            await ctx.respond("❌ 新しい録音システムが利用できません。", ephemeral=True)
             return
         
         # 処理中であることを即座に応答
-        await ctx.respond("🎵 録音を処理中です...", ephemeral=True)
+        await ctx.respond("🎵 新システムで録音を処理中です...", ephemeral=True)
         
-        # 重い処理を別タスクで実行してボットのブロックを回避
-        asyncio.create_task(self._process_replay_async(ctx, duration, user))
+        self.logger.info(f"New replay request: guild={ctx.guild.id}, duration={duration}s, user={user.id if user else 'all'}, normalize={normalize}")
+        
+        # 新システムで処理を別タスクで実行してボットのブロックを回避
+        asyncio.create_task(self._process_new_replay_async(ctx, duration, user, normalize))
     
     async def _process_replay_async(self, ctx, duration: float, user):
         """replayコマンドの重い処理を非同期で実行"""
         try:
             import io
+            import asyncio
             from datetime import datetime
             
             # リアルタイム録音データから直接バッファを取得（Guild別）
@@ -229,10 +244,42 @@ class RecordingCog(commands.Cog):
                     else:
                         self.logger.warning(f"Failed to create checkpoint, using existing buffers")
             
-            # 新しい時間範囲ベースの音声データ取得を試行
+            # 新しい時間範囲ベースの音声データ取得を試行（タイムアウト付き）
             if hasattr(self.real_time_recorder, 'get_audio_for_time_range'):
-                # 連続バッファから指定時間分の音声を取得
-                time_range_audio = self.real_time_recorder.get_audio_for_time_range(guild_id, duration, user.id if user else None)
+                # まず現在のGuildから音声データを取得（10秒タイムアウト）
+                try:
+                    time_range_audio = await asyncio.wait_for(
+                        asyncio.to_thread(self.real_time_recorder.get_audio_for_time_range, guild_id, duration, user.id if user else None),
+                        timeout=10.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.error(f"Recording: Timeout getting audio for guild {guild_id}")
+                    await ctx.followup.send("⚠️ 音声データの取得がタイムアウトしました。", ephemeral=True)
+                    return
+                
+                # 音声リレー機能が有効な場合、全Guildから音声データを検索
+                if not time_range_audio or (user and user.id not in time_range_audio):
+                    self.logger.info(f"Recording: No audio found in current guild {guild_id}, searching all guilds...")
+                    # 安全にキーのリストを取得（辞書が変更されても問題ない）
+                    try:
+                        guild_ids = list(self.real_time_recorder.continuous_buffers.keys())
+                        for search_guild_id in guild_ids:
+                            if search_guild_id != guild_id:
+                                try:
+                                    # 各Guild検索も5秒タイムアウト
+                                    search_audio = await asyncio.wait_for(
+                                        asyncio.to_thread(self.real_time_recorder.get_audio_for_time_range, search_guild_id, duration, user.id if user else None),
+                                        timeout=5.0
+                                    )
+                                    if search_audio:
+                                        self.logger.info(f"Recording: Found audio data in guild {search_guild_id}")
+                                        time_range_audio = search_audio
+                                        break
+                                except asyncio.TimeoutError:
+                                    self.logger.warning(f"Recording: Timeout searching guild {search_guild_id}, skipping")
+                                    continue
+                    except Exception as e:
+                        self.logger.error(f"Recording: Error searching all guilds for audio: {e}")
                 
                 if user:
                     # 特定ユーザーの音声
@@ -546,6 +593,104 @@ class RecordingCog(commands.Cog):
             
             return io.BytesIO(original_data)
     
+    async def _process_new_replay_async(self, ctx, duration: float, user, normalize: bool):
+        """新システム（ReplayBufferManager）でのreplayコマンド処理"""
+        try:
+            from utils.replay_buffer_manager import replay_buffer_manager
+            
+            if not replay_buffer_manager:
+                await ctx.edit_original_response(content="❌ ReplayBufferManagerが利用できません。")
+                return
+            
+            start_time = time.time()
+            self.logger.info(f"Starting new replay processing: duration={duration}s, normalize={normalize}")
+            
+            # ReplayBufferManagerから音声データを取得
+            result = await replay_buffer_manager.get_replay_audio(
+                guild_id=ctx.guild.id,
+                duration_seconds=duration,
+                user_id=user.id if user else None,
+                normalize=normalize,
+                mix_users=True
+            )
+            
+            if not result:
+                user_mention = f"@{user.display_name}" if user else "全ユーザー"
+                await ctx.edit_original_response(
+                    content=f"❌ {user_mention} の過去{duration:.1f}秒間の音声データが見つかりません。\n"
+                            "音声リレーが動作していて、実際に音声データが流れているか確認してください。"
+                )
+                return
+            
+            # 統計情報をログ出力
+            processing_time = time.time() - start_time
+            self.logger.info(f"New replay generation completed: {result.file_size} bytes, {result.total_duration:.1f}s, {result.user_count} users, {processing_time:.2f}s processing time")
+            
+            # ファイル名生成
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            if user:
+                filename = f"replay_{user.display_name}_{duration:.0f}s_{timestamp}.wav"
+                description = f"@{user.display_name} の録音です（過去{duration:.1f}秒分"
+            else:
+                filename = f"replay_all_{result.user_count}users_{duration:.0f}s_{timestamp}.wav"
+                description = f"全員の録音です（過去{duration:.1f}秒分、{result.user_count}人"
+            
+            if normalize:
+                description += "、正規化済み"
+            description += "）"
+            
+            # 音声データをBytesIOに変換
+            audio_buffer = io.BytesIO(result.audio_data)
+            
+            # ファイルサイズチェック（Discord制限: 25MB）
+            file_size_mb = result.file_size / (1024 * 1024)
+            if file_size_mb > 24:  # 余裕を持って24MBで制限
+                await ctx.edit_original_response(
+                    content=f"❌ ファイルサイズが大きすぎます: {file_size_mb:.1f}MB\n"
+                            f"短い時間（{duration/2:.0f}秒以下）で再試行してください。"
+                )
+                return
+            
+            # Discordファイルとして送信
+            file = discord.File(audio_buffer, filename=filename)
+            
+            # レスポンス更新（ファイル添付）
+            embed = discord.Embed(
+                title="🎵 録音完了（新システム）",
+                description=description,
+                color=discord.Color.green()
+            )
+            
+            embed.add_field(
+                name="📊 詳細情報",
+                value=f"ファイルサイズ: {file_size_mb:.2f}MB\n"
+                      f"音声長: {result.total_duration:.1f}秒\n"
+                      f"サンプルレート: {result.sample_rate}Hz\n"
+                      f"チャンネル数: {result.channels}\n"
+                      f"処理時間: {processing_time:.2f}秒",
+                inline=False
+            )
+            
+            embed.set_footer(text=f"新録音システム • {timestamp}")
+            
+            await ctx.edit_original_response(
+                content="",
+                embed=embed,
+                file=file
+            )
+            
+            self.logger.info(f"New replay sent successfully: {filename}")
+            
+        except Exception as e:
+            self.logger.error(f"New replay processing failed: {e}", exc_info=True)
+            try:
+                await ctx.edit_original_response(
+                    content=f"❌ 新システムでの録音処理中にエラーが発生しました: {str(e)}\n"
+                            "古いシステムでの処理をお試しください。"
+                )
+            except Exception as edit_error:
+                self.logger.error(f"Failed to edit response after error: {edit_error}")
+    
     def _mix_multiple_audio_streams(self, user_audio_dict: dict) -> bytes:
         """複数ユーザーの音声をミキシング（重ね合わせ）"""
         import numpy as np
@@ -669,6 +814,156 @@ class RecordingCog(commands.Cog):
             if user_audio_dict:
                 return list(user_audio_dict.values())[0]
             return b""
+    
+    @discord.slash_command(name="recording_callback_test", description="RecordingCallbackManagerの状態をテストします")
+    async def recording_callback_test(self, ctx):
+        """RecordingCallbackManagerの状態をテスト"""
+        try:
+            from utils.recording_callback_manager import recording_callback_manager
+            
+            # バッファ状態を取得
+            status = recording_callback_manager.get_buffer_status()
+            
+            # 最近の音声データを取得してテスト
+            guild_id = ctx.guild.id
+            recent_audio = await recording_callback_manager.get_recent_audio(guild_id, duration_seconds=10.0)
+            
+            # レスポンス作成
+            embed = discord.Embed(
+                title="🔍 RecordingCallbackManager テスト結果",
+                color=discord.Color.green()
+            )
+            
+            embed.add_field(
+                name="システム状態",
+                value=f"初期化: {'✅' if status.get('initialized', False) else '❌'}\n"
+                      f"ギルド数: {status.get('total_guilds', 0)}\n" 
+                      f"ユーザー数: {status.get('total_users', 0)}\n"
+                      f"音声チャンク数: {status.get('total_chunks', 0)}",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="最近の音声データ",
+                value=f"過去10秒間: {len(recent_audio)}チャンク\n"
+                      f"合計データサイズ: {sum(len(chunk.data) for chunk in recent_audio):,}バイト",
+                inline=False
+            )
+            
+            if recent_audio:
+                # 最新チャンクの詳細
+                latest = recent_audio[-1]
+                embed.add_field(
+                    name="最新音声チャンク",
+                    value=f"ユーザーID: {latest.user_id}\n"
+                          f"サイズ: {len(latest.data):,}バイト\n"
+                          f"長さ: {latest.duration:.2f}秒\n"
+                          f"サンプルレート: {latest.sample_rate}Hz",
+                    inline=False
+                )
+            
+            embed.set_footer(text=f"テスト時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            await ctx.respond(embed=embed, ephemeral=True)
+            
+        except ImportError:
+            await ctx.respond(
+                "❌ RecordingCallbackManagerが利用できません。\n"
+                "録音システムが正しく初期化されているか確認してください。",
+                ephemeral=True
+            )
+        except Exception as e:
+            self.logger.error(f"RecordingCallbackManager test failed: {e}")
+            await ctx.respond(
+                f"❌ テストが失敗しました: {e}",
+                ephemeral=True
+            )
+    
+    @discord.slash_command(name="replay_buffer_test", description="ReplayBufferManagerの状態をテストします")
+    async def replay_buffer_test(self, ctx):
+        """ReplayBufferManagerの状態をテスト"""
+        try:
+            from utils.replay_buffer_manager import replay_buffer_manager
+            
+            if not replay_buffer_manager:
+                await ctx.respond(
+                    "❌ ReplayBufferManagerが初期化されていません。",
+                    ephemeral=True
+                )
+                return
+            
+            # 統計情報を取得
+            stats = await replay_buffer_manager.get_stats()
+            
+            # テスト用の音声データ取得を試行
+            guild_id = ctx.guild.id
+            test_result = await replay_buffer_manager.get_replay_audio(
+                guild_id=guild_id,
+                duration_seconds=5.0,
+                user_id=None,
+                normalize=True,
+                mix_users=True
+            )
+            
+            # レスポンス作成
+            embed = discord.Embed(
+                title="🔍 ReplayBufferManager テスト結果",
+                color=discord.Color.blue()
+            )
+            
+            embed.add_field(
+                name="📈 統計情報",
+                value=f"総リクエスト数: {stats.get('total_requests', 0)}\n"
+                      f"成功リクエスト: {stats.get('successful_requests', 0)}\n"
+                      f"失敗リクエスト: {stats.get('failed_requests', 0)}\n"
+                      f"キャッシュヒット: {stats.get('cache_hits', 0)}\n"
+                      f"平均処理時間: {stats.get('average_generation_time', 0):.3f}秒",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="💾 システム状態",
+                value=f"キャッシュサイズ: {stats.get('cache_size', 0)}\n"
+                      f"処理中リクエスト: {stats.get('active_requests', 0)}",
+                inline=False
+            )
+            
+            if test_result:
+                embed.add_field(
+                    name="🎵 テスト音声データ",
+                    value=f"ファイルサイズ: {test_result.file_size:,}バイト\n"
+                          f"音声長: {test_result.total_duration:.2f}秒\n"
+                          f"ユーザー数: {test_result.user_count}\n"
+                          f"サンプルレート: {test_result.sample_rate}Hz\n"
+                          f"チャンネル数: {test_result.channels}",
+                    inline=False
+                )
+                embed.color = discord.Color.green()
+            else:
+                embed.add_field(
+                    name="⚠️ テスト結果",
+                    value="過去5秒間の音声データが見つかりませんでした。\n"
+                          "音声リレーが動作しているか確認してください。",
+                    inline=False
+                )
+                embed.color = discord.Color.orange()
+            
+            embed.set_footer(text=f"テスト時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            await ctx.respond(embed=embed, ephemeral=True)
+            
+        except ImportError:
+            await ctx.respond(
+                "❌ ReplayBufferManagerが利用できません。\n"
+                "新しい録音システムが正しく初期化されているか確認してください。",
+                ephemeral=True
+            )
+        except Exception as e:
+            self.logger.error(f"ReplayBufferManager test failed: {e}")
+            await ctx.respond(
+                f"❌ テストが失敗しました: {e}",
+                ephemeral=True
+            )
 
 
 def setup(bot):
