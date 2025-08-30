@@ -66,7 +66,10 @@ class RealtimeRelaySink(discord.sinks.Sink):
     def write(self, data, user):
         """音声データを受信してキューに転送（同期処理、DecodeManagerスレッドで実行）"""
         try:
+            self.logger.info(f"🔊 WRITE CALLED: User {user}, data size: {len(data)}")
+            
             if user == self.bot.user.id:
+                self.logger.debug(f"Skipping bot audio from user {user}")
                 return  # ボット自身の音声は除外
             
             # パケットIDを生成（重複防止）
@@ -92,7 +95,7 @@ class RealtimeRelaySink(discord.sinks.Sink):
             try:
                 # ノンブロッキングでキューに投入
                 self.audio_queue.put_nowait(audio_packet)
-                self.logger.debug(f"Audio packet queued from user {user}, size: {len(data)} bytes")
+                self.logger.info(f"🎤 AUDIO RECEIVED: User {user}, size: {len(data)} bytes, session: {self.session.session_id}")
             except queue.Full:
                 self.logger.warning(f"Audio queue full, dropping packet from user {user}")
             
@@ -426,6 +429,13 @@ class AudioRelay:
                     self.logger.error(f"Recording error in session {session.session_id}: {error}")
                 else:
                     self.logger.info(f"Recording finished for session {session.session_id}")
+            
+            # 既存の録音を停止してからリレー録音を開始
+            if source_voice_client.recording:
+                self.logger.info(f"Stopping existing recording before starting relay for session: {session.session_id}")
+                source_voice_client.stop_recording()
+                # 少し待機
+                await asyncio.sleep(0.1)
             
             # リアルタイム音声キャプチャを開始
             source_voice_client.start_recording(sink, after_recording)
