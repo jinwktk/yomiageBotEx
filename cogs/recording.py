@@ -599,7 +599,7 @@ class RecordingCog(commands.Cog):
             from utils.replay_buffer_manager import replay_buffer_manager
             
             if not replay_buffer_manager:
-                await ctx.edit_original_response(content="❌ ReplayBufferManagerが利用できません。")
+                await ctx.followup.send(content="❌ ReplayBufferManagerが利用できません。")
                 return
             
             start_time = time.time()
@@ -616,7 +616,7 @@ class RecordingCog(commands.Cog):
             
             if not result:
                 user_mention = f"@{user.display_name}" if user else "全ユーザー"
-                await ctx.edit_original_response(
+                await ctx.followup.send(
                     content=f"❌ {user_mention} の過去{duration:.1f}秒間の音声データが見つかりません。\n"
                             "音声リレーが動作していて、実際に音声データが流れているか確認してください。"
                 )
@@ -645,7 +645,7 @@ class RecordingCog(commands.Cog):
             # ファイルサイズチェック（Discord制限: 25MB）
             file_size_mb = result.file_size / (1024 * 1024)
             if file_size_mb > 24:  # 余裕を持って24MBで制限
-                await ctx.edit_original_response(
+                await ctx.followup.send(
                     content=f"❌ ファイルサイズが大きすぎます: {file_size_mb:.1f}MB\n"
                             f"短い時間（{duration/2:.0f}秒以下）で再試行してください。"
                 )
@@ -673,7 +673,7 @@ class RecordingCog(commands.Cog):
             
             embed.set_footer(text=f"新録音システム • {timestamp}")
             
-            await ctx.edit_original_response(
+            await ctx.followup.send(
                 content="",
                 embed=embed,
                 file=file
@@ -684,7 +684,7 @@ class RecordingCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"New replay processing failed: {e}", exc_info=True)
             try:
-                await ctx.edit_original_response(
+                await ctx.followup.send(
                     content=f"❌ 新システムでの録音処理中にエラーが発生しました: {str(e)}\n"
                             "古いシステムでの処理をお試しください。"
                 )
