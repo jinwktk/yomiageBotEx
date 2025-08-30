@@ -68,11 +68,10 @@ class RecordingCog(commands.Cog):
     
     @commands.Cog.listener()
     async def on_ready(self):
-        """Bot準備完了時のクリーンアップタスク開始"""
-        if self.recording_enabled and not self.cleanup_task_started:
-            asyncio.create_task(self.recording_manager.start_cleanup_task())
-            self.cleanup_task_started = True
-            self.logger.info("Recording: Cleanup task started")
+        """Bot準備完了時の処理"""
+        # RealTimeAudioRecorderにはstart_cleanup_taskメソッドがないため削除
+        self.cleanup_task_started = True
+        self.logger.info("Recording: Ready for recording operations")
     
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):

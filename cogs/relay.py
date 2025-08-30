@@ -66,9 +66,19 @@ class RelayCog(commands.Cog):
                     continue
                 
                 source_guild_id = pair.get("source_guild_id", 0)
-                source_channel_id = pair.get("source_channel_id", 0)
+                configured_source_channel_id = pair.get("source_channel_id", 0)
                 target_guild_id = pair.get("target_guild_id", 0)
                 target_channel_id = pair.get("target_channel_id", 0)
+                
+                # ソースギルドでボットが現在接続しているチャンネルを動的取得
+                source_guild = self.bot.get_guild(source_guild_id)
+                if source_guild and source_guild.voice_client:
+                    source_channel_id = source_guild.voice_client.channel.id
+                    self.logger.info(f"Using bot's current voice channel as source: {source_channel_id}")
+                else:
+                    # ボットが接続していない場合は設定値を使用
+                    source_channel_id = configured_source_channel_id
+                    self.logger.warning(f"Bot not connected in source guild {source_guild_id}, using configured channel: {source_channel_id}")
                 
                 # IDの妥当性チェック
                 if not all([source_guild_id, source_channel_id, target_guild_id, target_channel_id]):
