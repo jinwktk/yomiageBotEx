@@ -1,15 +1,11 @@
 """
 TTS（Text-to-Speech）機能Cog
-- 挨拶機能（参加・退出時の音声再生）
-- TTSキャッシュ管理
-- Style-Bert-VITS2統合
 """
 
 import asyncio
 import logging
-import io
 import random
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 import discord
 from discord.ext import commands

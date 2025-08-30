@@ -1,13 +1,11 @@
 """
 ボイスチャンネル管理Cog
-- スラッシュコマンド（/join, /leave）
-- 自動参加・退出機能
 """
 
 import asyncio
 import random
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import json
 from pathlib import Path
 

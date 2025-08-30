@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-yomiageBotEx - Discord読み上げボット (Phase 2: Cog構造 + 自動参加/退出)
+yomiageBotEx - Discord読み上げボット
 """
 
 import os
@@ -8,19 +8,15 @@ import sys
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
 import signal
 import time
 
 import discord
-from discord.ext import commands
 import yaml
 from dotenv import load_dotenv
 
-
 from utils.logger import setup_logging, start_log_cleanup_task
 
-# 音声受信クライアントのインポート（py-cord統合版のみ使用）
 try:
     from utils.real_audio_recorder import RealEnhancedVoiceClient as EnhancedVoiceClient
     print("[OK] Using py-cord real audio recording")
@@ -30,34 +26,14 @@ except Exception as e:
     print("   Please ensure py-cord[voice] and required dependencies are installed")
     sys.exit(1)
 
-# 環境変数の読み込み
 load_dotenv()
-
-# 設定ファイルの読み込み
 def load_config():
     """設定ファイルを読み込む"""
     config_path = Path("config.yaml")
-    print(f"DEBUG: Loading config from: {config_path.absolute()}")
     if config_path.exists():
         with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-            
-            # TTS設定は data/tts_config.json から取得
-            try:
-                tts_config_path = Path("data/tts_config.json")
-                if tts_config_path.exists():
-                    import json
-                    with open(tts_config_path, "r", encoding="utf-8") as tts_f:
-                        tts_config = json.load(tts_f)
-                        print(f"DEBUG: TTS API URL: {tts_config.get('api_url', 'NOT_FOUND')}")
-                else:
-                    print("DEBUG: TTS API URL: data/tts_config.json NOT_FOUND")
-            except Exception as e:
-                print(f"DEBUG: TTS API URL: ERROR - {e}")
-            
-            return config
+            return yaml.safe_load(f)
     else:
-        # デフォルト設定
         return {
             "bot": {
                 "command_prefix": "/",
@@ -71,55 +47,37 @@ def load_config():
             }
         }
 
-# 設定の読み込み
 config = load_config()
-
-# ロギングの初期化
 logger = setup_logging(config)
 
 class YomiageBot(discord.Bot):
     """読み上げボットのメインクラス"""
     
     def __init__(self):
-        # Intentsの設定
         intents = discord.Intents.default()
         intents.message_content = True
         intents.voice_states = True
         intents.guilds = True
-        intents.members = True  # メンバー情報の取得を有効化
+        intents.members = True
         
-        # グローバルコマンド同期（すべてのギルドで利用可能）
-        # debug_guildsを指定しないことで、すべてのギルドでコマンドが同期される
-        super().__init__(
-            intents=intents
-            # debug_guildsを削除してグローバル同期に変更
-        )
+        super().__init__(intents=intents)
         
         self.config = config
         self._cogs_loaded = False
-        
-        # 起動時にCogを読み込み
         self.setup_cogs()
     
     async def connect_voice_safely(self, channel):
         """安全な音声接続（WebSocketエラー対応強化版）"""
-        max_retries = 3  # リトライ回数を削減（現実的な値）
+        max_retries = 3
         
-        # 既存の接続をクリーンアップ
         if await self._cleanup_existing_connection(channel):
             await asyncio.sleep(2.0)
-        
-        # リトライループ
         for attempt in range(max_retries):
             try:
                 logger.info(f"Voice connection attempt {attempt + 1}/{max_retries} to {channel.name}")
-                
-                # 音声接続試行
                 vc = await self._attempt_voice_connection(channel)
                 
-                # 接続の安定性確認
                 if await self._verify_connection_stability(vc, channel):
-                    # 音声状態設定
                     await self._configure_voice_state(channel)
                     logger.info(f"Voice connection successful to {channel.name}")
                     return vc
@@ -131,13 +89,11 @@ class YomiageBot(discord.Bot):
             except Exception as e:
                 logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
                 
-                # 最後の試行でない場合はリトライ
                 if attempt < max_retries - 1:
-                    retry_delay = 3.0 * (attempt + 1)  # 段階的に遅延増加
+                    retry_delay = 3.0 * (attempt + 1)
                     logger.info(f"Retrying connection after {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
                 else:
-                    # 最後の試行：フォールバック
                     logger.error("All connection attempts failed, trying basic connect")
                     try:
                         return await channel.connect()
@@ -166,11 +122,7 @@ class YomiageBot(discord.Bot):
 
     async def _attempt_voice_connection(self, channel):
         """音声接続を試行"""
-        vc = await channel.connect(
-            timeout=30.0,  # タイムアウトを短縮
-            reconnect=True
-        )
-        # 接続後の安定化待機
+        vc = await channel.connect(timeout=30.0, reconnect=True)
         await asyncio.sleep(2.0)
         return vc
 
@@ -179,15 +131,12 @@ class YomiageBot(discord.Bot):
         if not vc or not hasattr(vc, 'is_connected') or not vc.is_connected():
             return False
             
-        # WebSocket状態の基本確認
         if hasattr(vc, 'ws') and vc.ws and hasattr(vc.ws, 'open'):
             if not vc.ws.open:
                 logger.warning("WebSocket not open")
                 await asyncio.sleep(1.0)
                 if not (hasattr(vc.ws, 'open') and vc.ws.open):
                     return False
-        
-        # 最終的な接続確認
         return vc.is_connected()
 
     async def _configure_voice_state(self, channel):
@@ -434,12 +383,7 @@ class YomiageBot(discord.Bot):
                         return channel.guild.voice_client
                 raise client_error
     
-# Botインスタンスの作成
 bot = YomiageBot()
-
-
-
-# Cogの初期読み込み
 bot.setup_cogs()
 
 async def shutdown_handler():

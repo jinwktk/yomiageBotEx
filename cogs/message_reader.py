@@ -1,14 +1,11 @@
 """
 メッセージ読み上げ機能Cog
-- チャットメッセージの読み上げ
-- メッセージの前処理（URL除去、長さ制限等）
-- 読み上げ設定管理
 """
 
 import asyncio
 import logging
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 import discord
 from discord.ext import commands
@@ -99,21 +96,89 @@ class MessageReaderCog(commands.Cog):
         
         return content.strip()
     
+    async def _attempt_auto_reconnect(self, guild: discord.Guild) -> bool:
+        """ボイスチャンネルへの自動再接続を試行"""
+        try:
+            self.logger.info(f"MessageReader: Attempting auto-reconnect in {guild.name}")
+            
+            # 既存の接続をクリーンアップ
+            existing_client = guild.voice_client
+            if existing_client:
+                self.logger.info(f"MessageReader: Cleaning up existing voice client (connected: {existing_client.is_connected()})")
+                try:
+                    await existing_client.disconnect(force=True)
+                    await asyncio.sleep(1)  # 切断完了を待つ
+                except Exception as e:
+                    self.logger.warning(f"MessageReader: Failed to disconnect existing client: {e}")
+            
+            # ユーザーがいるボイスチャンネルを探す
+            target_channel = None
+            for channel in guild.voice_channels:
+                # Botを除いた実際のユーザーがいるかチェック
+                non_bot_members = [member for member in channel.members if not member.bot]
+                if non_bot_members:
+                    target_channel = channel
+                    self.logger.info(f"MessageReader: Found users in channel: {channel.name} ({len(non_bot_members)} users)")
+                    break
+            
+            if not target_channel:
+                self.logger.warning(f"MessageReader: No voice channels with users found in {guild.name}")
+                return False
+            
+            # 直接接続を試行（connect_voice_safelyを使わずシンプルに）
+            try:
+                voice_client = await target_channel.connect(reconnect=True, timeout=15.0)
+                await asyncio.sleep(1)  # 接続安定化待機
+                
+                if voice_client and voice_client.is_connected():
+                    self.logger.info(f"MessageReader: Auto-reconnect successful to {target_channel.name}")
+                    return True
+                else:
+                    self.logger.warning(f"MessageReader: Voice client not properly connected after join")
+                    return False
+                    
+            except Exception as connect_error:
+                self.logger.error(f"MessageReader: Direct connect failed: {connect_error}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"MessageReader: Auto-reconnect exception: {e}")
+            return False
+    
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         """メッセージ受信時の読み上げ処理"""
         try:
+            self.logger.info(f"MessageReader: Processing message from {message.author.display_name}: '{message.content[:50]}'")
+            
             # 基本チェック
             if not message.guild:  # DMは対象外
+                self.logger.debug("MessageReader: Skipping DM message")
                 return
             
             if not self.should_read_message(message):
+                self.logger.info(f"MessageReader: Message filtered out - Bot:{message.author.bot}, Content:'{message.content[:30]}'")
                 return
             
             # ボットがVCに接続しているかチェック
             voice_client = message.guild.voice_client
             if not voice_client or not voice_client.is_connected():
-                return
+                self.logger.warning(f"MessageReader: Bot not connected to voice channel in {message.guild.name}")
+                self.logger.info(f"MessageReader: Voice client status - exists: {voice_client is not None}, connected: {voice_client.is_connected() if voice_client else 'N/A'}")
+                
+                # 自動再接続を試行
+                reconnected = await self._attempt_auto_reconnect(message.guild)
+                if not reconnected:
+                    self.logger.warning(f"MessageReader: Auto-reconnect failed, skipping TTS")
+                    return
+                    
+                # 再接続後のvoice_clientを取得
+                voice_client = message.guild.voice_client
+                self.logger.info(f"MessageReader: After reconnect - voice client exists: {voice_client is not None}, connected: {voice_client.is_connected() if voice_client else 'N/A'}")
+            else:
+                self.logger.info(f"MessageReader: Voice connection confirmed - channel: {voice_client.channel.name if voice_client.channel else 'Unknown'}")
+            
+            self.logger.info(f"MessageReader: Bot connected to voice channel: {voice_client.channel.name}")
             
             # メッセージの前処理
             processed_content = self.preprocess_message(message.content)

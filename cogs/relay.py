@@ -1,12 +1,10 @@
 """
 音声横流し（リレー）機能Cog
-DiscordスラッシュコマンドでAudioRelayを制御
 """
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional
-
+from typing import Dict, Any
 
 import discord
 from discord.ext import commands

@@ -1,19 +1,15 @@
 """
 録音・リプレイ機能Cog
-- /replayコマンド
-- 音声バッファ管理
-- 録音ファイル自動クリーンアップ
 """
 
 import asyncio
 import logging
 import random
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 import discord
 from discord.ext import commands
 
-# from utils.recording import RecordingManager, SimpleRecordingSink  # Removed
 from utils.real_audio_recorder import RealTimeAudioRecorder
 from utils.audio_processor import AudioProcessor
 

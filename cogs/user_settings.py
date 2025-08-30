@@ -1,13 +1,11 @@
 """
 ユーザー設定機能Cog
-- 個人設定の管理
-- TTS設定、読み上げ設定等
 """
 
 import asyncio
 import logging
 import random
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 import discord
 from discord.ext import commands
