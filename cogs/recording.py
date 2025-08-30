@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional
 import discord
 from discord.ext import commands
 
-from utils.recording import RecordingManager, SimpleRecordingSink
+# from utils.recording import RecordingManager, SimpleRecordingSink  # Removed
 from utils.real_audio_recorder import RealTimeAudioRecorder
 from utils.audio_processor import AudioProcessor
 
@@ -25,7 +25,8 @@ class RecordingCog(commands.Cog):
         self.bot = bot
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.recording_manager = RecordingManager(config)
+        # 一時的にNoneを渡す（後で適切に修正が必要）
+        self.recording_manager = RealTimeAudioRecorder(None)
         self.recording_enabled = config.get("recording", {}).get("enabled", False)
         
         # 初期化時の設定値をログ出力
@@ -61,13 +62,9 @@ class RecordingCog(commands.Cog):
         delay = random.uniform(*self.config["bot"]["rate_limit_delay"])
         await asyncio.sleep(delay)
     
-    def get_recording_sink(self, guild_id: int) -> SimpleRecordingSink:
-        """ギルド用の録音シンクを取得"""
-        if guild_id not in self.recording_sinks:
-            self.recording_sinks[guild_id] = SimpleRecordingSink(
-                self.recording_manager, guild_id
-            )
-        return self.recording_sinks[guild_id]
+    def get_recording_sink(self, guild_id: int):
+        """ギルド用の録音シンクを取得（py-cord WaveSink使用）"""
+        return discord.sinks.WaveSink()
     
     @commands.Cog.listener()
     async def on_ready(self):

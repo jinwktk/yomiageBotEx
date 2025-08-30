@@ -22,6 +22,7 @@ yomiageBotEx/
 │   ├── message_reader.py # チャット読み上げ機能Cog
 │   ├── dictionary.py  # 辞書機能Cog
 │   ├── user_settings.py # ユーザー設定機能Cog
+│   ├── relay.py       # 音声横流し（リレー）機能Cog
 │   └── reload.py      # ホットリロード・Cog管理機能
 ├── utils/             # ユーティリティモジュール
 │   ├── __init__.py    # ユーティリティパッケージ初期化
@@ -32,6 +33,7 @@ yomiageBotEx/
 │   ├── dictionary.py  # 辞書管理システム
 │   ├── user_settings.py # ユーザー別設定管理
 │   ├── real_audio_recorder.py # 統合版音声録音（bot_simple.py移植）
+│   ├── audio_relay.py # 音声横流し（リレー）機能ユーティリティ
 │   ├── audio_sink.py  # Discord音声受信用AudioSink
 │   ├── voice_receiver.py # カスタム音声受信システム
 │   └── simple_recorder.py # シンプル音声録音（フォールバック）
@@ -786,6 +788,71 @@ yomiageBotEx/
   - `/dict_add`のグローバル辞書追加（管理者限定）  
   - `/dict_remove`のグローバル辞書削除（管理者限定）
 - **目的**: 複数サーバーで統一的な管理者権限を持つため
+
+### 2024-08-30 音声横流し（リレー）機能実装（Phase 6）
+- **TypeScript版からPython版への機能移植**:
+  - TypeScript版のyomiageBotTSから`startAudioStreaming()`機能を移植
+  - `utils/audio_relay.py`: 音声リレーエンジンの実装
+  - `cogs/relay.py`: スラッシュコマンドインターフェースの実装
+- **新規追加コマンド**:
+  - `/relay_start`: 音声リレーセッション開始（管理者限定）
+  - `/relay_stop`: 音声リレーセッション停止（管理者限定）
+  - `/relay_status`: アクティブセッション状態表示（管理者限定）
+  - `/relay_test`: 機能テストとシステム情報表示（管理者限定）
+- **主要機能**:
+  - **リアルタイム音声転送**: あるVCチャンネルの音声を別のVCチャンネルに即座に転送
+  - **セッション管理**: 複数の音声リレーセッションの並列実行・管理
+  - **レート制限**: ユーザー単位でのストリーム切り替えクールダウン（2秒）
+  - **自動クリーンアップ**: 非アクティブセッションの自動停止（5分間無活動、最大1時間）
+- **技術的特徴**:
+  - py-cordのWaveSinkを使用したリアルタイム音声キャプチャ
+  - FFmpegPCMAudioを使用した音声再生・転送
+  - 非同期処理による複数セッション並列実行
+  - ボリューム調整・音声品質制御
+- **設定項目** (config.yaml):
+  - `audio_relay.enabled`: 機能の有効/無効（デフォルト無効）
+  - `audio_relay.volume`: リレー音声ボリューム（0.0-1.0）
+  - `audio_relay.max_sessions`: 同時実行可能セッション数
+  - `audio_relay.max_duration_hours`: セッション最大継続時間
+- **セキュリティ**: 管理者ユーザーID限定でのアクセス制御
+- **自動開始機能** (2024-08-30追加):
+  - `audio_relay.auto_start`: ボット起動時の自動リレー開始の有効/無効
+  - `audio_relay.auto_relay_pairs`: 自動開始するリレーペア設定
+  - ボット起動から5秒後に自動的に設定されたリレーセッションを開始
+  - 実際の運用設定例:
+    - 転送元: Guild ID `995627275074666568`
+    - 転送先: Guild ID `813783748566581249`, Channel ID `813783749153259606`
+
+### 実装完了機能（最新状態）
+- ✅ Phase 1: 基本機能（VC参加・退出）
+- ✅ Phase 2: 自動参加・退出機能  
+- ✅ Phase 3: TTS統合（Style-Bert-VITS2）
+- ✅ Phase 4: 録音・リプレイ機能
+- ✅ Phase 5: 高度な機能拡張
+  - ✅ bot_simple.pyの録音機能統合（WaveSink）
+  - ✅ FFmpeg音声正規化・フィルタリング
+  - ✅ 辞書登録・管理機能
+  - ✅ Style-Bert-VITS2モデル・話者選択
+  - ✅ 圧縮ログローテーション
+  - ✅ ユーザー別個人設定システム
+  - ✅ プルダウン式設定UI
+  - ✅ タイムアウト問題の解決
+  - ✅ 全コマンドephemeral化
+  - ✅ 起動時ログローテーション
+  - ✅ 非同期処理最適化
+  - ✅ グローバル例外ハンドラー
+  - ✅ 音声録音安定性向上
+- ✅ **Phase 6: 音声横流し（リレー）機能**（NEW!）
+  - ✅ TypeScript版startAudioStreaming()機能の完全移植
+  - ✅ リアルタイム音声転送システム
+  - ✅ セッション管理・状態監視
+  - ✅ 管理者限定アクセス制御
+  - ✅ 設定ファイル統合
+  - ✅ **自動開始機能**: ボット起動時に設定されたリレーペアを自動開始
+  - ✅ **スマートVC移動制御**: 
+    - 人がいるVCに参加中 → 移動せず現在の接続を使用
+    - 空のVCに参加中 → 指定チャンネルに移動してリレー開始
+  - ✅ **ステルス機能**: リレーコマンドを非表示化してバレにくくする
 
 ## 参考リンク
 - [TypeScript版（参考）](https://github.com/jinwktk/yomiageBotTS)

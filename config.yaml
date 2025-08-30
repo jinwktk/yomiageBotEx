@@ -24,6 +24,24 @@ recording:
   default_duration: 30 # デフォルト録音時間（秒）
   max_file_size_mb: 50 # 最大ファイルサイズ（MB）
 
+# 音声横流し（リレー）機能
+audio_relay:
+  enabled: true       # 音声リレー機能の有効/無効（有効に変更）
+  volume: 0.5         # リレー音声のボリューム（0.0-1.0）
+  max_sessions: 3     # 同時実行可能なセッション数
+  max_duration_hours: 1  # セッション最大継続時間（時間）
+  stream_cooldown: 2.0   # ユーザーのストリーム切り替えクールダウン（秒）
+  buffer_interval: 5.0   # バッファフラッシュ間隔（秒）
+  
+  # 自動開始設定
+  auto_start: true    # ボット起動時の自動リレー開始
+  auto_relay_pairs:   # 自動開始するリレーペア一覧
+    - source_guild_id: 995627275074666568        # 転送元サーバーID
+      source_channel_id: 995627275074666568      # 転送元チャンネルID（同じIDを想定）
+      target_guild_id: 813783748566581249        # 転送先サーバーID
+      target_channel_id: 813783749153259606      # 転送先チャンネルID
+      enabled: true                              # このペアを有効
+
 message_reading:
   enabled: true                           # チャット読み上げ機能の有効/無効
   max_length: 100                         # 読み上げる最大文字数

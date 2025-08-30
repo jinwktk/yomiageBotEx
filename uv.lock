@@ -123,20 +123,6 @@ wheels = [
 ]
 
 [[package]]
-name = "anyio"
-version = "3.7.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
-    { name = "idna" },
-    { name = "sniffio" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/28/99/2dfd53fd55ce9838e6ff2d4dac20ce58263798bd1a0dbe18b3a9af3fcfce/anyio-3.7.1.tar.gz", hash = "sha256:44a3c9aba0f5defa43261a8b3efb97891f2bd7d804e0e1f56419befa1adfc780", size = 142927, upload-time = "2023-07-05T16:45:02.294Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/24/44299477fe7dcc9cb58d0a57d5a7588d6af2ff403fdd2d47a246c91a3246/anyio-3.7.1-py3-none-any.whl", hash = "sha256:91dee416e570e92c64041bd18b900d1d6fa78dff7048769ce5ac5ddad004fbb5", size = 80896, upload-time = "2023-07-05T16:44:59.805Z" },
-]
-
-[[package]]
 name = "async-timeout"
 version = "5.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -258,18 +244,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cogwatch"
-version = "3.3.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "watchfiles" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4d/96/049bc937245dcc2c6e49f94ef58de0544b0e64ea22b7034c08880447c34f/cogwatch-3.3.1.tar.gz", hash = "sha256:102408b97196ca13ed95af9fa2cda22db8e3d6ba71bfaafa1098231da7b963fb", size = 7299, upload-time = "2023-04-02T15:01:31.182Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/f1/dba4865b83c92cbadb8e85c09eb8f4059fd272a6777d135450d11dd28ea7/cogwatch-3.3.1-py3-none-any.whl", hash = "sha256:727aef54a92261b704ccafa6a23ec5a0f0fb3e9e25cf8a6c8ef24cf2e6c73d1f", size = 8107, upload-time = "2023-04-02T15:01:30.005Z" },
-]
-
-[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -288,18 +262,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0b/9f/a65090624ecf468cdca03533906e7c69ed7588582240cfe7cc9e770b50eb/exceptiongroup-1.3.0.tar.gz", hash = "sha256:b241f5885f560bc56a59ee63ca4c6a8bfa46ae4ad651af316d4e81817bb9fd88", size = 29749, upload-time = "2025-05-10T17:42:51.123Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/36/f4/c6e662dade71f56cd2f3735141b265c3c79293c109549c1e6933b0651ffc/exceptiongroup-1.3.0-py3-none-any.whl", hash = "sha256:4d111e6e0c13d0644cad6ddaa7ed0261a0b36971f6d23e7ec9b4b9097da78a10", size = 16674, upload-time = "2025-05-10T17:42:49.33Z" },
-]
-
-[[package]]
-name = "ffmpeg-python"
-version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "future" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/dd/5e/d5f9105d59c1325759d838af4e973695081fbbc97182baf73afc78dec266/ffmpeg-python-0.2.0.tar.gz", hash = "sha256:65225db34627c578ef0e11c8b1eb528bb35e024752f6f10b78c011f6f64c4127", size = 21543, upload-time = "2019-07-06T00:19:08.989Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d7/0c/56be52741f75bad4dc6555991fabd2e07b432d333da82c11ad701123888a/ffmpeg_python-0.2.0-py3-none-any.whl", hash = "sha256:ac441a0404e053f8b6a1113a77c0f452f1cfc62f6344a769475ffdc0f56c23c5", size = 25024, upload-time = "2019-07-06T00:19:07.215Z" },
 ]
 
 [[package]]
@@ -408,15 +370,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/31/8fbc5af2d183bff20f21aa743b4088eac4445d2bb1cdece449ae80e4e2d1/frozenlist-1.7.0-cp313-cp313t-win32.whl", hash = "sha256:3a14027124ddb70dfcee5148979998066897e79f89f64b13328595c4bdf77c81", size = 43059, upload-time = "2025-06-09T23:02:02.072Z" },
     { url = "https://files.pythonhosted.org/packages/bb/ed/41956f52105b8dbc26e457c5705340c67c8cc2b79f394b79bffc09d0e938/frozenlist-1.7.0-cp313-cp313t-win_amd64.whl", hash = "sha256:3bf8010d71d4507775f658e9823210b7427be36625b387221642725b515dcf3e", size = 47516, upload-time = "2025-06-09T23:02:03.779Z" },
     { url = "https://files.pythonhosted.org/packages/ee/45/b82e3c16be2182bff01179db177fe144d58b5dc787a7d4492c6ed8b9317f/frozenlist-1.7.0-py3-none-any.whl", hash = "sha256:9a5af342e34f7e97caf8c995864c7a396418ae2859cc6fdf1b1073020d516a7e", size = 13106, upload-time = "2025-06-09T23:02:34.204Z" },
-]
-
-[[package]]
-name = "future"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a7/b2/4140c69c6a66432916b26158687e821ba631a4c9273c474343badf84d3ba/future-1.0.0.tar.gz", hash = "sha256:bd2968309307861edae1458a4f8a4f3598c03be43b97521076aebf5d94c07b05", size = 1228490, upload-time = "2024-02-21T11:52:38.461Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/71/ae30dadffc90b9006d77af76b393cb9dfbfc9629f339fc1574a1c52e6806/future-1.0.0-py3-none-any.whl", hash = "sha256:929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216", size = 491326, upload-time = "2024-02-21T11:52:35.956Z" },
 ]
 
 [[package]]
@@ -956,15 +909,6 @@ wheels = [
 ]
 
 [[package]]
-name = "sniffio"
-version = "1.3.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
-]
-
-[[package]]
 name = "tomli"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1010,28 +954,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d1/bc/51647cd02527e87d05cb083ccc402f93e441606ff1f01739a62c8ad09ba5/typing_extensions-4.14.0.tar.gz", hash = "sha256:8676b788e32f02ab42d9e7c61324048ae4c6d844a399eebace3d4979d75ceef4", size = 107423, upload-time = "2025-06-02T14:52:11.399Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/69/e0/552843e0d356fbb5256d21449fa957fa4eff3bbc135a74a691ee70c7c5da/typing_extensions-4.14.0-py3-none-any.whl", hash = "sha256:a1514509136dd0b477638fc68d6a91497af5076466ad0fa6c338e44e359944af", size = 43839, upload-time = "2025-06-02T14:52:10.026Z" },
-]
-
-[[package]]
-name = "watchfiles"
-version = "0.15.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anyio" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/fa/9c/0b193edd1fe3ce2d8cdc109f578c5eded48151c6ab7bef8415619b8a5a9f/watchfiles-0.15.0.tar.gz", hash = "sha256:cab62510f990d195986302aa6a48ed636d685b099927049120d520c96069fa49", size = 36227, upload-time = "2022-06-17T08:16:29.628Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/98/a28e9886b05178099e2f2666fc05c362421e7902a0c88817954618816b50/watchfiles-0.15.0-cp37-abi3-macosx_10_7_x86_64.whl", hash = "sha256:67d4c66e46a564059df4aeedab78f09cba0b697bf36cc77566b0a7015dfb7f5d", size = 367955, upload-time = "2022-06-17T08:16:12.604Z" },
-    { url = "https://files.pythonhosted.org/packages/20/ca/8e529bfe132b886a40d32b3486d8d2ad973c231d00e8c87a1df9c0b1986c/watchfiles-0.15.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:6e0e8829d32b05151e6009570449f44f891e05f518e495d25f960e0d0b2d0064", size = 357566, upload-time = "2022-06-17T08:16:14.09Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/53/a144d78d1474d529544d4c585016508387823fe344862195a542d7c58c5d/watchfiles-0.15.0-cp37-abi3-manylinux_2_12_i686.manylinux2010_i686.whl", hash = "sha256:f7f71012e096e11256fae3b37617a9777980f281e18deb2e789e85cd5b113935", size = 1202532, upload-time = "2022-06-17T08:16:16.075Z" },
-    { url = "https://files.pythonhosted.org/packages/6e/d3/ad947c6ece5fbfb68d0bcf9e20c57eecd8741dd1d41b8851108f3d3d45ed/watchfiles-0.15.0-cp37-abi3-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:65ca99a94fcab29d00aa406526eb29cf198c0661854d59a315596064fed02141", size = 1160225, upload-time = "2022-06-17T08:16:17.62Z" },
-    { url = "https://files.pythonhosted.org/packages/39/9a/dc96c6ae0984d87023f695d81b2a6d72670066ec4170a9a4331b7272ff21/watchfiles-0.15.0-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d4f45acd1143db6d3ee77a4ff12d3239bc8083108133e6174e9dcce59c1f9902", size = 1162699, upload-time = "2022-06-17T08:16:19.117Z" },
-    { url = "https://files.pythonhosted.org/packages/55/4d/f95f3c134f52a0c278e92d3a6a0c1fd6b1bc69290ceac6415f878e3c4b64/watchfiles-0.15.0-cp37-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:955e8f840e1996a8a41be57de4c03af7b1515a685b7fb6abe222f859e413a907", size = 1165255, upload-time = "2022-06-17T08:16:21.064Z" },
-    { url = "https://files.pythonhosted.org/packages/ca/86/27c3d45da114b16afd4193fe53975c9d09d0828981ab8164a3c9f713fa93/watchfiles-0.15.0-cp37-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:715733c2ac9da67b2790788657ff6f8b3797eb31565bfc592289b523ae907ca2", size = 1333461, upload-time = "2022-06-17T08:16:22.514Z" },
-    { url = "https://files.pythonhosted.org/packages/c7/e9/4ca84d0d6cf629085541bef3eede8c5187034d5028d3b4e48b21e3ca4055/watchfiles-0.15.0-cp37-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:d1f9de6b776b3aff17898a4cf5ac5a2d0a16212ea7aad2bbe0ef6aa3e79a96af", size = 1344044, upload-time = "2022-06-17T08:16:24.531Z" },
-    { url = "https://files.pythonhosted.org/packages/f1/99/5049bb5730a7d303453900e89137efe0fbb2a32d46bcee4616670f443709/watchfiles-0.15.0-cp37-abi3-win32.whl", hash = "sha256:56abed43e645d1f2d6def83e35999cc5758b051aff54ca1065cbfcaea15b3389", size = 246287, upload-time = "2022-06-17T08:16:26.135Z" },
-    { url = "https://files.pythonhosted.org/packages/41/71/9eab568af6bf9a57b498a30a09e089a4b3963a4962827b02dcb506935947/watchfiles-0.15.0-cp37-abi3-win_amd64.whl", hash = "sha256:7b81c6e404b2aa62482a719eb778e4a16d01728302dce1f1512c1e5354a73fda", size = 253007, upload-time = "2022-06-17T08:16:27.366Z" },
-    { url = "https://files.pythonhosted.org/packages/7d/a6/9e25afd734d15146fd3a58cea6d3d8a3497317556835b873470065399125/watchfiles-0.15.0-cp37-abi3-win_arm64.whl", hash = "sha256:82238d08d8a49f1a1ba254278cd4329a154f6100b028393059722ebeddd2ff3d", size = 246172, upload-time = "2022-06-17T08:16:28.483Z" },
 ]
 
 [[package]]
@@ -1140,8 +1062,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
-    { name = "cogwatch" },
-    { name = "ffmpeg-python" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "py-cord", extra = ["voice"] },
@@ -1171,8 +1091,6 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=23.0.0" },
     { name = "aiohttp", specifier = ">=3.8.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
-    { name = "cogwatch", specifier = ">=3.2.0" },
-    { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "py-cord", extras = ["voice"], specifier = ">=2.4.0" },

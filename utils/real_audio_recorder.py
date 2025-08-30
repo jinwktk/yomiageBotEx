@@ -219,17 +219,14 @@ class RealTimeAudioRecorder:
         """録音完了時のコールバック（bot_simple.pyから移植）"""
         try:
             logger.info(f"RealTimeRecorder: Finished callback called for guild {guild_id}")
-            logger.info(f"RealTimeRecorder: Callback details:")
-            logger.info(f"  - Sink type: {type(sink).__name__}")
-            logger.info(f"  - Audio data keys: {list(sink.audio_data.keys())}")
-            logger.info(f"  - Number of users: {len(sink.audio_data)}")
+            logger.debug(f"RealTimeRecorder: Callback details - {len(sink.audio_data)} users")
             
             # ユーザー数のみログ（詳細は省略）
             logger.debug(f"  - Processing audio for {len(sink.audio_data)} users")
             
             audio_count = 0
             for user_id, audio in sink.audio_data.items():
-                logger.info(f"RealTimeRecorder: Processing audio for user {user_id}")
+                logger.debug(f"RealTimeRecorder: Processing audio for user {user_id}")
                 if audio.file:
                     audio.file.seek(0)
                     audio_data = audio.file.read()
@@ -243,7 +240,7 @@ class RealTimeAudioRecorder:
                         audio_data = audio_data[:MAX_AUDIO_SIZE]
                         logger.info(f"RealTimeRecorder: Truncated audio to {len(audio_data)/1024/1024:.1f}MB")
                     
-                    logger.info(f"RealTimeRecorder: Audio data size for user {user_id}: {len(audio_data)/1024/1024:.1f}MB")
+                    logger.debug(f"RealTimeRecorder: Audio data size for user {user_id}: {len(audio_data)/1024/1024:.1f}MB")
                     
                     if audio_data and len(audio_data) > 44:  # WAVヘッダー以上のサイズ
                         user_audio_buffer = io.BytesIO(audio_data)
@@ -259,7 +256,7 @@ class RealTimeAudioRecorder:
                         if len(self.guild_user_buffers[guild_id][user_id]) >= MAX_BUFFERS_PER_USER:
                             # 古いバッファを削除
                             self.guild_user_buffers[guild_id][user_id].pop(0)
-                            logger.info(f"RealTimeRecorder: Removed old buffer for user {user_id} (limit: {MAX_BUFFERS_PER_USER})")
+                            logger.debug(f"RealTimeRecorder: Removed old buffer for user {user_id}")
                         
                         current_time = time.time()
                         self.guild_user_buffers[guild_id][user_id].append((user_audio_buffer, current_time))
@@ -271,7 +268,7 @@ class RealTimeAudioRecorder:
                         if self.recording_manager:
                             self.recording_manager.add_audio_data(guild_id, audio_data, user_id)
                         
-                        logger.info(f"RealTimeRecorder: Added audio buffer for guild {guild_id}, user {user_id} ({len(audio_data)} bytes)")
+                        logger.debug(f"RealTimeRecorder: Added audio buffer for guild {guild_id}, user {user_id}")
                         audio_count += 1
                     else:
                         logger.warning(f"RealTimeRecorder: Audio data too small for user {user_id}: {len(audio_data)} bytes")
@@ -282,11 +279,11 @@ class RealTimeAudioRecorder:
             
             # バッファを永続化（頻度を下げて最小限のみ保存）
             if audio_count > 0:
-                # 10回に1回のみ保存（頻繁な保存を避ける）
+                # 20回に1回のみ保存（さらに頻度を下げる）
                 if not hasattr(self, '_finished_save_counter'):
                     self._finished_save_counter = 0
                 self._finished_save_counter += 1
-                if self._finished_save_counter >= 10:
+                if self._finished_save_counter >= 20:
                     self._finished_save_counter = 0
                     self.save_buffers()
             

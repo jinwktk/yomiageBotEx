@@ -20,6 +20,23 @@ tmpwav/
 sessions.json
 recordings_buffer.pkl
 data/audio_buffers.json
+data/audio_buffers_backup_*.json
+data/*.json.bak
+data/*.json.backup
+
+# バックアップファイル・一時ファイルの除外強化
+*.backup
+*.bak
+*.tmp.*
+*_backup_*
+*_bak_*
+*.swp
+*.swo
+
+# 大容量メディアファイル
+*.wav.large
+*.mp3.large
+audio_data_*
 
 # OS・IDE
 .DS_Store
