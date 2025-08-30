@@ -58,8 +58,12 @@ class RealtimeRelaySink(discord.sinks.Sink):
             if user == self.bot.user.id:
                 return  # ボット自身の音声は除外
             
+            # デバッグ: 音声データ受信をログ出力
+            self.logger.info(f"RealtimeRelaySink received audio data from user {user}, size: {len(data)} bytes")
+            
             # パケットIDを生成（重複防止）
-            packet_id = f"{user}_{time.time()}"
+            current_time = time.time()
+            packet_id = f"{user}_{current_time}"
             if packet_id in self.processed_packets:
                 return
             
@@ -294,7 +298,7 @@ class AudioRelay:
             sink = RealtimeRelaySink(session, target_voice_client, self.logger, self.relay_config, self.bot)
             
             # 録音完了時のコールバック
-            def after_recording(sink, error):
+            def after_recording(sink, error=None):
                 if error:
                     self.logger.error(f"Recording error in session {session.session_id}: {error}")
                 else:
