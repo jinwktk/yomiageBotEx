@@ -58,8 +58,8 @@ class RealtimeRelaySink(discord.sinks.Sink):
             if user == self.bot.user.id:
                 return  # ボット自身の音声は除外
             
-            # デバッグ: 音声データ受信をログ出力
-            self.logger.info(f"RealtimeRelaySink received audio data from user {user}, size: {len(data)} bytes")
+            # デバッグ: 音声データ受信をログ出力（重要な転送のみ）
+            self.logger.debug(f"RealtimeRelaySink received audio data from user {user}, size: {len(data)} bytes")
             
             # パケットIDを生成（重複防止）
             current_time = time.time()
@@ -114,7 +114,7 @@ class RealtimeRelaySink(discord.sinks.Sink):
                     self.target_voice_client.stop()
                 
                 self.target_voice_client.play(audio_source)
-                self.logger.debug(f"Relaying realtime audio from user {user_id}")
+                self.logger.info(f"🎵 LIVE RELAY: User {user_id} audio streamed to target channel")
                 
             finally:
                 # クリーンアップを遅延実行
