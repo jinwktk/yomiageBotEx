@@ -38,7 +38,7 @@ class TTSCog(commands.Cog):
         asyncio.create_task(self.tts_manager.cleanup())
     
     async def play_audio_from_bytes(self, voice_client: discord.VoiceClient, audio_data: bytes):
-        """バイト配列から音声を再生"""
+        """バイト配列から音声を再生（高速化版）"""
         try:
             import tempfile
             import os
@@ -55,20 +55,28 @@ class TTSCog(commands.Cog):
                 if not voice_client.is_playing():
                     voice_client.play(source)
                     
-                    # 再生完了まで待機（最大10秒）
-                    timeout = 10
+                    # 非同期で再生完了を待機（タイムアウト短縮）
+                    timeout = 5.0  # 10秒→5秒に短縮
                     while voice_client.is_playing() and timeout > 0:
-                        await asyncio.sleep(0.1)
-                        timeout -= 0.1
+                        await asyncio.sleep(0.05)  # 0.1秒→0.05秒に短縮
+                        timeout -= 0.05
+                else:
+                    self.logger.debug("Voice client is already playing, skipping greeting")
             finally:
-                # 一時ファイルを削除
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
+                # 一時ファイルを非同期で削除
+                asyncio.create_task(self._cleanup_temp_file(temp_path))
                     
         except Exception as e:
             self.logger.error(f"Failed to play audio: {e}")
+    
+    async def _cleanup_temp_file(self, file_path: str):
+        """一時ファイルを遅延削除"""
+        try:
+            await asyncio.sleep(0.1)  # 少し待ってから削除
+            import os
+            os.unlink(file_path)
+        except Exception as e:
+            self.logger.debug(f"Failed to cleanup temp file {file_path}: {e}")
     
     async def speak_greeting(self, voice_client: discord.VoiceClient, member: discord.Member, greeting_type: str):
         """挨拶音声を生成・再生（ユーザー個別設定対応）"""
@@ -94,12 +102,23 @@ class TTSCog(commands.Cog):
                 "style": tts_config.get("style", "01")
             }
             
+            # 音声生成と再生を並列化（ノンブロッキング）
+            asyncio.create_task(self._generate_and_play_greeting(
+                voice_client, message, user_tts_settings
+            ))
+            
+        except Exception as e:
+            self.logger.error(f"Failed to speak greeting: {e}")
+    
+    async def _generate_and_play_greeting(self, voice_client: discord.VoiceClient, message: str, tts_settings: dict):
+        """挨拶音声の生成・再生をバックグラウンドで実行"""
+        try:
             # ユーザー個別のTTS設定で音声生成
             audio_data = await self.tts_manager.generate_speech(
                 text=message,
-                model_id=user_tts_settings.get("model_id", 0),
-                speaker_id=user_tts_settings.get("speaker_id", 0),
-                style=user_tts_settings.get("style", "Neutral")
+                model_id=tts_settings.get("model_id", 0),
+                speaker_id=tts_settings.get("speaker_id", 0),
+                style=tts_settings.get("style", "Neutral")
             )
             
             if audio_data:
@@ -109,9 +128,8 @@ class TTSCog(commands.Cog):
                 self.logger.warning(f"Failed to generate greeting audio: {message}")
                 
         except Exception as e:
-            self.logger.error(f"Failed to speak greeting: {e}")
+            self.logger.error(f"Failed to generate and play greeting: {e}")
     
-    @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         """ボイスステート変更時の挨拶処理"""
         if member.bot:  # ボット自身の変更は無視
@@ -137,7 +155,7 @@ class TTSCog(commands.Cog):
         # ユーザーがボットのいるチャンネルに参加した場合
         if before.channel != bot_channel and after.channel == bot_channel:
             self.logger.info(f"TTS: User {member.display_name} joined bot channel {bot_channel.name}")
-            await asyncio.sleep(1)  # 接続安定化のため少し待機
+            await asyncio.sleep(1.0)  # 接続安定化のため待機
             await self.speak_greeting(voice_client, member, "join")
         
         # ユーザーがボットのいるチャンネルから退出した場合

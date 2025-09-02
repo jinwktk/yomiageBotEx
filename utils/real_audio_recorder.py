@@ -160,7 +160,7 @@ class RealTimeAudioRecorder:
     async def _periodic_checkpoint_task(self, guild_id: int, voice_client):
         """定期的にチェックポイントを作成してリアルタイム音声データを取得"""
         logger.info(f"RealTimeRecorder: Starting periodic checkpoint task for guild {guild_id}")
-        checkpoint_interval = 10.0  # 10秒ごとにチェックポイント作成
+        checkpoint_interval = 5.0  # 5秒ごとにチェックポイント作成（リプレイ機能改善のため10秒→5秒に短縮）
         
         try:
             while self.recording_status.get(guild_id, False):
@@ -233,15 +233,55 @@ class RealTimeAudioRecorder:
             logger.info(f"RealTimeRecorder: Finished callback called for guild {guild_id}")
             logger.debug(f"RealTimeRecorder: Callback details - {len(sink.audio_data)} users")
             
+            # WaveSinkの詳細情報をデバッグ出力
+            logger.info(f"RealTimeRecorder: WaveSink debug info:")
+            logger.info(f"  - sink.audio_data type: {type(sink.audio_data)}")
+            logger.info(f"  - sink.audio_data keys: {list(sink.audio_data.keys())}")
+            
             # ユーザー数のみログ（詳細は省略）
             logger.debug(f"  - Processing audio for {len(sink.audio_data)} users")
             
             audio_count = 0
             for user_id, audio in sink.audio_data.items():
-                logger.debug(f"RealTimeRecorder: Processing audio for user {user_id}")
+                logger.info(f"RealTimeRecorder: Processing audio for user {user_id}")
+                logger.info(f"  - audio object type: {type(audio)}")
+                logger.info(f"  - audio.file exists: {audio.file is not None}")
+                
                 if audio.file:
-                    audio.file.seek(0)
+                    # ファイル詳細情報を取得
+                    file_pos_before = audio.file.tell()
+                    audio.file.seek(0, 2)  # ファイル末尾に移動
+                    file_size = audio.file.tell()
+                    audio.file.seek(0)  # 先頭に戻す
                     audio_data = audio.file.read()
+                    
+                    logger.info(f"  - File position before: {file_pos_before}")
+                    logger.info(f"  - File size: {file_size} bytes")
+                    logger.info(f"  - Read data size: {len(audio_data)} bytes")
+                    
+                    # WAVファイル構造を詳しく分析
+                    if len(audio_data) >= 44:
+                        import wave
+                        try:
+                            with wave.open(io.BytesIO(audio_data), 'rb') as wav_file:
+                                logger.info(f"  - WAV channels: {wav_file.getnchannels()}")
+                                logger.info(f"  - WAV sample width: {wav_file.getsampwidth()}")
+                                logger.info(f"  - WAV framerate: {wav_file.getframerate()}")
+                                logger.info(f"  - WAV frames: {wav_file.getnframes()}")
+                                
+                                # 実際のPCMデータを読み取り
+                                pcm_data = wav_file.readframes(wav_file.getnframes())
+                                logger.info(f"  - PCM data size: {len(pcm_data)} bytes")
+                                
+                                # PCMデータの最初の数バイトをサンプル表示
+                                if len(pcm_data) > 0:
+                                    sample_bytes = pcm_data[:min(16, len(pcm_data))]
+                                    logger.info(f"  - PCM sample (first {len(sample_bytes)} bytes): {sample_bytes.hex()}")
+                                else:
+                                    logger.warning(f"  - PCM data is empty!")
+                                    
+                        except Exception as wav_e:
+                            logger.error(f"  - WAV analysis error: {wav_e}")
                     
                     # 音声データサイズ制限（100MB上限）
                     MAX_AUDIO_SIZE = 100 * 1024 * 1024  # 100MB
@@ -282,6 +322,7 @@ class RealTimeAudioRecorder:
                         audio_count += 1
                     else:
                         logger.warning(f"RealTimeRecorder: Audio data too small for user {user_id}: {len(audio_data)} bytes")
+                        logger.warning(f"  - This means WaveSink only provided WAV header without PCM data")
                 else:
                     logger.warning(f"RealTimeRecorder: No audio.file for user {user_id}")
             

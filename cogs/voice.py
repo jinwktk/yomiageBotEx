@@ -160,9 +160,19 @@ class VoiceCog(commands.Cog):
         self.logger.info(f"Checking guild: {guild.name} (ID: {guild.id})")
         
         try:
-            # 既に接続している場合はスキップ
+            # 既に接続している場合でも録音機能の確認と開始を行う
             if guild.voice_client:
-                self.logger.info(f"Already connected to voice in {guild.name}, skipping")
+                self.logger.info(f"Already connected to voice in {guild.name}")
+                # 接続中のチャンネルでメンバーがいる場合は録音機能を確保する
+                current_channel = guild.voice_client.channel
+                if current_channel:
+                    # 既存メンバーがいるかチェック
+                    non_bot_members = [m for m in current_channel.members if not m.bot]
+                    if non_bot_members:
+                        self.logger.info(f"Found {len(non_bot_members)} members in connected channel {current_channel.name}, ensuring recording is active")
+                        # 録音機能が開始されていることを確認
+                        await self.notify_bot_joined_channel(guild, current_channel, is_startup=True, ensure_recording=True)
+                        self.save_sessions()
                 return
             
             # ボイスチャンネル数をログ
@@ -308,7 +318,13 @@ class VoiceCog(commands.Cog):
             except Exception as e:
                 self.logger.error(f"Failed to move to voice channel: {e}")
         else:
-            # 新規接続
+            # 新規接続（音声リレーで接続済みの場合はスキップ）
+            if guild.voice_client and guild.voice_client.is_connected():
+                self.logger.info(f"Already connected to a voice channel via relay in {guild.name}, notifying only")
+                # 既存接続での録音確保のみ実行
+                await self.notify_bot_joined_channel(guild, channel, ensure_recording=True)
+                return
+                
             try:
                 await self.bot.connect_to_voice(channel)
                 self.logger.info(f"Auto-joined voice channel: {channel.name} in {guild.name}")
@@ -318,43 +334,47 @@ class VoiceCog(commands.Cog):
             except Exception as e:
                 self.logger.error(f"Failed to auto-join voice channel: {e}")
     
-    async def notify_bot_joined_channel(self, guild: discord.Guild, channel: discord.VoiceChannel, is_startup: bool = False):
+    async def notify_bot_joined_channel(self, guild: discord.Guild, channel: discord.VoiceChannel, is_startup: bool = False, ensure_recording: bool = False):
         """ボットがチャンネルに接続した際の他Cogへの通知"""
         try:
-            # 音声接続が完全に確立されるまで待機
-            self.logger.info("Waiting for voice connection to stabilize...")
-            
-            stable_connection = False
-            for attempt in range(10):  # 最大10回試行（3秒間）に短縮
-                await asyncio.sleep(0.3)
+            # 既に接続済みで録音確保のみの場合は安定化チェックをスキップ
+            if ensure_recording and guild.voice_client and guild.voice_client.is_connected():
+                self.logger.info(f"Ensuring recording is active for existing connection in {channel.name}")
+            else:
+                # 音声接続が完全に確立されるまで待機
+                self.logger.info("Waiting for voice connection to stabilize...")
                 
-                voice_client = guild.voice_client
-                if voice_client and voice_client.is_connected():
-                    # 追加の安定性チェック：WebSocketの状態も確認
-                    try:
-                        # ボイスクライアントの内部状態をチェック
-                        if hasattr(voice_client, '_connected') and voice_client._connected:
-                            self.logger.info(f"Voice connection confirmed after {(attempt + 1) * 0.3}s")
-                            stable_connection = True
-                            break
-                        elif hasattr(voice_client, 'is_connected') and voice_client.is_connected():
-                            self.logger.info(f"Voice connection stable after {(attempt + 1) * 0.3}s")
-                            stable_connection = True
-                            break
-                    except Exception as e:
-                        self.logger.debug(f"Connection stability check failed: {e}")
-                        continue
+                stable_connection = False
+                for attempt in range(10):  # 最大10回試行（3秒間）に短縮
+                    await asyncio.sleep(0.3)
+                    
+                    voice_client = guild.voice_client
+                    if voice_client and voice_client.is_connected():
+                        # 追加の安定性チェック：WebSocketの状態も確認
+                        try:
+                            # ボイスクライアントの内部状態をチェック
+                            if hasattr(voice_client, '_connected') and voice_client._connected:
+                                self.logger.info(f"Voice connection confirmed after {(attempt + 1) * 0.3}s")
+                                stable_connection = True
+                                break
+                            elif hasattr(voice_client, 'is_connected') and voice_client.is_connected():
+                                self.logger.info(f"Voice connection stable after {(attempt + 1) * 0.3}s")
+                                stable_connection = True
+                                break
+                        except Exception as e:
+                            self.logger.debug(f"Connection stability check failed: {e}")
+                            continue
+                    
+                    if attempt >= 9:
+                        self.logger.warning("Voice connection not stable after 3s, aborting")
+                        return
                 
-                if attempt >= 9:
-                    self.logger.warning("Voice connection not stable after 3s, aborting")
+                if not stable_connection:
+                    self.logger.warning("Voice connection stability could not be verified")
                     return
-            
-            if not stable_connection:
-                self.logger.warning("Voice connection stability could not be verified")
-                return
-            
-            # 追加の安定化待機
-            await asyncio.sleep(1.5)
+                
+                # 追加の安定化待機
+                await asyncio.sleep(1.5)
             
             # 最終確認：接続がまだ有効か
             voice_client = guild.voice_client
@@ -365,6 +385,14 @@ class VoiceCog(commands.Cog):
             # チャンネルにいる全メンバーを取得（ボット以外）
             members = [m for m in channel.members if not m.bot]
             self.logger.info(f"Bot joined channel with {len(members)} members: {[m.display_name for m in members]}")
+            
+            # 録音確保モードの場合は録音処理のみ実行
+            if ensure_recording:
+                if members:
+                    self.logger.info("Ensuring recording is active for connected members")
+                    first_member = members[0]
+                    await self._process_member_recording(guild, first_member)
+                return
             
             # TTS処理は並列実行、録音処理は最初の1回のみ実行
             if members:
@@ -381,10 +409,7 @@ class VoiceCog(commands.Cog):
                 first_member = members[0]
                 await self._process_member_recording(guild, first_member)
             
-            # RelayCogへ音声接続完了を通知（リレー自動開始用）
-            relay_cog = self.bot.get_cog("RelayCog")
-            if relay_cog:
-                await relay_cog.handle_voice_connected(guild.id, channel.id)
+            # 音声接続完了（RelayCogは独立して自動開始）
                     
         except Exception as e:
             self.logger.error(f"Failed to notify other cogs: {e}")

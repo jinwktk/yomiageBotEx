@@ -274,6 +274,22 @@ class YomiageBot(discord.Bot):
             for cmd in cog_commands:
                 logger.info(f"  - {cmd.name}")
         
+        # RecordingCallbackManagerの初期化
+        try:
+            from utils.recording_callback_manager import recording_callback_manager
+            await recording_callback_manager.initialize()
+            logger.info("RecordingCallbackManager initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize RecordingCallbackManager: {e}")
+        
+        # ReplayBufferManagerの初期化
+        try:
+            from utils.replay_buffer_manager import initialize_replay_buffer_manager
+            initialize_replay_buffer_manager(self.config)
+            logger.info("ReplayBufferManager initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize ReplayBufferManager: {e}")
+        
         # ログクリーンアップタスクの開始
         asyncio.create_task(start_log_cleanup_task(self.config))
         
@@ -351,6 +367,23 @@ class YomiageBot(discord.Bot):
                 logger.info("MessageReaderCog session cleanup completed")
             except Exception as e:
                 logger.error(f"Failed to cleanup MessageReaderCog session: {e}")
+        
+        # RecordingCallbackManagerのクリーンアップ
+        try:
+            from utils.recording_callback_manager import recording_callback_manager
+            await recording_callback_manager.shutdown()
+            logger.info("RecordingCallbackManager shutdown completed")
+        except Exception as e:
+            logger.error(f"Failed to cleanup RecordingCallbackManager: {e}")
+        
+        # ReplayBufferManagerのクリーンアップ
+        try:
+            from utils.replay_buffer_manager import replay_buffer_manager
+            if replay_buffer_manager:
+                await replay_buffer_manager.cleanup()
+                logger.info("ReplayBufferManager cleanup completed")
+        except Exception as e:
+            logger.error(f"Failed to cleanup ReplayBufferManager: {e}")
         
         # HTTPセッションのクリーンアップ
         try:
