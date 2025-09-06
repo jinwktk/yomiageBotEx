@@ -15,6 +15,8 @@ from discord.ext import commands
 
 from utils.real_audio_recorder import RealTimeAudioRecorder
 from utils.audio_processor import AudioProcessor
+from utils.direct_audio_capture import direct_audio_capture
+from utils.recording_callback_manager import recording_callback_manager
 
 
 class RecordingCog(commands.Cog):
@@ -190,7 +192,7 @@ class RecordingCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Recording: Failed to handle bot joined with user: {e}")
     
-    @discord.slash_command(name="replay", description="最近の音声を録音ファイルとして投稿します（新システム）")
+    @discord.slash_command(name="replay", description="最近の音声を録音ファイルとして投稿します（直接キャプチャ）")
     async def replay_command(
         self, 
         ctx: discord.ApplicationContext, 
@@ -198,30 +200,18 @@ class RecordingCog(commands.Cog):
         user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None,
         normalize: discord.Option(bool, "音声正規化の有効/無効", default=True, required=False) = True
     ):
-        """新システムによる録音をリプレイ（RecordingCallbackManager + ReplayBufferManager）"""
+        """直接音声キャプチャシステムによる録音をリプレイ（py-cord WaveSinkバグ完全回避）"""
         if not self.recording_enabled:
             await ctx.respond("⚠️ 録音機能が無効です。", ephemeral=True)
             return
         
-        # 新システムでは音声リレーからデータを取得するため、voice_clientチェックを削除
-        
-        # ReplayBufferManagerの確認
-        try:
-            from utils.replay_buffer_manager import replay_buffer_manager
-            if not replay_buffer_manager:
-                await ctx.respond("❌ ReplayBufferManagerが初期化されていません。", ephemeral=True)
-                return
-        except ImportError:
-            await ctx.respond("❌ 新しい録音システムが利用できません。", ephemeral=True)
-            return
-        
         # 処理中であることを即座に応答
-        await ctx.respond("🎵 新システムで録音を処理中です...", ephemeral=True)
+        await ctx.respond("🎵 直接キャプチャシステムで音声を取得中...", ephemeral=True)
         
-        self.logger.info(f"New replay request: guild={ctx.guild.id}, duration={duration}s, user={user.id if user else 'all'}, normalize={normalize}")
+        self.logger.info(f"Direct capture replay request: guild={ctx.guild.id}, duration={duration}s, user={user.id if user else 'all'}, normalize={normalize}")
         
-        # 新システムで処理を別タスクで実行してボットのブロックを回避
-        asyncio.create_task(self._process_new_replay_async(ctx, duration, user, normalize))
+        # 直接キャプチャシステムで処理を別タスクで実行
+        asyncio.create_task(self._process_direct_capture_replay_async(ctx, duration, user, normalize))
     
     async def _process_replay_async(self, ctx, duration: float, user):
         """replayコマンドの重い処理を非同期で実行"""
@@ -599,7 +589,7 @@ class RecordingCog(commands.Cog):
             from utils.replay_buffer_manager import replay_buffer_manager
             
             if not replay_buffer_manager:
-                await ctx.followup.send(content="❌ ReplayBufferManagerが利用できません。")
+                await ctx.followup.send(content="❌ ReplayBufferManagerが利用できません。", ephemeral=True)
                 return
             
             start_time = time.time()
@@ -618,7 +608,8 @@ class RecordingCog(commands.Cog):
                 user_mention = f"@{user.display_name}" if user else "全ユーザー"
                 await ctx.followup.send(
                     content=f"❌ {user_mention} の過去{duration:.1f}秒間の音声データが見つかりません。\n"
-                            "音声リレーが動作していて、実際に音声データが流れているか確認してください。"
+                            "ボイスチャンネルで音声が発生してから、少し時間をおいて再度お試しください。",
+                    ephemeral=True
                 )
                 return
             
@@ -647,7 +638,8 @@ class RecordingCog(commands.Cog):
             if file_size_mb > 24:  # 余裕を持って24MBで制限
                 await ctx.followup.send(
                     content=f"❌ ファイルサイズが大きすぎます: {file_size_mb:.1f}MB\n"
-                            f"短い時間（{duration/2:.0f}秒以下）で再試行してください。"
+                            f"短い時間（{duration/2:.0f}秒以下）で再試行してください。",
+                    ephemeral=True
                 )
                 return
             
@@ -676,7 +668,8 @@ class RecordingCog(commands.Cog):
             await ctx.followup.send(
                 content="",
                 embed=embed,
-                file=file
+                file=file,
+                ephemeral=True
             )
             
             self.logger.info(f"New replay sent successfully: {filename}")
@@ -686,7 +679,8 @@ class RecordingCog(commands.Cog):
             try:
                 await ctx.followup.send(
                     content=f"❌ 新システムでの録音処理中にエラーが発生しました: {str(e)}\n"
-                            "古いシステムでの処理をお試しください。"
+                            "古いシステムでの処理をお試しください。",
+                    ephemeral=True
                 )
             except Exception as edit_error:
                 self.logger.error(f"Failed to edit response after error: {edit_error}")
@@ -962,6 +956,142 @@ class RecordingCog(commands.Cog):
             self.logger.error(f"ReplayBufferManager test failed: {e}")
             await ctx.respond(
                 f"❌ テストが失敗しました: {e}",
+                ephemeral=True
+            )
+    
+    async def _process_direct_capture_replay_async(self, ctx, duration: float, user, normalize: bool):
+        """直接音声キャプチャシステムでのreplayコマンド処理"""
+        try:
+            from datetime import datetime
+            
+            self.logger.info(f"Starting direct capture replay: guild={ctx.guild.id}, duration={duration}s")
+            
+            # DirectAudioCaptureを初期化（必要に応じて）
+            if direct_audio_capture.bot is None:
+                direct_audio_capture.bot = self.bot
+            
+            # 音声キャプチャを開始（まだ開始されていない場合）
+            capture_success = await direct_audio_capture.start_capture(ctx.guild.id)
+            if not capture_success:
+                await ctx.followup.send(
+                    "❌ 音声キャプチャの開始に失敗しました。ボットがボイスチャンネルに接続していることを確認してください。",
+                    ephemeral=True
+                )
+                return
+            
+            # キャプチャ状況を確認
+            status = direct_audio_capture.get_status()
+            self.logger.info(f"Direct capture status: {status}")
+            
+            # キャプチャが十分なデータを生成するまで待機（少なくとも4秒）
+            self.logger.info(f"Direct capture: Waiting for audio data generation...")
+            await asyncio.sleep(4.0)
+            
+            # 音声データを取得
+            audio_chunks = await direct_audio_capture.get_recent_audio(
+                guild_id=ctx.guild.id,
+                duration_seconds=duration,
+                user_id=user.id if user else None
+            )
+            
+            if not audio_chunks:
+                # エラーメッセージは音声リレーを隠した親切な内容
+                await ctx.followup.send(
+                    f"❌ {user.mention if user else '@全員'} の過去{duration}秒間の音声データが見つかりません。\n"
+                    "ボイスチャンネルで音声が発生してから、少し時間をおいて再度お試しください。",
+                    ephemeral=True
+                )
+                return
+            
+            # WAVファイルを作成
+            wav_data = await direct_audio_capture.create_wav_file(audio_chunks)
+            if not wav_data:
+                await ctx.followup.send(
+                    "❌ 音声ファイルの作成に失敗しました。音声データが破損している可能性があります。",
+                    ephemeral=True
+                )
+                return
+            
+            # 正規化処理（オプション）
+            if normalize:
+                try:
+                    # 一時ファイルに保存して正規化
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                        temp_file.write(wav_data)
+                        temp_path = temp_file.name
+                    
+                    # 正規化実行
+                    normalized_path = await self.audio_processor.normalize_audio(temp_path)
+                    
+                    if normalized_path:
+                        # 正規化されたファイルを読み込み
+                        with open(normalized_path, 'rb') as f:
+                            wav_data = f.read()
+                        
+                        # 一時ファイル削除
+                        import os
+                        os.unlink(temp_path)
+                        if normalized_path != temp_path:
+                            os.unlink(normalized_path)
+                        
+                        self.logger.info(f"Direct capture: Audio normalized successfully")
+                    else:
+                        # 正規化失敗時は一時ファイルのみ削除
+                        import os
+                        os.unlink(temp_path)
+                        self.logger.warning(f"Direct capture: Normalization failed, using original audio")
+                        
+                except Exception as norm_e:
+                    self.logger.warning(f"Direct capture: Normalization failed: {norm_e}, using original audio")
+            
+            # ファイル名を生成
+            timestamp = datetime.now().strftime("%m%d_%H%M%S")
+            if user:
+                filename = f"recording_{user.display_name}_{duration}s_{timestamp}.wav"
+            else:
+                user_count = len(set(chunk.user_id for chunk in audio_chunks))
+                filename = f"recording_all_{user_count}users_{duration}s_{timestamp}.wav"
+            
+            # Discord制限内かチェック
+            if len(wav_data) > 25 * 1024 * 1024:  # 25MB
+                await ctx.followup.send(
+                    f"⚠️ 音声ファイルが大きすぎます（{len(wav_data)//1024//1024}MB）。\n"
+                    f"時間を短く設定するか、特定のユーザーを指定してください。",
+                    ephemeral=True
+                )
+                return
+            
+            # ファイルとして送信
+            import io
+            file_obj = discord.File(
+                io.BytesIO(wav_data),
+                filename=filename
+            )
+            
+            # 成功メッセージと共に送信
+            total_duration = sum(chunk.duration for chunk in audio_chunks)
+            chunk_count = len(audio_chunks)
+            
+            message = (
+                f"🎵 **音声録音完了** (`{filename}`)\n"
+                f"📊 **音声情報**: {total_duration:.1f}秒間, {chunk_count}チャンク\n"
+                f"💾 **ファイルサイズ**: {len(wav_data)//1024}KB\n"
+                f"🎯 **対象**: {user.mention if user else '全員'}"
+            )
+            
+            await ctx.followup.send(
+                content=message,
+                file=file_obj,
+                ephemeral=True
+            )
+            
+            self.logger.info(f"Direct capture replay completed: {len(wav_data)} bytes, {total_duration:.1f}s")
+            
+        except Exception as e:
+            self.logger.error(f"Direct capture replay failed: {e}", exc_info=True)
+            await ctx.followup.send(
+                f"❌ 音声処理中にエラーが発生しました: {e}",
                 ephemeral=True
             )
 

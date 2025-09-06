@@ -353,22 +353,57 @@ class SmoothAudioRelay:
             # 🚀 BREAKTHROUGH: RecordingCallbackManagerに音声データを直接送信（WaveSinkバグ回避）
             if self.recording_callback_enabled and recording_callback_manager and audio_data and len(audio_data) > 44:
                 try:
-                    # セッションからソースGuild IDを取得
-                    session = next((s for s in self.active_sessions.values() if s.session_id == session_id), None)
-                    if session:
-                        # 統合ユーザーID（音声リレー用）を使用
-                        relay_user_id = 999999999999999999  # 音声リレー専用の仮想ユーザーID
-                        
-                        success = await recording_callback_manager.process_audio_data(
-                            guild_id=session.source_guild_id,
-                            user_id=relay_user_id,
-                            audio_data=audio_data
-                        )
-                        
-                        if success:
-                            self.logger.debug(f"🎵 RELAY AUDIO FORWARDED: {len(audio_data)} bytes to RecordingCallbackManager")
-                        else:
-                            self.logger.debug(f"⚠️ RELAY AUDIO FORWARD FAILED: Guild {session.source_guild_id}")
+                    # 🎯 WAVファイルの詳細チェック（デバッグ用）
+                    import wave
+                    import io
+                    
+                    has_pcm_data = False
+                    try:
+                        with wave.open(io.BytesIO(audio_data), 'rb') as wav_file:
+                            pcm_frames = wav_file.getnframes()
+                            if pcm_frames > 0:
+                                pcm_data = wav_file.readframes(pcm_frames)
+                                has_pcm_data = len(pcm_data) > 0
+                                if has_pcm_data:
+                                    self.logger.info(f"🎵 SMOOTH RELAY PCM DATA FOUND: {len(pcm_data)} bytes, {pcm_frames} frames")
+                    except Exception as wav_e:
+                        self.logger.debug(f"WAV analysis failed: {wav_e}")
+                    
+                    # PCMデータが存在する場合のみ転送
+                    if has_pcm_data:
+                        # セッションからソースGuild IDを取得
+                        session = next((s for s in self.active_sessions.values() if s.session_id == session_id), None)
+                        if session:
+                            # 🎯 実際の参加ユーザーIDを取得してデータを転送
+                            source_guild = self.bot.get_guild(session.source_guild_id)
+                            if source_guild and source_guild.voice_client:
+                                voice_channel = source_guild.voice_client.channel
+                                if voice_channel:
+                                    forwarded_count = 0
+                                    # 参加中の全ユーザーに音声データを関連付け
+                                    for member in voice_channel.members:
+                                        if not member.bot:  # ボットは除外
+                                            success = await recording_callback_manager.process_audio_data(
+                                                guild_id=session.source_guild_id,
+                                                user_id=member.id,
+                                                audio_data=audio_data
+                                            )
+                                            if success:
+                                                forwarded_count += 1
+                                    
+                                    if forwarded_count > 0:
+                                        self.logger.info(f"🎵 RELAY AUDIO FORWARDED: {forwarded_count} users, {len(audio_data)} bytes")
+                            
+                            # フォールバック: 統合ユーザーIDでも保存
+                            relay_user_id = 999999999999999999  # 音声リレー専用の仮想ユーザーID
+                            await recording_callback_manager.process_audio_data(
+                                guild_id=session.source_guild_id,
+                                user_id=relay_user_id,
+                                audio_data=audio_data
+                            )
+                    else:
+                        self.logger.debug(f"🚫 SMOOTH RELAY: Empty PCM data detected, skipping transfer ({len(audio_data)} bytes total)")
+                
                 except Exception as e:
                     self.logger.warning(f"Failed to forward relay audio to RecordingCallbackManager: {e}")
             
