@@ -30,15 +30,38 @@ def cleanup_lock_file():
     except Exception as e:
         print(f"Warning: Could not remove lock file: {e}")
 
+def is_process_running(pid):
+    """指定されたPIDのプロセスが実行中かチェック"""
+    try:
+        # Windows
+        if sys.platform == "win32":
+            import subprocess
+            result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], 
+                                  capture_output=True, text=True)
+            return str(pid) in result.stdout
+        # Unix/Linux
+        else:
+            os.kill(int(pid), 0)
+            return True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
 def check_single_process():
     """単一プロセス実行を確認"""
     if os.path.exists(LOCK_FILE):
         try:
             with open(LOCK_FILE, 'r') as f:
                 existing_pid = f.read().strip()
-            print(f"Bot is already running (PID: {existing_pid})!")
-            print("Multiple process execution is prohibited by CLAUDE.md rules.")
-            sys.exit(1)
+            
+            # PIDが実際に生きているかチェック
+            if is_process_running(existing_pid):
+                print(f"Bot is already running (PID: {existing_pid})!")
+                print("Multiple process execution is prohibited by CLAUDE.md rules.")
+                sys.exit(1)
+            else:
+                print(f"Stale lock file found (PID {existing_pid} not running), removing...")
+                cleanup_lock_file()
+                
         except Exception as e:
             print(f"Lock file exists but unreadable: {e}")
             # 壊れたロックファイルを削除
@@ -465,6 +488,7 @@ bot.setup_cogs()
 async def shutdown_handler():
     """シャットダウン時のクリーンアップハンドラ"""
     logger.info("Shutdown signal received, cleaning up...")
+    cleanup_lock_file()  # ロックファイルを削除
     await bot.close()
 
 def main():
@@ -488,6 +512,7 @@ def main():
             logger.info("Protection period ended. Continuing normal operation...")
             return  # シグナルを無視して続行
         
+        cleanup_lock_file()  # シグナル受信時にもロックファイルを削除
         asyncio.create_task(shutdown_handler())
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -503,16 +528,21 @@ def main():
         sys.exit(1)
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
+        cleanup_lock_file()  # Ctrl+C時にもロックファイルを削除
         # シャットダウン処理を実行
         asyncio.run(shutdown_handler())
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
+        cleanup_lock_file()  # 例外時にもロックファイルを削除
         # 例外発生時もクリーンアップを実行
         try:
             asyncio.run(shutdown_handler())
         except:
             pass
         sys.exit(1)
+    finally:
+        # 最終的なクリーンアップ（念のため）
+        cleanup_lock_file()
 
 if __name__ == "__main__":
     main()
