@@ -10,9 +10,11 @@ import logging
 from pathlib import Path
 import signal
 import time
+import threading
 import atexit
 
 import discord
+from discord import opus as discord_opus
 import yaml
 from dotenv import load_dotenv
 
@@ -91,6 +93,54 @@ except Exception as e:
     print(f"[ERROR] Could not import RealEnhancedVoiceClient: {e}")
     print("   Please ensure py-cord[voice] and required dependencies are installed")
     sys.exit(1)
+
+def patch_opus_decode_manager():
+    """Opusデコーダーのエラーハンドリングを強化."""
+    if getattr(discord_opus.DecodeManager, "_yomiage_patch_applied", False):
+        return
+
+    def patched_run(self):
+        opus_logger = logging.getLogger("discord.opus")
+        if not hasattr(self, "_last_opus_error"):
+            self._last_opus_error = {}
+        while not self._end_thread.is_set():
+            try:
+                data = self.decode_queue.pop(0)
+            except IndexError:
+                time.sleep(0.001)
+                continue
+
+            if not data.decrypted_data:
+                continue
+
+            try:
+                decoder = self.get_decoder(getattr(data, "ssrc", None))
+                data.decoded_data = decoder.decode(data.decrypted_data)
+            except discord_opus.OpusError as err:
+                ssrc = getattr(data, "ssrc", "unknown")
+                self.decoder.pop(ssrc, None)
+                now = time.monotonic()
+                last_logged = self._last_opus_error.get(ssrc, 0)
+                if now - last_logged >= 5.0:
+                    opus_logger.warning(
+                        "Opus decode error (SSRC=%s): %s. Decoder reset.",
+                        ssrc,
+                        err,
+                    )
+                    self._last_opus_error[ssrc] = now
+                continue
+
+            self.client.recv_decoded_audio(data)
+
+    discord_opus.DecodeManager.run = patched_run
+    discord_opus.DecodeManager._yomiage_patch_applied = True
+    logging.getLogger(__name__).info("Applied YomiageBot Opus decoder patch for improved stability.")
+    opus_logger = logging.getLogger("discord.opus")
+    opus_logger.setLevel(logging.WARNING)
+    opus_logger.propagate = False
+
+
+patch_opus_decode_manager()
 
 load_dotenv()
 def load_config():
@@ -501,16 +551,33 @@ def main():
         sys.exit(1)
     
     # シグナルハンドラーの設定
+    pst_protection_enabled = os.getenv("ENABLE_PST", "false").lower() not in {"0", "false", "off", "no"}
+    protection_block_seconds = 5.0
+    grace_interval = 30.0  # 秒
+    last_sigint_time = 0.0
+    protection_block_until = 0.0
+
     def signal_handler(signum, frame):
+        nonlocal last_sigint_time, protection_block_until
         logger.info(f"Received signal {signum}, initiating shutdown...")
-        # PST.exeからのSIGINTを検出して無視する処理を追加
-        if signum == signal.SIGINT:
-            logger.warning("SIGINT received - possibly from PST.exe. Checking source...")
-            # プロセス保護：外部からの終了信号を一定時間無視
-            logger.info("Protected mode: Ignoring external termination signal for 5 seconds...")
-            time.sleep(5)
-            logger.info("Protection period ended. Continuing normal operation...")
-            return  # シグナルを無視して続行
+        if signum == signal.SIGINT and pst_protection_enabled:
+            now = time.monotonic()
+            if now < protection_block_until:
+                logger.info("SIGINT received during protection window. Ignoring.")
+                return
+            if now - last_sigint_time < grace_interval:
+                logger.warning("SIGINT received again before grace interval elapsed. Proceeding with shutdown.")
+            else:
+                logger.warning("SIGINT received - possibly from PST.exe. Checking source...")
+                logger.info(f"Protected mode: Ignoring external termination signal for {protection_block_seconds:.0f} seconds...")
+                last_sigint_time = now
+                protection_block_until = now + protection_block_seconds
+
+                def _end_protection():
+                    logger.info("Protection period ended. Continuing normal operation...")
+
+                threading.Timer(protection_block_seconds, _end_protection).start()
+                return
         
         cleanup_lock_file()  # シグナル受信時にもロックファイルを削除
         asyncio.create_task(shutdown_handler())

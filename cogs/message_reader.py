@@ -5,6 +5,7 @@
 import asyncio
 import logging
 import re
+from pathlib import Path
 from typing import Dict, Any
 
 import discord
@@ -55,14 +56,21 @@ class MessageReaderCog(commands.Cog):
             return False
         return self.guild_reading_enabled.get(guild_id, True)
     
+    def _has_readable_content(self, message: discord.Message) -> bool:
+        """本文または添付・スタンプがあるか確認"""
+        if message.content and message.content.strip():
+            return True
+        attachments = getattr(message, "attachments", [])
+        stickers = getattr(message, "stickers", [])
+        return bool(attachments or stickers)
+
     def should_read_message(self, message: discord.Message) -> bool:
         """メッセージを読み上げるべきかチェック"""
         # ボットの場合
         if self.ignore_bots and message.author.bot:
             return False
         
-        # 空のメッセージ
-        if not message.content.strip():
+        if not self._has_readable_content(message):
             return False
         
         # プレフィックスチェック
@@ -95,6 +103,65 @@ class MessageReaderCog(commands.Cog):
             content = content[:self.max_length] + "以下省略"
         
         return content.strip()
+
+    @staticmethod
+    def _guess_attachment_kind(attachment) -> str:
+        """添付ファイルの種類を判定"""
+        content_type = (getattr(attachment, "content_type", "") or "").lower()
+        filename = (getattr(attachment, "filename", "") or "")
+        suffix = Path(filename).suffix.lower()
+
+        if content_type.startswith("image/") or suffix in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}:
+            return "画像"
+        if content_type.startswith("video/") or suffix in {".mp4", ".mov", ".wmv", ".avi", ".mkv"}:
+            return "動画"
+        if content_type.startswith("audio/") or suffix in {".mp3", ".wav", ".aac", ".flac", ".ogg"}:
+            return "音声"
+        if content_type in {"application/pdf"} or suffix == ".pdf":
+            return "PDF"
+        if suffix in {".txt", ".md", ".csv"}:
+            return "テキスト"
+        return "ファイル"
+
+    @staticmethod
+    def _summarize_attachments(attachments) -> str:
+        """添付ファイルの概要を生成"""
+        if not attachments:
+            return ""
+
+        return "ファイル"
+
+    @staticmethod
+    def _summarize_stickers(stickers) -> str:
+        """スタンプの概要を生成"""
+        if not stickers:
+            return ""
+        names = [getattr(sticker, "name", "スタンプ") for sticker in stickers[:3]]
+        summary = "、".join(names)
+        total = len(stickers)
+        if total > 3:
+            summary += f"、ほか{total - 3}件"
+        return f"スタンプ: {summary}"
+
+    def compose_message_text(self, message: discord.Message) -> str:
+        """本文と添付要素を組み合わせた読み上げ対象文字列を作成"""
+        segments = []
+
+        base_text = self.preprocess_message(message.content)
+        if base_text:
+            segments.append(base_text)
+
+        attachment_summary = self._summarize_attachments(getattr(message, "attachments", []))
+        if attachment_summary:
+            segments.append(attachment_summary)
+
+        sticker_summary = self._summarize_stickers(getattr(message, "stickers", []))
+        if sticker_summary:
+            segments.append(sticker_summary)
+
+        if not segments:
+            return ""
+        return "。".join(segments)
     
     async def _attempt_auto_reconnect(self, guild: discord.Guild) -> bool:
         """ボイスチャンネルへの自動再接続を試行"""
@@ -125,18 +192,36 @@ class MessageReaderCog(commands.Cog):
                 self.logger.warning(f"MessageReader: No voice channels with users found in {guild.name}")
                 return False
             
-            # 直接接続を試行（connect_voice_safelyを使わずシンプルに）
+            # connect_voice_safely が利用可能なら優先して使用
+            connect_callable = getattr(self.bot, "connect_voice_safely", None)
             try:
-                voice_client = await target_channel.connect(reconnect=True, timeout=15.0)
+                if connect_callable:
+                    voice_client = await connect_callable(target_channel)
+                else:
+                    voice_client = await target_channel.connect(reconnect=True, timeout=15.0)
+
                 await asyncio.sleep(1)  # 接続安定化待機
                 
                 if voice_client and voice_client.is_connected():
                     self.logger.info(f"MessageReader: Auto-reconnect successful to {target_channel.name}")
                     return True
-                else:
-                    self.logger.warning(f"MessageReader: Voice client not properly connected after join")
-                    return False
-                    
+                self.logger.warning("MessageReader: Voice client not properly connected after join")
+                return False
+            except IndexError as index_error:
+                self.logger.warning(f"MessageReader: Voice connect IndexError detected, retrying once: {index_error}")
+                await asyncio.sleep(1.0)
+                try:
+                    if connect_callable:
+                        voice_client = await connect_callable(target_channel)
+                    else:
+                        voice_client = await target_channel.connect(reconnect=True, timeout=15.0)
+                    await asyncio.sleep(1)
+                    if voice_client and voice_client.is_connected():
+                        self.logger.info(f"MessageReader: Auto-reconnect successful to {target_channel.name} after retry")
+                        return True
+                except Exception as retry_error:
+                    self.logger.error(f"MessageReader: Retry connect failed: {retry_error}")
+                return False
             except Exception as connect_error:
                 self.logger.error(f"MessageReader: Direct connect failed: {connect_error}")
                 return False
@@ -181,13 +266,13 @@ class MessageReaderCog(commands.Cog):
             self.logger.info(f"MessageReader: Bot connected to voice channel: {voice_client.channel.name}")
             
             # メッセージの前処理
-            processed_content = self.preprocess_message(message.content)
-            if not processed_content:
+            message_text = self.compose_message_text(message)
+            if not message_text:
                 return
-            
+
             # 辞書を適用
-            original_content = processed_content
-            processed_content = self.dictionary_manager.apply_dictionary(processed_content, message.guild.id)
+            original_content = message_text
+            processed_content = self.dictionary_manager.apply_dictionary(message_text, message.guild.id)
             
             # 辞書適用のデバッグログ
             if original_content != processed_content:

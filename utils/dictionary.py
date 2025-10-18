@@ -6,9 +6,8 @@
 import json
 import logging
 import re
-import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +15,14 @@ logger = logging.getLogger(__name__)
 class DictionaryManager:
     """辞書管理クラス（軽量化重視）"""
     
-    def __init__(self, config: dict):
-        self.config = config
-        self.dict_file = Path("data/dictionary.json")
+    def __init__(self, config: dict, dict_file: Optional[Union[str, Path]] = None):
+        self.config = config or {}
+        dictionary_config = self.config.get("dictionary", {})
+        self.max_words_per_guild = dictionary_config.get("max_words_per_guild", 1000)
+        self.max_word_length = dictionary_config.get("max_word_length", 50)
+        self.max_reading_length = dictionary_config.get("max_reading_length", 100)
+        
+        self.dict_file = self._resolve_dict_file(dict_file, dictionary_config)
         self.dict_file.parent.mkdir(parents=True, exist_ok=True)
         
         # ギルドごとの辞書
@@ -26,10 +30,27 @@ class DictionaryManager:
         
         # グローバル辞書
         self.global_dictionary: Dict[str, str] = {}
+
+        # 置換パターンキャッシュ
+        self._global_patterns: List[Tuple[re.Pattern, str]] = []
+        self._guild_patterns: Dict[int, List[Tuple[re.Pattern, str]]] = {}
         
         # 辞書の読み込み
         self._load_dictionaries()
         
+    def _resolve_dict_file(
+        self,
+        override: Optional[Union[str, Path]],
+        dictionary_config: Dict[str, object],
+    ) -> Path:
+        """辞書ファイルの保存先パスを決定"""
+        if override:
+            return Path(override)
+        configured_path = dictionary_config.get("file_path")
+        if configured_path:
+            return Path(configured_path)
+        return Path("data/dictionary.json")
+    
     def _load_dictionaries(self):
         """辞書ファイルを読み込み"""
         try:
@@ -52,6 +73,10 @@ class DictionaryManager:
         except Exception as e:
             logger.error(f"Failed to load dictionaries: {e}")
             self._create_default_dictionary()
+        finally:
+            self._refresh_global_patterns()
+            for guild_id in list(self.guild_dictionaries.keys()):
+                self._refresh_guild_patterns(guild_id)
     
     def _create_default_dictionary(self):
         """デフォルト辞書を作成"""
@@ -76,6 +101,7 @@ class DictionaryManager:
             "DM": "ダイレクトメッセージ"
         }
         self.guild_dictionaries = {}
+        self._refresh_global_patterns()
         self._save_dictionaries()
     
     def _save_dictionaries(self):
@@ -99,29 +125,85 @@ class DictionaryManager:
         except Exception as e:
             logger.error(f"Failed to save dictionaries: {e}")
     
+    def _build_patterns(self, words: Dict[str, str]) -> List[Tuple[re.Pattern, str]]:
+        if not words:
+            return []
+        return [
+            (re.compile(re.escape(word), re.IGNORECASE), reading)
+            for word, reading in words.items()
+        ]
+
+    def _refresh_global_patterns(self):
+        self._global_patterns = self._build_patterns(self.global_dictionary)
+
+    def _refresh_guild_patterns(self, guild_id: int):
+        words = self.guild_dictionaries.get(guild_id)
+        if words:
+            self._guild_patterns[guild_id] = self._build_patterns(words)
+        else:
+            self._guild_patterns.pop(guild_id, None)
+    
     def get_guild_dictionary(self, guild_id: int) -> Dict[str, str]:
         """ギルド辞書を取得"""
         if guild_id not in self.guild_dictionaries:
             self.guild_dictionaries[guild_id] = {}
+            self._guild_patterns[guild_id] = []
         return self.guild_dictionaries[guild_id]
+    
+    def _validate_word_input(self, word: str, reading: str) -> bool:
+        """単語追加の入力値を検証"""
+        if not word or not reading:
+            return False
+        
+        if len(word) > self.max_word_length:
+            logger.warning(f"Word '{word}' exceeds max length {self.max_word_length}")
+            return False
+        
+        if len(reading) > self.max_reading_length:
+            logger.warning(
+                f"Reading for '{word}' exceeds max length {self.max_reading_length}"
+            )
+            return False
+        return True
+    
+    @staticmethod
+    def _normalize_input(word: str, reading: str) -> Tuple[str, str]:
+        """入力値の共通整形"""
+        return word.strip(), reading.strip()
+    
+    def _is_capacity_available(self, dictionary: Dict[str, str], word: str) -> bool:
+        """辞書の上限数を確認"""
+        if word in dictionary:
+            return True
+        if len(dictionary) >= self.max_words_per_guild:
+            logger.warning(
+                f"Dictionary capacity reached ({self.max_words_per_guild} entries)"
+            )
+            return False
+        return True
     
     def add_word(self, guild_id: Optional[int], word: str, reading: str) -> bool:
         """単語を辞書に追加"""
         try:
-            word = word.strip()
-            reading = reading.strip()
+            word, reading = self._normalize_input(word, reading)
             
-            if not word or not reading:
+            if not self._validate_word_input(word, reading):
                 return False
             
             if guild_id is None:
                 # グローバル辞書に追加
+                if not self._is_capacity_available(self.global_dictionary, word):
+                    return False
                 self.global_dictionary[word] = reading
+                self._refresh_global_patterns()
                 logger.info(f"Added global word: {word} -> {reading}")
             else:
                 # ギルド辞書に追加
                 guild_dict = self.get_guild_dictionary(guild_id)
+                if not self._is_capacity_available(guild_dict, word):
+                    return False
                 guild_dict[word] = reading
+                self._refresh_guild_patterns(guild_id)
                 logger.info(f"Added guild word for {guild_id}: {word} -> {reading}")
             
             self._save_dictionaries()
@@ -134,12 +216,13 @@ class DictionaryManager:
     def remove_word(self, guild_id: Optional[int], word: str) -> bool:
         """単語を辞書から削除"""
         try:
-            word = word.strip()
+            word, _ = self._normalize_input(word, "")
             
             if guild_id is None:
                 # グローバル辞書から削除
                 if word in self.global_dictionary:
                     del self.global_dictionary[word]
+                    self._refresh_global_patterns()
                     logger.info(f"Removed global word: {word}")
                     self._save_dictionaries()
                     return True
@@ -148,6 +231,7 @@ class DictionaryManager:
                 guild_dict = self.get_guild_dictionary(guild_id)
                 if word in guild_dict:
                     del guild_dict[word]
+                    self._refresh_guild_patterns(guild_id)
                     logger.info(f"Removed guild word for {guild_id}: {word}")
                     self._save_dictionaries()
                     return True
@@ -199,15 +283,15 @@ class DictionaryManager:
             
             # ギルド辞書を優先して適用
             if guild_id is not None:
-                guild_dict = self.get_guild_dictionary(guild_id)
-                for word, reading in guild_dict.items():
-                    # 単語境界を考慮した置換（より正確な置換）
-                    pattern = re.compile(re.escape(word), re.IGNORECASE)
+                patterns = self._guild_patterns.get(guild_id)
+                if patterns is None:
+                    self._refresh_guild_patterns(guild_id)
+                    patterns = self._guild_patterns.get(guild_id, [])
+                for pattern, reading in patterns:
                     result = pattern.sub(reading, result)
             
             # グローバル辞書を適用
-            for word, reading in self.global_dictionary.items():
-                pattern = re.compile(re.escape(word), re.IGNORECASE)
+            for pattern, reading in self._global_patterns:
                 result = pattern.sub(reading, result)
             
             return result
