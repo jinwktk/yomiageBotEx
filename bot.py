@@ -103,6 +103,8 @@ def patch_opus_decode_manager():
         opus_logger = logging.getLogger("discord.opus")
         if not hasattr(self, "_last_opus_error"):
             self._last_opus_error = {}
+        if not hasattr(self, "_error_state"):
+            self._error_state = {}
         while not self._end_thread.is_set():
             try:
                 data = self.decode_queue.pop(0)
@@ -118,10 +120,22 @@ def patch_opus_decode_manager():
                 data.decoded_data = decoder.decode(data.decrypted_data)
             except discord_opus.OpusError as err:
                 ssrc = getattr(data, "ssrc", "unknown")
+                state = self._error_state.setdefault(ssrc, {"count": 0, "blocked_until": 0.0})
+                now = time.monotonic()
+                if now >= state["blocked_until"]:
+                    state["count"] = 0
                 self.decoder.pop(ssrc, None)
                 now = time.monotonic()
                 last_logged = self._last_opus_error.get(ssrc, 0)
-                if now - last_logged >= 5.0:
+                state["count"] += 1
+                if state["count"] > 5:
+                    state["blocked_until"] = now + 30.0
+                    state["count"] = 0
+                    opus_logger.warning(
+                        "Opus decode repeatedly failed (SSRC=%s). Muting errors for 30s.",
+                        ssrc,
+                    )
+                elif now - last_logged >= 5.0:
                     opus_logger.warning(
                         "Opus decode error (SSRC=%s): %s. Decoder reset.",
                         ssrc,
@@ -129,6 +143,10 @@ def patch_opus_decode_manager():
                     )
                     self._last_opus_error[ssrc] = now
                 continue
+            else:
+                ssrc = getattr(data, "ssrc", None)
+                if ssrc in getattr(self, "_error_state", {}):
+                    self._error_state[ssrc]["count"] = 0
 
             self.client.recv_decoded_audio(data)
 
