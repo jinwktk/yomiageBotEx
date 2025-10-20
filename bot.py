@@ -12,6 +12,9 @@ import signal
 import time
 import threading
 import atexit
+import gc
+from contextlib import suppress
+from typing import Optional
 
 import discord
 from discord import opus as discord_opus
@@ -198,7 +201,51 @@ class YomiageBot(discord.Bot):
         
         self.config = config
         self._cogs_loaded = False
+        self._refresh_task: Optional[asyncio.Task] = None
         self.setup_cogs()
+
+    async def _refresh_resources(self):
+        """長時間稼働によるリソース劣化をリフレッシュ"""
+        logger.info("Scheduled refresh: starting resource refresh cycle")
+
+        # TTS マネージャーのセッションを更新
+        async def refresh_tts_manager(cog_name: str):
+            cog = self.get_cog(cog_name)
+            if cog and hasattr(cog, "tts_manager"):
+                tts_manager = cog.tts_manager
+                try:
+                    await tts_manager.cleanup()
+                    await tts_manager.cache.cleanup_if_needed()
+                    await tts_manager.init_session()
+                    logger.info("Scheduled refresh: %s TTS session refreshed", cog_name)
+                except Exception as exc:
+                    logger.warning("Scheduled refresh: failed to refresh %s TTS manager: %s", cog_name, exc)
+
+        await refresh_tts_manager("TTSCog")
+        await refresh_tts_manager("MessageReaderCog")
+
+        # メモリクリーニング
+        collected = gc.collect()
+        logger.debug("Scheduled refresh: garbage collector reclaimed %s objects", collected)
+
+    async def _periodic_refresh(self):
+        """1時間ごとの自動リフレッシュタスク"""
+        await self.wait_until_ready()
+        logger.info("Scheduled refresh task started")
+        try:
+            while not self.is_closed():
+                await asyncio.sleep(3600)  # 1時間
+                try:
+                    await self._refresh_resources()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.error("Scheduled refresh: refresh step failed: %s", exc, exc_info=True)
+        except asyncio.CancelledError:
+            logger.info("Scheduled refresh task cancelled")
+            raise
+        finally:
+            logger.info("Scheduled refresh task terminated")
     
     async def connect_voice_safely(self, channel):
         """安全な音声接続（WebSocketエラー対応強化版）"""
@@ -391,6 +438,9 @@ class YomiageBot(discord.Bot):
                 name="自動参加・退出対応 | /join"
             )
         )
+
+        if self._refresh_task is None or self._refresh_task.done():
+            self._refresh_task = asyncio.create_task(self._periodic_refresh())
     
     async def on_error(self, event_method: str, *args, **kwargs):
         """エラーハンドリング"""
@@ -431,7 +481,13 @@ class YomiageBot(discord.Bot):
     async def close(self):
         """Bot終了時のクリーンアップ"""
         logger.info("Bot is shutting down, cleaning up resources...")
-        
+
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._refresh_task
+            self._refresh_task = None
+
         # 音声接続のクリーンアップ
         try:
             for vc in self.voice_clients:
