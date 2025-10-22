@@ -320,15 +320,22 @@ class YomiageBot(discord.Bot):
                     return False
         return vc.is_connected()
 
+    def _should_listen_to_channel_audio(self) -> bool:
+        """録音やリレー機能のためにチャンネル音声を受信する必要があるか"""
+        recording_enabled = self.config.get("recording", {}).get("enabled", False)
+        relay_enabled = self.config.get("audio_relay", {}).get("enabled", False)
+        return recording_enabled or relay_enabled
+
     async def _configure_voice_state(self, channel):
         """音声状態を設定"""
         try:
+            listen_required = self._should_listen_to_channel_audio()
             await channel.guild.change_voice_state(
                 channel=channel,
-                self_deaf=True,
+                self_deaf=not listen_required,
                 self_mute=False
             )
-            logger.info("Voice state (self_deaf=True) set successfully")
+            logger.info("Voice state (self_deaf=%s) set successfully", not listen_required)
         except Exception as e:
             logger.warning(f"Failed to set voice state: {e}")
 
