@@ -200,20 +200,23 @@ class RecordingCog(commands.Cog):
         user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None,
         normalize: discord.Option(bool, "音声正規化の有効/無効", default=True, required=False) = True
     ):
-        """直接音声キャプチャシステムによる録音をリプレイ（py-cord WaveSinkバグ完全回避）"""
+        """過去の音声をWAVファイルとして出力"""
         if not self.recording_enabled:
             await ctx.respond("⚠️ 録音機能が無効です。", ephemeral=True)
             return
         
-        # 処理中であることを即座に応答
-        await ctx.respond("🎵 直接キャプチャシステムで音声を取得中...", ephemeral=True)
-        
-        self.logger.info(f"Direct capture replay request: guild={ctx.guild.id}, duration={duration}s, user={user.id if user else 'all'}, normalize={normalize}")
-        
-        # 直接キャプチャシステムで処理を別タスクで実行
-        asyncio.create_task(self._process_direct_capture_replay_async(ctx, duration, user, normalize))
+        await ctx.respond("🎵 録音データを取得しています...", ephemeral=True)
+        self.logger.info(
+            "Replay request: guild=%s, duration=%ss, user=%s, normalize=%s",
+            ctx.guild.id,
+            duration,
+            user.id if user else "all",
+            normalize,
+        )
+
+        asyncio.create_task(self._process_replay_async(ctx, duration, user, normalize))
     
-    async def _process_replay_async(self, ctx, duration: float, user):
+    async def _process_replay_async(self, ctx, duration: float, user, normalize: bool):
         """replayコマンドの重い処理を非同期で実行"""
         try:
             import io
@@ -284,7 +287,7 @@ class RecordingCog(commands.Cog):
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"recording_user{user.id}_{duration}s_{timestamp}.wav"
                     
-                    processed_buffer = await self._process_audio_buffer(audio_buffer)
+                    processed_buffer = await self._process_audio_buffer(audio_buffer, normalize=normalize)
                     
                     await ctx.followup.send(
                         f"🎵 {user.mention} の録音です（過去{duration}秒分、ノーマライズ済み）",
@@ -324,7 +327,7 @@ class RecordingCog(commands.Cog):
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"recording_all_{user_count}users_{duration}s_{timestamp}.wav"
                     
-                    processed_buffer = await self._process_audio_buffer(combined_audio)
+                    processed_buffer = await self._process_audio_buffer(combined_audio, normalize=normalize)
                     
                     await ctx.followup.send(
                         f"🎵 全員の録音です（過去{duration}秒分、{user_count}人、ノーマライズ済み）",
@@ -363,7 +366,7 @@ class RecordingCog(commands.Cog):
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"recording_user{user.id}_{timestamp}.wav"
                 
-                processed_buffer = await self._process_audio_buffer(audio_buffer)
+                processed_buffer = await self._process_audio_buffer(audio_buffer, normalize=normalize)
                 
                 await ctx.followup.send(
                     f"🎵 {user.mention} の録音です（約{duration}秒分、ノーマライズ済み）",
@@ -489,7 +492,7 @@ class RecordingCog(commands.Cog):
             )
     
     
-    async def _process_audio_buffer(self, audio_buffer):
+    async def _process_audio_buffer(self, audio_buffer, normalize: bool = True):
         """音声バッファをノーマライズ処理（ファイルサイズ制限付き）"""
         try:
             import tempfile
@@ -521,8 +524,11 @@ class RecordingCog(commands.Cog):
                 
                 temp_input_path = temp_input.name
             
-            # ノーマライズ処理
-            normalized_path = await self.audio_processor.normalize_audio(temp_input_path)
+            processed_data: Optional[bytes] = None
+
+            normalized_path = None
+            if normalize:
+                normalized_path = await self.audio_processor.normalize_audio(temp_input_path)
             
             if normalized_path and normalized_path != temp_input_path:
                 # ノーマライズされたファイルを読み込み
