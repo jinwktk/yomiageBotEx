@@ -13,6 +13,8 @@ import time
 import threading
 import atexit
 import gc
+import io
+import wave
 from contextlib import suppress
 from typing import Optional
 
@@ -22,7 +24,7 @@ import yaml
 from dotenv import load_dotenv
 
 from utils.logger import setup_logging, start_log_cleanup_task
-
+    
 # プロセス重複防止機能（CLAUDE.mdルール遵守）
 LOCK_FILE = "bot.lock"
 
@@ -162,6 +164,48 @@ def patch_opus_decode_manager():
 
 
 patch_opus_decode_manager()
+
+
+def patch_wave_sink():
+    """WaveSinkがPCMデータを失う問題を回避"""
+    try:
+        from discord.sinks.wave import WaveSink
+    except Exception as exc:
+        print(f"[WARN] Failed to import WaveSink for patching: {exc}")
+        return
+
+    if getattr(WaveSink, "_yomiage_patch_applied", False):
+        return
+
+    original_format_audio = WaveSink.format_audio
+
+    def patched_format_audio(self, audio):
+        try:
+            audio.file.seek(0)
+            pcm_data = audio.file.read()
+            if not pcm_data:
+                return original_format_audio(self, audio)
+
+            wav_buffer = io.BytesIO()
+            with wave.open(wav_buffer, "wb") as wav_file:
+                wav_file.setnchannels(self.vc.decoder.CHANNELS)
+                wav_file.setsampwidth(self.vc.decoder.SAMPLE_SIZE // self.vc.decoder.CHANNELS)
+                wav_file.setframerate(self.vc.decoder.SAMPLING_RATE)
+                wav_file.writeframes(pcm_data)
+
+            audio.file = io.BytesIO(wav_buffer.getvalue())
+            audio.file.seek(0)
+            audio.on_format(self.encoding)
+        except Exception as exc:
+            print(f"[WARN] WaveSink patch failed, falling back to original: {exc}")
+            original_format_audio(self, audio)
+
+    WaveSink.format_audio = patched_format_audio
+    WaveSink._yomiage_patch_applied = True
+    print("[INFO] Applied WaveSink patch to preserve PCM data.")
+
+
+patch_wave_sink()
 
 load_dotenv()
 def load_config():
