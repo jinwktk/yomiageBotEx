@@ -24,6 +24,7 @@ import yaml
 from dotenv import load_dotenv
 
 from utils.logger import setup_logging, start_log_cleanup_task
+from utils.hot_reload import HotReloadManager
     
 # プロセス重複防止機能（CLAUDE.mdルール遵守）
 LOCK_FILE = "bot.lock"
@@ -246,6 +247,14 @@ class YomiageBot(discord.Bot):
         self.config = config
         self._cogs_loaded = False
         self._refresh_task: Optional[asyncio.Task] = None
+
+        dev_config = self.config.get("development", {})
+        hot_reload_config = dev_config.get("hot_reload", {}) if isinstance(dev_config, dict) else {}
+        self._hot_reload_enabled = bool(hot_reload_config.get("enabled", False))
+        self._hot_reload_interval = float(hot_reload_config.get("poll_interval", 1.0))
+        self.hot_reload_manager: Optional[HotReloadManager] = HotReloadManager() if self._hot_reload_enabled else None
+        self._hot_reload_task: Optional[asyncio.Task] = None
+
         self.setup_cogs()
 
     async def _refresh_resources(self):
@@ -290,6 +299,32 @@ class YomiageBot(discord.Bot):
             raise
         finally:
             logger.info("Scheduled refresh task terminated")
+
+    async def _hot_reload_loop(self):
+        await self.wait_until_ready()
+        logger.info("Hot reload watcher started")
+        try:
+            while not self.is_closed():
+                await asyncio.sleep(self._hot_reload_interval)
+                if not self.hot_reload_manager:
+                    continue
+                for extension in self.hot_reload_manager.collect_changed_extensions():
+                    try:
+                        logger.info("Hot reloading extension: %s", extension)
+                        self.reload_extension(extension)
+                    except Exception as exc:
+                        logger.error("Hot reload failed for %s: %s", extension, exc, exc_info=True)
+        except asyncio.CancelledError:
+            logger.info("Hot reload watcher cancelled")
+            raise
+
+    async def close(self):
+        if self._hot_reload_task:
+            self._hot_reload_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._hot_reload_task
+            self._hot_reload_task = None
+        await super().close()
     
     async def connect_voice_safely(self, channel):
         """安全な音声接続（WebSocketエラー対応強化版）"""
@@ -390,6 +425,14 @@ class YomiageBot(discord.Bot):
         except Exception:
             pass
         
+    def load_extension(self, name: str, *, package: Optional[str] = None):
+        super().load_extension(name, package=package)
+        self._register_hot_reload_path(name)
+
+    def reload_extension(self, name: str, *, package: Optional[str] = None):
+        super().reload_extension(name, package=package)
+        self._register_hot_reload_path(name)
+
     def setup_cogs(self):
         """起動時のCog読み込み（同期処理）"""
         logger.info("Loading cogs...")
@@ -426,11 +469,24 @@ class YomiageBot(discord.Bot):
                 logger.info(f"Loaded cog: {cog}")
             except Exception as e:
                 logger.error(f"Failed to load cog {cog}: {e}", exc_info=True)
-                
+
     async def load_cogs(self):
         """Cogを読み込む（非同期版）"""
         self.load_cogs_sync()
-    
+
+    def _register_hot_reload_path(self, extension: str) -> None:
+        if not self.hot_reload_manager:
+            return
+        module = sys.modules.get(extension)
+        module_file = getattr(module, "__file__", None) if module else None
+        if not module_file:
+            return
+        self.hot_reload_manager.register_extension(extension, Path(module_file))
+
+    async def setup_hook(self) -> None:
+        if self._hot_reload_enabled and not self._hot_reload_task:
+            self._hot_reload_task = asyncio.create_task(self._hot_reload_loop())
+
     async def on_ready(self):
         """Bot準備完了時のイベント"""
         logger.info(f"Bot is ready! Logged in as {self.user} (ID: {self.user.id})")

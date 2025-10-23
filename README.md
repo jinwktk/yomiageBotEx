@@ -171,6 +171,11 @@ uv run flake8 .
 uv run pytest
 ```
 
+### ホットリロード
+- `config.yaml` の `development.hot_reload.enabled` を `true` にすると、Cog ファイル（`cogs/*.py`）の更新をポーリングで検知して自動的に `reload_extension` が走ります。
+- 間隔は `development.hot_reload.poll_interval`（秒）で調整できます。デフォルトは 1.0 秒です。
+- 実行中に `/reload_cog` コマンドを使う従来の手動リロードとも併用できます。
+
 ## 🐛 トラブルシューティング
 
 ### スラッシュコマンドが表示されない

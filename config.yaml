@@ -66,3 +66,8 @@ dictionary:
   max_words_per_guild: 1000    # ギルドあたりの最大単語数
   max_word_length: 50          # 単語の最大文字数
   max_reading_length: 100      # 読み方の最大文字数
+
+development:
+  hot_reload:
+    enabled: false             # ホットリロード機能の有効/無効
+    poll_interval: 1.0         # 変更検知間隔（秒）

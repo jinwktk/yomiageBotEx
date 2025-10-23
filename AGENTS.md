@@ -9,6 +9,8 @@
 - `data/audio_buffers.json` に保存される WaveSink 出力がヘッダのみで PCM データを持たない場合がある点を確認。今後、WaveSink のフォーマット処理かノーマライズ手順の見直しが必要。
 - `utils/real_audio_recorder.py` を修正し、連続バッファの時間範囲算出を実データ長ベースに変更。チェックポイント再開時に `recording_status` を更新するようにして、1回目の `/replay` 以降でもチャンクが蓄積され続けるよう対応。
 - `tests/test_real_audio_recorder_buffers.py` を追加し、連続バッファの時間管理ロジックをユニットテストで回帰確認。
+- `utils/hot_reload.py` を新設し、Cogファイルの更新を検知できるホットリロードマネージャを実装。`bot.py` にウォッチタスクを組み込み、`config.yaml` の `development.hot_reload` で有効化できるようにした。
+- `tests/test_hot_reload_manager.py` を追加し、ファイル更新検知と欠損時の復帰をテスト。
 
 ## リポジトリ構成メモ（変更差分）
 - `cogs/recording.py`: リプレイ保存ディレクトリの解決方法を修正、例外処理のインデントを修正。
