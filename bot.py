@@ -367,6 +367,7 @@ class YomiageBot(discord.Bot):
             "cogs.dictionary",
             "cogs.user_settings",
             "cogs.relay",
+            "cogs.admin",
         ]
         
         for cog in cogs:
