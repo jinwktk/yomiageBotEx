@@ -7,6 +7,7 @@ import asyncio
 import logging
 import time
 import io
+import wave
 import json
 import base64
 from pathlib import Path
@@ -42,7 +43,11 @@ class RealTimeAudioRecorder:
         self.BUFFER_EXPIRATION = 300  # 5分
         self.CONTINUOUS_BUFFER_DURATION = 300  # 5分間の連続バッファ
         self.is_available = PYCORD_AVAILABLE
-        
+
+        self.DEFAULT_SAMPLE_RATE = 48000
+        self.DEFAULT_CHANNELS = 2
+        self.DEFAULT_SAMPLE_WIDTH = 2
+
         # 永続化設定
         self.buffer_file = Path("data/audio_buffers.json")
         self.buffer_file.parent.mkdir(parents=True, exist_ok=True)
@@ -52,6 +57,22 @@ class RealTimeAudioRecorder:
         
         # 起動時にバッファを復元（サイズチェック付き）
         self.load_buffers_safe()
+
+    def _ensure_wav_format(self, pcm_data: bytes) -> bytes:
+        """PCMデータを必ずWAVフォーマットに変換"""
+        if not pcm_data:
+            return pcm_data
+
+        if pcm_data[:4] == b"RIFF" and pcm_data[8:12] == b"WAVE":
+            return pcm_data
+
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(self.DEFAULT_CHANNELS)
+            wav_file.setsampwidth(self.DEFAULT_SAMPLE_WIDTH)
+            wav_file.setframerate(self.DEFAULT_SAMPLE_RATE)
+            wav_file.writeframes(pcm_data)
+        return buffer.getvalue()
     
     def register_relay_callback(self, guild_id: int, callback_func: Callable):
         """音声リレー用コールバック関数の登録"""
@@ -207,12 +228,13 @@ class RealTimeAudioRecorder:
             for user_id, audio in audio_data.items():
                 if audio.file:
                     audio.file.seek(0)
-                    wav_data = audio.file.read()
+                    raw_data = audio.file.read()
+                    wav_data = self._ensure_wav_format(raw_data)
                     
                     if len(wav_data) > 44:  # WAVヘッダー + 音声データが存在
                         # continuous_buffersに追加
                         self._add_to_continuous_buffer(guild_id, user_id, wav_data, current_time)
-                        
+                    
                         # 従来のバッファにも追加
                         buffer = io.BytesIO(wav_data)
                         if guild_id not in self.guild_user_buffers:
@@ -253,7 +275,8 @@ class RealTimeAudioRecorder:
                     audio.file.seek(0, 2)  # ファイル末尾に移動
                     file_size = audio.file.tell()
                     audio.file.seek(0)  # 先頭に戻す
-                    audio_data = audio.file.read()
+                    raw_audio_data = audio.file.read()
+                    audio_data = self._ensure_wav_format(raw_audio_data)
                     
                     logger.info(f"  - File position before: {file_pos_before}")
                     logger.info(f"  - File size: {file_size} bytes")
