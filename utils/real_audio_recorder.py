@@ -10,6 +10,7 @@ import io
 import wave
 import json
 import base64
+import struct
 from pathlib import Path
 from typing import Dict, Callable, Optional, Any
 
@@ -67,12 +68,34 @@ class RealTimeAudioRecorder:
             return pcm_data
 
         buffer = io.BytesIO()
-        with wave.open(buffer, "wb") as wav_file:
-            wav_file.setnchannels(self.DEFAULT_CHANNELS)
-            wav_file.setsampwidth(self.DEFAULT_SAMPLE_WIDTH)
-            wav_file.setframerate(self.DEFAULT_SAMPLE_RATE)
-            wav_file.writeframes(pcm_data)
+        header = self._pcm_to_wav_header(len(pcm_data))
+        buffer.write(header)
+        buffer.write(pcm_data)
         return buffer.getvalue()
+
+    def _pcm_to_wav_header(self, pcm_size: int) -> bytes:
+        """PCMデータ長からWAVヘッダーを生成"""
+        chunk_size = 36 + pcm_size
+        byte_rate = self.DEFAULT_SAMPLE_RATE * self.DEFAULT_CHANNELS * self.DEFAULT_SAMPLE_WIDTH
+        block_align = self.DEFAULT_CHANNELS * self.DEFAULT_SAMPLE_WIDTH
+        bits_per_sample = self.DEFAULT_SAMPLE_WIDTH * 8
+
+        return struct.pack(
+            "<4sI4s4sIHHIIHH4sI",
+            b"RIFF",
+            chunk_size,
+            b"WAVE",
+            b"fmt ",
+            16,  # PCM fmt chunk size
+            1,  # PCM format
+            self.DEFAULT_CHANNELS,
+            self.DEFAULT_SAMPLE_RATE,
+            byte_rate,
+            block_align,
+            bits_per_sample,
+            b"data",
+            pcm_size,
+        )
     
     def register_relay_callback(self, guild_id: int, callback_func: Callable):
         """音声リレー用コールバック関数の登録"""
