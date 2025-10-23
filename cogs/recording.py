@@ -7,10 +7,14 @@ import logging
 import random
 import time
 import io
+import re
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from collections import defaultdict
+from contextlib import suppress
+from pathlib import Path
 
 import discord
 from discord.ext import commands
@@ -31,6 +35,7 @@ class ReplayEntry:
     size: int
     created_at: datetime
     data: bytes
+    path: Path
 
 
 class RecordingCog(commands.Cog):
@@ -67,6 +72,8 @@ class RecordingCog(commands.Cog):
         self.replay_history: Dict[int, List["ReplayEntry"]] = defaultdict(list)
         self.replay_retention = timedelta(hours=24)
         self.replay_max_entries = 5
+        self.replay_dir_base = Path("recordings") / "replay"
+        self.replay_dir_base.mkdir(parents=True, exist_ok=True)
 
     def _cleanup_replay_history(self, guild_id: Optional[int] = None):
         """リプレイ履歴から期限切れ・過剰なエントリを削除"""
@@ -79,10 +86,16 @@ class RecordingCog(commands.Cog):
                 self.replay_history.pop(gid, None)
                 continue
 
+            original_entries = list(entries)
             entries[:] = [entry for entry in entries if now - entry.created_at <= self.replay_retention]
 
             if len(entries) > self.replay_max_entries:
                 entries[:] = entries[-self.replay_max_entries:]
+
+            removed = [entry for entry in original_entries if entry not in entries]
+            for entry in removed:
+                with suppress(FileNotFoundError, OSError):
+                    entry.path.unlink(missing_ok=True)
 
             if not entries:
                 self.replay_history.pop(gid, None)
@@ -97,6 +110,18 @@ class RecordingCog(commands.Cog):
         data: bytes,
     ):
         """生成したリプレイ音声を一時保持"""
+        guild_dir = self.replay_dir_base / str(guild_id)
+        guild_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_filename = re.sub(r"[^A-Za-z0-9_.-]", "_", filename)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = guild_dir / safe_filename
+        if path.exists():
+            path = guild_dir / f"{timestamp}_{safe_filename}"
+
+        with open(path, "wb") as fp:
+            fp.write(data)
+
         entry = ReplayEntry(
             guild_id=guild_id,
             user_id=user_id,
@@ -106,6 +131,7 @@ class RecordingCog(commands.Cog):
             size=len(data),
             created_at=datetime.now(),
             data=data,
+            path=path,
         )
         self.replay_history[guild_id].append(entry)
         self._cleanup_replay_history(guild_id)
@@ -527,9 +553,61 @@ class RecordingCog(commands.Cog):
             self.logger.info(f"Replaying {duration}s audio (user: {user}) for {ctx.user} in {ctx.guild.name}")
             
         except Exception as e:
-            self.logger.error(f"Failed to replay audio: {e}", exc_info=True)
-            await ctx.followup.send(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
-    
+        self.logger.error(f"Failed to replay audio: {e}", exc_info=True)
+        await ctx.followup.send(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
+
+    @discord.slash_command(name="replay_history", description="最近生成したリプレイ音声を表示します（管理者向け）")
+    async def replay_history_command(
+        self,
+        ctx: discord.ApplicationContext,
+        slot: discord.Option(int, "ダウンロードする番号（一覧表示のみの場合は未指定）", required=False, min_value=1, max_value=5) = None,
+    ):
+        await self.rate_limit_delay()
+        self._cleanup_replay_history(ctx.guild.id)
+        entries = self.replay_history.get(ctx.guild.id, [])
+
+        if not entries:
+            await ctx.respond("📂 リプレイ履歴は空です。最近 `/replay` を実行してください。", ephemeral=True)
+            return
+
+        entries_sorted = sorted(entries, key=lambda e: e.created_at, reverse=True)
+
+        if slot is not None:
+            if slot > len(entries_sorted):
+                await ctx.respond(f"⚠️ 指定した番号 {slot} は存在しません。現在 {len(entries_sorted)} 件です。", ephemeral=True)
+                return
+            entry = entries_sorted[slot - 1]
+            if not entry.path.exists():
+                await ctx.respond("⚠️ 音声ファイルが見つかりませんでした。", ephemeral=True)
+                return
+            with open(entry.path, "rb") as fp:
+                data = fp.read()
+            await ctx.respond(
+                content=f"🎵 {entry.filename} を送信します（{entry.duration:.1f}秒, {'ノーマライズ済み' if entry.normalize else '無加工'}）。",
+                file=discord.File(io.BytesIO(data), filename=entry.filename),
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title="🎞️ 最近生成したリプレイ",
+            color=discord.Color.teal(),
+        )
+        for index, entry in enumerate(entries_sorted[: self.replay_max_entries], start=1):
+            emoji = "✅" if entry.normalize else "⚠️"
+            embed.add_field(
+                name=f"{index}. {entry.filename}",
+                value=(
+                    f"時間: {entry.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"長さ: {entry.duration:.1f}秒 / サイズ: {entry.size/1024/1024:.2f}MB\n"
+                    f"対象: {f'<@{entry.user_id}>' if entry.user_id else '全員'} / {emoji} "
+                    f"{'ノーマライズ' if entry.normalize else '無加工'}"
+                ),
+                inline=False,
+            )
+        embed.set_footer(text="番号を指定すると個別にダウンロードできます。例: /replay_history slot:1")
+        await ctx.respond(embed=embed, ephemeral=True)
+
     @discord.slash_command(name="recordings", description="最近の録音リストを表示します")
     async def recordings_command(self, ctx: discord.ApplicationContext):
         """録音リストを表示するコマンド"""
