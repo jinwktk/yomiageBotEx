@@ -195,6 +195,11 @@ Could not find Opus library. Make sure it is installed.
 
 **注意**: Opusライブラリがなくても基本的な録音機能は動作しますが、音質が低下する可能性があります。
 
+### `/replay` コマンドで生成したファイルが見つからない
+- 2025-10-23 の修正で、保存先は必ずプロジェクトルート直下の `recordings/replay/<GuildID>/` に統一されました。
+- サービスを別ディレクトリから起動している場合でも、上記ディレクトリを確認してください。
+- パス解決が正しく機能しているかは `pytest tests/test_replay_file_storage.py` で回帰テストできます。
+
 ## 📄 ライセンス
 
 MIT License

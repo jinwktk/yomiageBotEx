@@ -72,7 +72,8 @@ class RecordingCog(commands.Cog):
         self.replay_history: Dict[int, List["ReplayEntry"]] = defaultdict(list)
         self.replay_retention = timedelta(hours=24)
         self.replay_max_entries = 5
-        self.replay_dir_base = Path("recordings") / "replay"
+        project_root = Path(__file__).resolve().parents[1]
+        self.replay_dir_base = project_root / "recordings" / "replay"
         self.replay_dir_base.mkdir(parents=True, exist_ok=True)
 
     def _cleanup_replay_history(self, guild_id: Optional[int] = None):
@@ -553,8 +554,10 @@ class RecordingCog(commands.Cog):
             self.logger.info(f"Replaying {duration}s audio (user: {user}) for {ctx.user} in {ctx.guild.name}")
             
         except Exception as e:
-        self.logger.error(f"Failed to replay audio: {e}", exc_info=True)
-        await ctx.followup.send(f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True)
+            self.logger.error(f"Failed to replay audio: {e}", exc_info=True)
+            await ctx.followup.send(
+                f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True
+            )
 
     @discord.slash_command(name="replay_history", description="最近生成したリプレイ音声を表示します（管理者向け）")
     async def replay_history_command(
