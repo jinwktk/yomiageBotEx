@@ -199,6 +199,7 @@ Could not find Opus library. Make sure it is installed.
 - 2025-10-23 の修正で、保存先は必ずプロジェクトルート直下の `recordings/replay/<GuildID>/` に統一されました。
 - サービスを別ディレクトリから起動している場合でも、上記ディレクトリを確認してください。
 - パス解決が正しく機能しているかは `pytest tests/test_replay_file_storage.py` で回帰テストできます。
+- 1回目の `/replay` 実行後に「データが見つからない」応答が続く場合、2025-10-23 修正以降では定期チェックポイントでチャンクが継続的に蓄積されるようになっています。`pytest tests/test_real_audio_recorder_buffers.py` で時間管理ロジックを確認できます。
 
 ## 📄 ライセンス
 

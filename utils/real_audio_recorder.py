@@ -233,6 +233,10 @@ class RealTimeAudioRecorder:
                         voice_client.stop_recording()
                         await asyncio.sleep(0.1)  # 少し待機
                         voice_client.start_recording(new_sink, new_callback)
+
+                        # コールバックでrecording_statusがFalseになるため、再開後に更新
+                        self.recording_status[guild_id] = True
+                        self.connections[guild_id] = voice_client
                         
                     except Exception as e:
                         logger.warning(f"RealTimeRecorder: Checkpoint creation failed: {e}")
@@ -449,22 +453,25 @@ class RealTimeAudioRecorder:
         if user_id not in self.continuous_buffers[guild_id]:
             self.continuous_buffers[guild_id][user_id] = []
         
-        # WAVファイルから実際の音声データ時間を推定（サンプリングレート44100Hz、16bit、ステレオと仮定）
-        wav_data_size = len(audio_data) - 44  # WAVヘッダーを除く
-        estimated_duration = wav_data_size / (44100 * 2 * 2)  # サンプリングレート * チャンネル数 * バイト/サンプル
-        
-        # 録音開始時刻を使用して正確な時間範囲を計算
-        if guild_id in self.recording_start_times:
-            recording_start_time = self.recording_start_times[guild_id]
-            # timestampは録音完了時刻、recording_start_timeは録音開始時刻
-            end_time = timestamp
-            start_time = recording_start_time
-        else:
-            # フォールバック：録音開始時刻が不明な場合は推定
-            end_time = timestamp
-            start_time = timestamp - estimated_duration
-            logger.warning(f"RealTimeRecorder: No recording start time for guild {guild_id}, using estimated duration")
-        
+        # WAVヘッダーから実際の長さを算出（失敗時は推定値を使用）
+        actual_duration = 0.0
+        try:
+            with wave.open(io.BytesIO(audio_data), "rb") as wav_file:
+                frames = wav_file.getnframes()
+                framerate = wav_file.getframerate() or self.DEFAULT_SAMPLE_RATE
+                if frames and framerate:
+                    actual_duration = frames / framerate
+        except Exception as e:
+            logger.debug(f"RealTimeRecorder: Failed to read WAV duration: {e}")
+
+        if actual_duration <= 0:
+            # WAV解析に失敗した場合は簡易推定（サンプリングレート48kHz/16bitステレオ前提）
+            wav_data_size = max(len(audio_data) - 44, 0)
+            actual_duration = wav_data_size / (self.DEFAULT_SAMPLE_RATE * self.DEFAULT_CHANNELS * self.DEFAULT_SAMPLE_WIDTH)
+
+        end_time = timestamp
+        start_time = max(0.0, end_time - actual_duration)
+
         self.continuous_buffers[guild_id][user_id].append((audio_data, start_time, end_time))
         
         # 5分より古いデータを削除
@@ -476,7 +483,7 @@ class RealTimeAudioRecorder:
         
         actual_duration = end_time - start_time
         logger.info(f"RealTimeRecorder: Added audio chunk for guild {guild_id}, user {user_id}")
-        logger.info(f"  - Duration: {actual_duration:.1f}s (estimated: {estimated_duration:.1f}s)")
+        logger.info(f"  - Duration: {actual_duration:.1f}s")
         logger.info(f"  - Time range: {current_time - end_time:.1f}s ago to {current_time - start_time:.1f}s ago")
         logger.info(f"  - Start: {start_time:.1f}, End: {end_time:.1f}, Now: {current_time:.1f}")
     
