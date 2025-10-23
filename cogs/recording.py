@@ -7,8 +7,10 @@ import logging
 import random
 import time
 import io
-from datetime import datetime
-from typing import Dict, Any
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass
+from collections import defaultdict
 
 import discord
 from discord.ext import commands
@@ -17,6 +19,18 @@ from utils.real_audio_recorder import RealTimeAudioRecorder
 from utils.audio_processor import AudioProcessor
 from utils.direct_audio_capture import direct_audio_capture
 from utils.recording_callback_manager import recording_callback_manager
+
+
+@dataclass
+class ReplayEntry:
+    guild_id: int
+    user_id: Optional[int]
+    duration: float
+    filename: str
+    normalize: bool
+    size: int
+    created_at: datetime
+    data: bytes
 
 
 class RecordingCog(commands.Cog):
@@ -48,6 +62,53 @@ class RecordingCog(commands.Cog):
         
         # クリーンアップタスクは後で開始
         self.cleanup_task_started = False
+
+        # リプレイ履歴（デバッグ用途）
+        self.replay_history: Dict[int, List["ReplayEntry"]] = defaultdict(list)
+        self.replay_retention = timedelta(hours=24)
+        self.replay_max_entries = 5
+
+    def _cleanup_replay_history(self, guild_id: Optional[int] = None):
+        """リプレイ履歴から期限切れ・過剰なエントリを削除"""
+        now = datetime.now()
+        target_guilds = [guild_id] if guild_id is not None else list(self.replay_history.keys())
+
+        for gid in target_guilds:
+            entries = self.replay_history.get(gid)
+            if not entries:
+                self.replay_history.pop(gid, None)
+                continue
+
+            entries[:] = [entry for entry in entries if now - entry.created_at <= self.replay_retention]
+
+            if len(entries) > self.replay_max_entries:
+                entries[:] = entries[-self.replay_max_entries:]
+
+            if not entries:
+                self.replay_history.pop(gid, None)
+
+    def _store_replay_result(
+        self,
+        guild_id: int,
+        user_id: Optional[int],
+        duration: float,
+        filename: str,
+        normalize: bool,
+        data: bytes,
+    ):
+        """生成したリプレイ音声を一時保持"""
+        entry = ReplayEntry(
+            guild_id=guild_id,
+            user_id=user_id,
+            duration=duration,
+            filename=filename,
+            normalize=normalize,
+            size=len(data),
+            created_at=datetime.now(),
+            data=data,
+        )
+        self.replay_history[guild_id].append(entry)
+        self._cleanup_replay_history(guild_id)
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
@@ -287,11 +348,19 @@ class RecordingCog(commands.Cog):
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"recording_user{user.id}_{duration}s_{timestamp}.wav"
                     
-                    processed_buffer = await self._process_audio_buffer(audio_buffer, normalize=normalize)
-                    
+                    processed_data = await self._process_audio_buffer(audio_buffer, normalize=normalize)
+                    self._store_replay_result(
+                        guild_id=ctx.guild.id,
+                        user_id=user.id,
+                        duration=duration,
+                        filename=filename,
+                        normalize=normalize,
+                        data=processed_data,
+                    )
+
                     await ctx.followup.send(
-                        f"🎵 {user.mention} の録音です（過去{duration}秒分、ノーマライズ済み）",
-                        file=discord.File(processed_buffer, filename=filename),
+                        f"🎵 {user.mention} の録音です（過去{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
+                        file=discord.File(io.BytesIO(processed_data), filename=filename),
                         ephemeral=True
                     )
                     return
@@ -327,11 +396,19 @@ class RecordingCog(commands.Cog):
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"recording_all_{user_count}users_{duration}s_{timestamp}.wav"
                     
-                    processed_buffer = await self._process_audio_buffer(combined_audio, normalize=normalize)
-                    
+                    processed_data = await self._process_audio_buffer(combined_audio, normalize=normalize)
+                    self._store_replay_result(
+                        guild_id=ctx.guild.id,
+                        user_id=None,
+                        duration=duration,
+                        filename=filename,
+                        normalize=normalize,
+                        data=processed_data,
+                    )
+
                     await ctx.followup.send(
-                        f"🎵 全員の録音です（過去{duration}秒分、{user_count}人、ノーマライズ済み）",
-                        file=discord.File(processed_buffer, filename=filename),
+                        f"🎵 全員の録音です（過去{duration}秒分、{user_count}人、{'ノーマライズ済み' if normalize else '無加工'}）",
+                        file=discord.File(io.BytesIO(processed_data), filename=filename),
                         ephemeral=True
                     )
                     return
@@ -366,11 +443,19 @@ class RecordingCog(commands.Cog):
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"recording_user{user.id}_{timestamp}.wav"
                 
-                processed_buffer = await self._process_audio_buffer(audio_buffer, normalize=normalize)
-                
+                processed_data = await self._process_audio_buffer(audio_buffer, normalize=normalize)
+                self._store_replay_result(
+                    guild_id=ctx.guild.id,
+                    user_id=user.id,
+                    duration=duration,
+                    filename=filename,
+                    normalize=normalize,
+                    data=processed_data,
+                )
+
                 await ctx.followup.send(
-                    f"🎵 {user.mention} の録音です（約{duration}秒分、ノーマライズ済み）",
-                    file=discord.File(processed_buffer, filename=filename),
+                    f"🎵 {user.mention} の録音です（約{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
+                    file=discord.File(io.BytesIO(processed_data), filename=filename),
                     ephemeral=True
                 )
                 
@@ -423,11 +508,19 @@ class RecordingCog(commands.Cog):
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"recording_all_{user_count}users_{timestamp}.wav"
                 
-                processed_buffer = await self._process_audio_buffer(merged_audio)
-                
+                processed_data = await self._process_audio_buffer(merged_audio, normalize=normalize)
+                self._store_replay_result(
+                    guild_id=ctx.guild.id,
+                    user_id=None,
+                    duration=duration,
+                    filename=filename,
+                    normalize=normalize,
+                    data=processed_data,
+                )
+
                 await ctx.followup.send(
-                    f"🎵 全員の録音です（{user_count}人分、{duration}秒分、ノーマライズ済み）",
-                    file=discord.File(processed_buffer, filename=filename),
+                    f"🎵 全員の録音です（{user_count}人分、{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
+                    file=discord.File(io.BytesIO(processed_data), filename=filename),
                     ephemeral=True
                 )
             
@@ -492,102 +585,102 @@ class RecordingCog(commands.Cog):
             )
     
     
-    async def _process_audio_buffer(self, audio_buffer, normalize: bool = True):
+    async def _process_audio_buffer(self, audio_buffer, normalize: bool = True) -> bytes:
         """音声バッファをノーマライズ処理（ファイルサイズ制限付き）"""
         try:
             import tempfile
             import os
-            
-            # ファイルサイズ制限（Discordの上限: 25MB、余裕を持って20MB）
+
             MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
-            
-            # 一時ファイルに保存
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_input:
+
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_input:
                 audio_buffer.seek(0)
                 original_data = audio_buffer.read()
-                
-                # ファイルサイズチェック
+
                 if len(original_data) > MAX_FILE_SIZE:
-                    self.logger.warning(f"Audio file too large: {len(original_data)/1024/1024:.1f}MB > 20MB limit")
-                    
-                    # 音声データを圧縮/切り取り
+                    self.logger.warning(
+                        "Audio file too large: %.1fMB > 20MB limit",
+                        len(original_data) / 1024 / 1024,
+                    )
                     compression_ratio = MAX_FILE_SIZE / len(original_data)
-                    compressed_size = int(len(original_data) * compression_ratio * 0.9)  # 90%まで圧縮
-                    
-                    # 単純に先頭部分を切り取り（より高度な処理も可能）
+                    compressed_size = int(len(original_data) * compression_ratio * 0.9)
                     compressed_data = original_data[:compressed_size]
-                    self.logger.info(f"Compressed audio from {len(original_data)/1024/1024:.1f}MB to {len(compressed_data)/1024/1024:.1f}MB")
-                    
+                    self.logger.info(
+                        "Compressed audio from %.1fMB to %.1fMB",
+                        len(original_data) / 1024 / 1024,
+                        len(compressed_data) / 1024 / 1024,
+                    )
                     temp_input.write(compressed_data)
                 else:
                     temp_input.write(original_data)
-                
+
                 temp_input_path = temp_input.name
-            
+
             processed_data: Optional[bytes] = None
 
             normalized_path = None
             if normalize:
                 normalized_path = await self.audio_processor.normalize_audio(temp_input_path)
-            
+
             if normalized_path and normalized_path != temp_input_path:
-                # ノーマライズされたファイルを読み込み
-                with open(normalized_path, 'rb') as f:
+                with open(normalized_path, "rb") as f:
                     processed_data = f.read()
-                
-                # 再度サイズチェック
+
                 if len(processed_data) > MAX_FILE_SIZE:
-                    self.logger.warning(f"Normalized file still too large: {len(processed_data)/1024/1024:.1f}MB")
-                    # 圧縮比率を再計算
+                    self.logger.warning(
+                        "Normalized file still too large: %.1fMB",
+                        len(processed_data) / 1024 / 1024,
+                    )
                     compression_ratio = MAX_FILE_SIZE / len(processed_data)
                     compressed_size = int(len(processed_data) * compression_ratio * 0.9)
                     processed_data = processed_data[:compressed_size]
-                    self.logger.info(f"Re-compressed to {len(processed_data)/1024/1024:.1f}MB")
-                
-                # 処理済みファイルをクリーンアップ
+                    self.logger.info(
+                        "Re-compressed to %.1fMB", len(processed_data) / 1024 / 1024
+                    )
+
                 self.audio_processor.cleanup_temp_files(normalized_path)
             else:
-                # ノーマライズに失敗した場合は元のデータを使用
-                with open(temp_input_path, 'rb') as f:
+                with open(temp_input_path, "rb") as f:
                     processed_data = f.read()
-                
-                # サイズチェック
+
                 if len(processed_data) > MAX_FILE_SIZE:
                     compression_ratio = MAX_FILE_SIZE / len(processed_data)
                     compressed_size = int(len(processed_data) * compression_ratio * 0.9)
                     processed_data = processed_data[:compressed_size]
-                    self.logger.info(f"Final compression to {len(processed_data)/1024/1024:.1f}MB")
-            
-            # 入力ファイルをクリーンアップ
+                    self.logger.info(
+                        "Final compression to %.1fMB", len(processed_data) / 1024 / 1024
+                    )
+
             self.audio_processor.cleanup_temp_files(temp_input_path)
-            
-            # 最終サイズ確認
+
             final_size_mb = len(processed_data) / 1024 / 1024
-            self.logger.info(f"Final audio file size: {final_size_mb:.1f}MB")
-            
+            self.logger.info("Final audio file size: %.1fMB", final_size_mb)
+
             if len(processed_data) > MAX_FILE_SIZE:
-                raise Exception(f"Audio file still too large after compression: {final_size_mb:.1f}MB")
-            
-            # 処理済みデータをBytesIOで返す
-            import io
-            return io.BytesIO(processed_data)
-            
+                raise Exception(
+                    f"Audio file still too large after compression: {final_size_mb:.1f}MB"
+                )
+
+            return processed_data
+
         except Exception as e:
             self.logger.error(f"Audio processing failed: {e}")
-            # エラー時は元のバッファを返す（但しサイズ制限適用）
             audio_buffer.seek(0)
             original_data = audio_buffer.read()
-            
+
             MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
             if len(original_data) > MAX_FILE_SIZE:
-                # 緊急時の圧縮
                 compression_ratio = MAX_FILE_SIZE / len(original_data)
                 compressed_size = int(len(original_data) * compression_ratio * 0.8)
                 compressed_data = original_data[:compressed_size]
-                self.logger.warning(f"Emergency compression: {len(original_data)/1024/1024:.1f}MB -> {len(compressed_data)/1024/1024:.1f}MB")
-                return io.BytesIO(compressed_data)
-            
-            return io.BytesIO(original_data)
+                self.logger.warning(
+                    "Emergency compression: %.1fMB -> %.1fMB",
+                    len(original_data) / 1024 / 1024,
+                    len(compressed_data) / 1024 / 1024,
+                )
+                return compressed_data
+
+            return original_data
     
     async def _process_new_replay_async(self, ctx, duration: float, user, normalize: bool):
         """新システム（ReplayBufferManager）でのreplayコマンド処理"""
@@ -636,9 +729,6 @@ class RecordingCog(commands.Cog):
                 description += "、正規化済み"
             description += "）"
             
-            # 音声データをBytesIOに変換
-            audio_buffer = io.BytesIO(result.audio_data)
-            
             # ファイルサイズチェック（Discord制限: 25MB）
             file_size_mb = result.file_size / (1024 * 1024)
             if file_size_mb > 24:  # 余裕を持って24MBで制限
@@ -649,8 +739,17 @@ class RecordingCog(commands.Cog):
                 )
                 return
             
+            self._store_replay_result(
+                guild_id=ctx.guild.id,
+                user_id=user.id if user else None,
+                duration=duration,
+                filename=filename,
+                normalize=normalize,
+                data=result.audio_data,
+            )
+
             # Discordファイルとして送信
-            file = discord.File(audio_buffer, filename=filename)
+            file = discord.File(io.BytesIO(result.audio_data), filename=filename)
             
             # レスポンス更新（ファイル添付）
             embed = discord.Embed(
@@ -1068,6 +1167,15 @@ class RecordingCog(commands.Cog):
                 )
                 return
             
+            self._store_replay_result(
+                guild_id=ctx.guild.id,
+                user_id=user.id if user else None,
+                duration=duration,
+                filename=filename,
+                normalize=normalize,
+                data=wav_data,
+            )
+
             # ファイルとして送信
             import io
             file_obj = discord.File(
@@ -1083,6 +1191,7 @@ class RecordingCog(commands.Cog):
                 f"🎵 **音声録音完了** (`{filename}`)\n"
                 f"📊 **音声情報**: {total_duration:.1f}秒間, {chunk_count}チャンク\n"
                 f"💾 **ファイルサイズ**: {len(wav_data)//1024}KB\n"
+                f"🔧 **処理**: {'ノーマライズ済み' if normalize else '無加工'}\n"
                 f"🎯 **対象**: {user.mention if user else '全員'}"
             )
             
