@@ -21,4 +21,5 @@
 - `pytest`
 
 ## 2025-10-24
-- 手動録音コマンド実装に向けた TDD ステップとして、`tests/test_manual_recording_manager.py` を追加。`ManualRecordingManager` のモジュールが未実装のため現時点ではテストが失敗する想定。
+- 手動録音コマンド実装に向けた TDD ステップとして `tests/test_manual_recording_manager.py` を追加し、先にフェイルさせて仕様を固めた。
+- `utils/manual_recording_manager.py` を新設し、`RecordingCog` に `/start_record`・`/stop_record` を追加。手動録音中はリアルタイム録音を一時停止し、停止時に混合WAVとユーザー別ZIPを生成するよう調整。`tests/test_recording_cog_manual_commands.py` でコマンド挙動を検証し、既存テストと合わせて `pytest` が全件成功することを確認。

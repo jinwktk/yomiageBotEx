@@ -9,6 +9,7 @@ import time
 import io
 import re
 import os
+import zipfile
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from utils.real_audio_recorder import RealTimeAudioRecorder
 from utils.audio_processor import AudioProcessor
 from utils.direct_audio_capture import direct_audio_capture
 from utils.recording_callback_manager import recording_callback_manager
+from utils.manual_recording_manager import ManualRecordingManager, ManualRecordingError
 
 
 @dataclass
@@ -75,6 +77,10 @@ class RecordingCog(commands.Cog):
         project_root = Path(__file__).resolve().parents[1]
         self.replay_dir_base = project_root / "recordings" / "replay"
         self.replay_dir_base.mkdir(parents=True, exist_ok=True)
+        self.manual_recording_dir_base = project_root / "recordings" / "manual"
+        self.manual_recording_dir_base.mkdir(parents=True, exist_ok=True)
+        self.manual_recording_manager = ManualRecordingManager(self.manual_recording_dir_base)
+        self.manual_recording_context: Dict[int, Dict[str, Any]] = {}
 
     def _cleanup_replay_history(self, guild_id: Optional[int] = None):
         """リプレイ履歴から期限切れ・過剰なエントリを削除"""
@@ -136,6 +142,25 @@ class RecordingCog(commands.Cog):
         )
         self.replay_history[guild_id].append(entry)
         self._cleanup_replay_history(guild_id)
+
+    def _store_manual_recording(
+        self,
+        guild_id: int,
+        filename: str,
+        data: bytes,
+    ) -> Path:
+        guild_dir = self.manual_recording_dir_base / str(guild_id)
+        guild_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_filename = re.sub(r"[^A-Za-z0-9_.-]", "_", filename)
+        path = guild_dir / safe_filename
+        if path.exists():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = guild_dir / f"{timestamp}_{safe_filename}"
+
+        with open(path, "wb") as fp:
+            fp.write(data)
+        return path
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
@@ -664,8 +689,179 @@ class RecordingCog(commands.Cog):
                 "❌ 録音リストの取得に失敗しました。",
                 ephemeral=True
             )
-    
-    
+
+
+    @discord.slash_command(name="start_record", description="手動で録音を開始します（WAV形式）")
+    async def start_record_command(
+        self,
+        ctx: discord.ApplicationContext,
+        normalize: discord.Option(bool, "音声を正規化するかどうか", default=True, required=False) = True,
+    ):
+        await self.rate_limit_delay()
+
+        if not self.recording_enabled:
+            await ctx.respond("⚠️ 録音機能が無効です。`config.yaml` を確認してください。", ephemeral=True)
+            return
+
+        if not ctx.author.voice or not ctx.author.voice.channel:
+            await ctx.respond("⚠️ ボイスチャンネルに参加してから実行してください。", ephemeral=True)
+            return
+
+        voice_client = ctx.guild.voice_client
+        if not voice_client or not voice_client.is_connected():
+            await ctx.respond("⚠️ ボットがボイスチャンネルに接続していません。先に `/join` を実行してください。", ephemeral=True)
+            return
+
+        if voice_client.channel != ctx.author.voice.channel:
+            await ctx.respond("⚠️ ボットと同じボイスチャンネルで実行する必要があります。", ephemeral=True)
+            return
+
+        if self.manual_recording_manager.has_session(ctx.guild.id):
+            await ctx.respond("⚠️ すでに手動録音を実行中です。`/stop_record` で停止してください。", ephemeral=True)
+            return
+
+        resume_real_time = False
+        try:
+            if self.real_time_recorder.recording_status.get(ctx.guild.id):
+                resume_real_time = True
+                await self.real_time_recorder.force_recording_checkpoint(ctx.guild.id)
+                await self.real_time_recorder.stop_recording(ctx.guild.id, voice_client)
+        except Exception as e:
+            self.logger.warning(f"Manual recording: failed to pause real-time recorder: {e}")
+
+        try:
+            await self.manual_recording_manager.start_session(
+                guild_id=ctx.guild.id,
+                voice_client=voice_client,
+                initiated_by=ctx.author.id,
+                metadata={
+                    "normalize": normalize,
+                    "channel_id": voice_client.channel.id if voice_client.channel else None,
+                },
+            )
+            self.manual_recording_context[ctx.guild.id] = {
+                "normalize": normalize,
+                "resume_real_time": resume_real_time,
+                "initiated_by": ctx.author.id,
+                "channel_id": voice_client.channel.id if voice_client.channel else None,
+            }
+            await ctx.respond(
+                "⏺️ 手動録音を開始しました。終了する際は `/stop_record` を実行してください。",
+                ephemeral=True,
+            )
+        except ManualRecordingError as e:
+            self.logger.error(f"Manual recording: failed to start: {e}")
+            if resume_real_time:
+                try:
+                    await self.real_time_recorder.start_recording(ctx.guild.id, voice_client)
+                except Exception as resume_error:
+                    self.logger.error(f"Manual recording: failed to resume real-time recorder: {resume_error}")
+            await ctx.respond("❌ 手動録音の開始に失敗しました。ログを確認してください。", ephemeral=True)
+
+    @discord.slash_command(name="stop_record", description="手動録音を停止してWAVファイルを出力します")
+    async def stop_record_command(self, ctx: discord.ApplicationContext):
+        if not self.recording_enabled:
+            await ctx.respond("⚠️ 録音機能が無効です。", ephemeral=True)
+            return
+
+        if not self.manual_recording_manager.has_session(ctx.guild.id):
+            await ctx.respond("⚠️ 手動録音は開始されていません。`/start_record` を先に実行してください。", ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
+
+        context_info = self.manual_recording_context.get(ctx.guild.id, {})
+        normalize = context_info.get("normalize", True)
+        resume_real_time = context_info.get("resume_real_time", False)
+
+        try:
+            result = await self.manual_recording_manager.stop_session(guild_id=ctx.guild.id)
+        except ManualRecordingError as e:
+            self.logger.error(f"Manual recording: failed to stop: {e}")
+            await ctx.followup.send("❌ 手動録音の停止に失敗しました。ログを確認してください。", ephemeral=True)
+            return
+        finally:
+            self.manual_recording_context.pop(ctx.guild.id, None)
+
+        if not result.audio_map:
+            await ctx.followup.send("⚠️ 録音データが取得できませんでした。音声が発生していたか確認してください。", ephemeral=True)
+            return
+
+        processed_per_user: Dict[int, bytes] = {}
+        try:
+            for user_id, wav_bytes in result.audio_map.items():
+                processed_per_user[user_id] = await self._process_audio_buffer(
+                    io.BytesIO(wav_bytes),
+                    normalize=normalize,
+                )
+        except Exception as e:
+            self.logger.error(f"Manual recording: audio processing failed: {e}", exc_info=True)
+            await ctx.followup.send("❌ 音声処理に失敗しました。", ephemeral=True)
+            processed_per_user = {
+                user_id: data for user_id, data in result.audio_map.items() if data
+            }
+
+        if not processed_per_user:
+            await ctx.followup.send("⚠️ 取得した音声が空でした。", ephemeral=True)
+            return
+
+        if len(processed_per_user) == 1:
+            combined_audio = next(iter(processed_per_user.values()))
+        else:
+            combined_audio = self._mix_multiple_audio_streams(processed_per_user)
+            if not combined_audio:
+                combined_audio = next(iter(processed_per_user.values()))
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        user_count = len(processed_per_user)
+        max_duration = max(result.durations.values(), default=0.0)
+        combined_filename = f"manual_record_{user_count}users_{max_duration:.0f}s_{timestamp}.wav"
+
+        combined_path = self._store_manual_recording(ctx.guild.id, combined_filename, combined_audio)
+
+        files = [
+            discord.File(io.BytesIO(combined_audio), filename=combined_filename),
+        ]
+
+        zip_bytes = None
+        if user_count > 1:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for user_id, audio_bytes in processed_per_user.items():
+                    member = ctx.guild.get_member(user_id)
+                    suffix = member.display_name if member else f"user{user_id}"
+                    zip_file.writestr(f"{suffix}_{timestamp}.wav", audio_bytes)
+            zip_bytes = zip_buffer.getvalue()
+            if len(zip_bytes) <= 24 * 1024 * 1024:
+                zip_filename = f"manual_record_users_{timestamp}.zip"
+                self._store_manual_recording(ctx.guild.id, zip_filename, zip_bytes)
+                files.append(discord.File(io.BytesIO(zip_bytes), filename=zip_filename))
+            else:
+                self.logger.warning("Manual recording ZIP exceeds 24MB, skipping attachment.")
+
+        user_mentions = []
+        for user_id in processed_per_user.keys():
+            member = ctx.guild.get_member(user_id)
+            user_mentions.append(member.mention if member else f"<@{user_id}>")
+
+        description_lines = [
+            f"🎙️ 手動録音が完了しました（{user_count}人, 約{max_duration:.1f}秒, {'ノーマライズ済み' if normalize else '無加工'}）。",
+            f"保存先: `{combined_path}`",
+        ]
+        if user_mentions:
+            description_lines.append(f"対象ユーザー: {', '.join(user_mentions)}")
+
+        await ctx.followup.send(
+            content="\n".join(description_lines),
+            files=files,
+            ephemeral=True,
+        )
+
+        if resume_real_time and ctx.guild.voice_client:
+            try:
+                await self.real_time_recorder.start_recording(ctx.guild.id, ctx.guild.voice_client)
+            except Exception as e:
+                self.logger.error(f"Manual recording: failed to resume real-time recorder after stop: {e}")
     async def _process_audio_buffer(self, audio_buffer, normalize: bool = True) -> bytes:
         """音声バッファをノーマライズ処理（ファイルサイズ制限付き）"""
         try:
