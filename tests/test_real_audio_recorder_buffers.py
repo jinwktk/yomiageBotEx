@@ -1,6 +1,7 @@
 import array
 import io
 import wave
+from types import SimpleNamespace
 
 import pytest
 
@@ -48,3 +49,31 @@ def test_get_audio_for_time_range_returns_latest_chunk(monkeypatch):
 
     assert 99 in result
     assert result[99] == wav_bytes
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_and_finished_callback_do_not_duplicate_audio(monkeypatch):
+    recorder = RealTimeAudioRecorder(None)
+    time_state = {"value": 3000.0}
+    monkeypatch.setattr(recorder_module.time, "time", lambda: time_state["value"])
+
+    wav_bytes = make_silent_wav(1.0)
+
+    class MockAudio:
+        def __init__(self, payload: bytes):
+            self.file = io.BytesIO(payload)
+
+    mock_audio = MockAudio(wav_bytes)
+
+    await recorder._process_checkpoint_data(1, {123: mock_audio})
+
+    time_state["value"] += 0.05
+    mock_audio.file.seek(0)
+
+    sink = SimpleNamespace(audio_data={123: mock_audio})
+    await recorder._finished_callback(sink, 1)
+
+    result = recorder.get_audio_for_time_range(guild_id=1, duration_seconds=5.0, user_id=123)
+
+    assert 123 in result
+    assert result[123] == wav_bytes

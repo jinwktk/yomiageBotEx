@@ -23,3 +23,6 @@
 ## 2025-10-24
 - 手動録音コマンド実装に向けた TDD ステップとして `tests/test_manual_recording_manager.py` を追加し、先にフェイルさせて仕様を固めた。
 - `utils/manual_recording_manager.py` を新設し、`RecordingCog` に `/start_record`・`/stop_record` を追加。手動録音中はリアルタイム録音を一時停止し、停止時に混合WAVとユーザー別ZIPを生成するよう調整。`tests/test_recording_cog_manual_commands.py` でコマンド挙動を検証し、既存テストと合わせて `pytest` が全件成功することを確認。
+- 音声が「あいうあいう」のように二重化する報告を受け、連続バッファへの重複追加が原因かを切り分けるため `tests/test_real_audio_recorder_buffers.py` にチェックポイントとコールバックの二重投入シナリオを再現する非同期テストを追加。
+- `_add_to_continuous_buffer` にハッシュベースの重複チャンク検出を実装し、チェックポイント直後の `WaveSink` コールバックで同一音声が再登録されないよう `utils/real_audio_recorder.py` を更新。重複キャッシュは最新チャンクのみ保持し、時間差0.2秒以内かつデータ一致時にスキップする方式とした。
+- `pytest` を再実行し、20件すべてのテストが成功することを確認。

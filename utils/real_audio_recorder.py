@@ -11,8 +11,9 @@ import wave
 import json
 import base64
 import struct
+import hashlib
 from pathlib import Path
-from typing import Dict, Callable, Optional, Any
+from typing import Dict, Callable, Optional, Any, Tuple
 
 try:
     import discord
@@ -36,6 +37,7 @@ class RealTimeAudioRecorder:
         self.guild_user_buffers: Dict[int, Dict[int, list]] = {}
         # Guild別の連続音声バッファ: {guild_id: {user_id: [(audio_chunk, start_time, end_time), ...]}}
         self.continuous_buffers: Dict[int, Dict[int, list]] = {}
+        self._last_chunk_meta: Dict[int, Dict[int, Tuple[bytes, float, float]]] = {}
         self.active_recordings: Dict[int, asyncio.Task] = {}
         # 録音状態管理（Guild別）
         self.recording_status: Dict[int, bool] = {}
@@ -472,14 +474,47 @@ class RealTimeAudioRecorder:
         end_time = timestamp
         start_time = max(0.0, end_time - actual_duration)
 
+        # 直近のチャンクとほぼ同一であればスキップ（チェックポイントとコールバックの重複対策）
+        chunk_signature = hashlib.blake2b(audio_data, digest_size=16).digest()
+        last_meta = self._last_chunk_meta.get(guild_id, {}).get(user_id)
+        if last_meta:
+            last_signature, last_start, last_end = last_meta
+            if (
+                chunk_signature == last_signature
+                and abs(last_start - start_time) <= 0.2
+                and abs(last_end - end_time) <= 0.2
+            ):
+                logger.debug(
+                    "RealTimeRecorder: Skipped duplicate chunk for guild %s user %s (start %.3f end %.3f)",
+                    guild_id,
+                    user_id,
+                    start_time,
+                    end_time,
+                )
+                return
+
         self.continuous_buffers[guild_id][user_id].append((audio_data, start_time, end_time))
         
         # 5分より古いデータを削除
         current_time = time.time()
-        self.continuous_buffers[guild_id][user_id] = [
-            (chunk, s_time, e_time) for chunk, s_time, e_time in self.continuous_buffers[guild_id][user_id]
+        filtered_chunks = [
+            (chunk, s_time, e_time)
+            for chunk, s_time, e_time in self.continuous_buffers[guild_id][user_id]
             if current_time - e_time <= self.CONTINUOUS_BUFFER_DURATION
         ]
+        self.continuous_buffers[guild_id][user_id] = filtered_chunks
+
+        if filtered_chunks:
+            last_chunk, last_start, last_end = filtered_chunks[-1]
+            last_signature = hashlib.blake2b(last_chunk, digest_size=16).digest()
+            if guild_id not in self._last_chunk_meta:
+                self._last_chunk_meta[guild_id] = {}
+            self._last_chunk_meta[guild_id][user_id] = (last_signature, last_start, last_end)
+        else:
+            if guild_id in self._last_chunk_meta and user_id in self._last_chunk_meta[guild_id]:
+                del self._last_chunk_meta[guild_id][user_id]
+                if not self._last_chunk_meta[guild_id]:
+                    del self._last_chunk_meta[guild_id]
         
         actual_duration = end_time - start_time
         logger.info(f"RealTimeRecorder: Added audio chunk for guild {guild_id}, user {user_id}")
