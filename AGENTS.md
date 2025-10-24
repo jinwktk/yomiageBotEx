@@ -19,3 +19,6 @@
 
 ## 実行コマンド
 - `pytest`
+
+## 2025-10-24
+- 手動録音コマンド実装に向けた TDD ステップとして、`tests/test_manual_recording_manager.py` を追加。`ManualRecordingManager` のモジュールが未実装のため現時点ではテストが失敗する想定。
