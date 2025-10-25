@@ -31,3 +31,4 @@
 - 読み上げ実行時にボットが離脱するとの報告を受け、`MessageReaderCog._attempt_auto_reconnect` が再接続先を見つけられない場合でも既存クライアントを強制切断してしまう挙動を再現するテスト `tests/test_message_reader_reconnect.py` を追加。
 - `_attempt_auto_reconnect` を修正し、有人ボイスチャンネルが見つかった場合のみ既存接続をクリーンアップするよう変更。すでにターゲットチャンネルへ接続済みの場合は再利用するフェイルセーフを追加。
 - `pytest` を実行し、21件すべてのテストが成功することを確認。
+- `py-cord` を PR #2651 (commit 59d4860) のブランチへ切り替え。`python3 -m pip install --break-system-packages git+https://github.com/Pycord-Development/pycord.git@refs/pull/2651/head` を実行し、`pyproject.toml` の依存も VCS 参照へ更新。
