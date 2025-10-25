@@ -167,17 +167,9 @@ class MessageReaderCog(commands.Cog):
         """ボイスチャンネルへの自動再接続を試行"""
         try:
             self.logger.info(f"MessageReader: Attempting auto-reconnect in {guild.name}")
-            
-            # 既存の接続をクリーンアップ
+
             existing_client = guild.voice_client
-            if existing_client:
-                self.logger.info(f"MessageReader: Cleaning up existing voice client (connected: {existing_client.is_connected()})")
-                try:
-                    await existing_client.disconnect(force=True)
-                    await asyncio.sleep(1)  # 切断完了を待つ
-                except Exception as e:
-                    self.logger.warning(f"MessageReader: Failed to disconnect existing client: {e}")
-            
+
             # ユーザーがいるボイスチャンネルを探す
             target_channel = None
             for channel in guild.voice_channels:
@@ -191,6 +183,23 @@ class MessageReaderCog(commands.Cog):
             if not target_channel:
                 self.logger.warning(f"MessageReader: No voice channels with users found in {guild.name}")
                 return False
+
+            # 既存の接続をクリーンアップ（対象チャンネルが判明してから実施）
+            if existing_client:
+                # すでにターゲットチャンネルに接続済みであれば再利用を試みる
+                try:
+                    if existing_client.channel == target_channel and existing_client.is_connected():
+                        self.logger.info("MessageReader: Existing voice client already connected to target channel")
+                        return True
+                except Exception as state_error:
+                    self.logger.debug(f"MessageReader: Failed to inspect existing client state: {state_error}")
+
+                self.logger.info(f"MessageReader: Cleaning up existing voice client (connected: {existing_client.is_connected()})")
+                try:
+                    await existing_client.disconnect(force=True)
+                    await asyncio.sleep(1)  # 切断完了を待つ
+                except Exception as e:
+                    self.logger.warning(f"MessageReader: Failed to disconnect existing client: {e}")
             
             # connect_voice_safely が利用可能なら優先して使用
             connect_callable = getattr(self.bot, "connect_voice_safely", None)
