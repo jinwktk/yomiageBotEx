@@ -32,3 +32,4 @@
 - `_attempt_auto_reconnect` を修正し、有人ボイスチャンネルが見つかった場合のみ既存接続をクリーンアップするよう変更。すでにターゲットチャンネルへ接続済みの場合は再利用するフェイルセーフを追加。
 - `pytest` を実行し、21件すべてのテストが成功することを確認。
 - `py-cord` を PR #2651 (commit 59d4860) のブランチへ切り替え。`python3 -m pip install --break-system-packages git+https://github.com/Pycord-Development/pycord.git@refs/pull/2651/head` を実行し、`pyproject.toml` の依存も VCS 参照へ更新。
+- Pycord PR環境への移行後に挨拶が鳴らなくなった件を調査し、`TTSCog.on_voice_state_update` に `@commands.Cog.listener()` を付与するテスト (`tests/test_tts_cog_listeners.py`) を追加。イベントリスナー登録を明示して挨拶再生が復活することを確認。

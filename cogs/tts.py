@@ -130,6 +130,7 @@ class TTSCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"Failed to generate and play greeting: {e}")
     
+    @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         """ボイスステート変更時の挨拶処理"""
         if member.bot:  # ボット自身の変更は無視

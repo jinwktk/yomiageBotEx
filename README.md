@@ -126,6 +126,7 @@ scripts\start.bat
 - Style-Bert-VITS2との連携
 - 音声キャッシュによる高速化
 - フォールバック機能（ビープ音での代替再生）
+- ユーザーの入退室時にカスタム挨拶を再生（py-cord PR2651 対応済み）
 
 ## 🎵 Style-Bert-VITS2 TTS APIサーバーのセットアップ（オプション）
 
