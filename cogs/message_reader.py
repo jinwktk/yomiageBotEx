@@ -188,9 +188,21 @@ class MessageReaderCog(commands.Cog):
             if existing_client:
                 # すでにターゲットチャンネルに接続済みであれば再利用を試みる
                 try:
-                    if existing_client.channel == target_channel and existing_client.is_connected():
-                        self.logger.info("MessageReader: Existing voice client already connected to target channel")
-                        return True
+                    if existing_client.channel == target_channel:
+                        if existing_client.is_connected():
+                            self.logger.info("MessageReader: Existing voice client already connected to target channel")
+                            return True
+
+                        # ハンドシェイク中の可能性があるため、短時間待機して状態を再確認
+                        for attempt in range(5):
+                            await asyncio.sleep(0.5)
+                            if existing_client.is_connected():
+                                self.logger.info(
+                                    "MessageReader: Existing voice client finished handshake for channel %s",
+                                    target_channel.name,
+                                )
+                                return True
+
                 except Exception as state_error:
                     self.logger.debug(f"MessageReader: Failed to inspect existing client state: {state_error}")
 

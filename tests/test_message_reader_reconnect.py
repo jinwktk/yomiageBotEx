@@ -30,6 +30,12 @@ class DummyVoiceClient:
         self.disconnect_called = True
 
 
+class DummyHandshakingVoiceClient(DummyVoiceClient):
+    def __init__(self, channel):
+        super().__init__(channel, connected=False)
+        self._connect_attempts = 0
+
+
 class DummyGuild:
     def __init__(self, *, voice_client, channels):
         self.name = "テストギルド"
@@ -63,4 +69,40 @@ async def test_attempt_auto_reconnect_keeps_existing_connection_when_no_targets(
     result = await cog._attempt_auto_reconnect(guild)
 
     assert result is False
+    assert voice_client.disconnect_called is False
+
+
+@pytest.mark.asyncio
+async def test_attempt_auto_reconnect_waits_for_handshake(tmp_path, monkeypatch):
+    config = {
+        "message_reading": {
+            "enabled": True,
+            "max_length": 100,
+            "ignore_prefixes": [],
+            "ignore_bots": False,
+        }
+    }
+
+    monkeypatch.setattr("utils.tts.Path", lambda p: tmp_path / p)
+
+    bot = SimpleNamespace(connect_voice_safely=None, config=config)
+    # ハンドシェイク中は非Botメンバーがいることが条件
+    channel = DummyChannel("vc", [DummyMember(bot=False)])
+    voice_client = DummyHandshakingVoiceClient(channel)
+    guild = DummyGuild(voice_client=voice_client, channels=[channel])
+
+    async def fake_sleep(duration):
+        voice_client._connect_attempts += 1
+        # 1回目の待機後に接続完了したとみなす
+        if voice_client._connect_attempts == 1:
+            voice_client._connected = True
+
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+
+    cog = MessageReaderCog(bot, config)
+
+    result = await cog._attempt_auto_reconnect(guild)
+
+    assert result is True
+    # ハンドシェイク完了まで待機してから接続を再利用するため、切断は呼ばれない
     assert voice_client.disconnect_called is False
