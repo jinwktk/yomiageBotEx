@@ -20,11 +20,21 @@ class DictionaryCog(commands.Cog):
         self.bot = bot
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.dictionary_manager = DictionaryManager(config)
+        self.dictionary_manager = self._resolve_dictionary_manager()
         
         # 初期化時の設定値をログ出力
         self.logger.info(f"Dictionary: Initialized dictionary manager")
     
+    def _resolve_dictionary_manager(self) -> DictionaryManager:
+        manager = getattr(self.bot, "dictionary_manager", None)
+        if manager is None:
+            manager = DictionaryManager(self.config)
+            try:
+                setattr(self.bot, "dictionary_manager", manager)
+            except AttributeError:
+                self.logger.warning("DictionaryCog: Could not attach dictionary manager to bot instance")
+        return manager
+
     async def rate_limit_delay(self):
         """レート制限対策の遅延"""
         delay = random.uniform(*self.config["bot"]["rate_limit_delay"])

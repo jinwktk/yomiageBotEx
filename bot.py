@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 from utils.logger import setup_logging, start_log_cleanup_task
 from utils.hot_reload import HotReloadManager
+from utils.dictionary import DictionaryManager
     
 # プロセス重複防止機能（CLAUDE.mdルール遵守）
 LOCK_FILE = "bot.lock"
@@ -245,6 +246,7 @@ class YomiageBot(discord.Bot):
         super().__init__(intents=intents)
         
         self.config = config
+        self.dictionary_manager = DictionaryManager(self.config)
         self._cogs_loaded = False
         self._refresh_task: Optional[asyncio.Task] = None
 

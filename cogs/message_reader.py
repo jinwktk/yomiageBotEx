@@ -23,7 +23,7 @@ class MessageReaderCog(commands.Cog):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.tts_manager = TTSManager(config)
-        self.dictionary_manager = DictionaryManager(config)
+        self.dictionary_manager = self._resolve_dictionary_manager()
         
         # 読み上げ設定
         self.reading_enabled = config.get("message_reading", {}).get("enabled", True)
@@ -46,6 +46,16 @@ class MessageReaderCog(commands.Cog):
             sample_words = list(self.dictionary_manager.global_dictionary.items())[:3]
             self.logger.info(f"MessageReader: Sample dictionary entries: {sample_words}")
     
+    def _resolve_dictionary_manager(self) -> DictionaryManager:
+        manager = getattr(self.bot, "dictionary_manager", None)
+        if manager is None:
+            manager = DictionaryManager(self.config)
+            try:
+                setattr(self.bot, "dictionary_manager", manager)
+            except AttributeError:
+                self.logger.warning("MessageReader: Could not attach dictionary manager to bot instance")
+        return manager
+
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
         asyncio.create_task(self.tts_manager.cleanup())
