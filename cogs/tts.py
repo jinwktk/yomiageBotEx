@@ -12,6 +12,7 @@ from discord.ext import commands
 from discord import FFmpegPCMAudio
 
 from utils.tts import TTSManager
+from utils.dictionary import DictionaryManager
 
 
 class TTSCog(commands.Cog):
@@ -22,6 +23,7 @@ class TTSCog(commands.Cog):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.tts_manager = TTSManager(config)
+        self.dictionary_manager = self._resolve_dictionary_manager()
         self.greeting_enabled = self.tts_manager.tts_config.get("greeting", {}).get("enabled", False)
         
         # 初期化時の設定値をログ出力
@@ -36,6 +38,16 @@ class TTSCog(commands.Cog):
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
         asyncio.create_task(self.tts_manager.cleanup())
+
+    def _resolve_dictionary_manager(self) -> DictionaryManager:
+        manager = getattr(self.bot, "dictionary_manager", None)
+        if manager is None:
+            manager = DictionaryManager(self.config)
+            try:
+                setattr(self.bot, "dictionary_manager", manager)
+            except AttributeError:
+                self.logger.warning("TTS: Could not attach dictionary manager to bot instance")
+        return manager
     
     async def play_audio_from_bytes(self, voice_client: discord.VoiceClient, audio_data: bytes):
         """バイト配列から音声を再生（高速化版）"""
@@ -94,6 +106,9 @@ class TTSCog(commands.Cog):
                 message = f"{member.display_name}{greeting_config.get('leave_message', 'さん、またね！')}"
             else:
                 return
+
+            guild_id = getattr(getattr(member, "guild", None), "id", None)
+            message = self.dictionary_manager.apply_dictionary(message, guild_id)
             
             # 統一されたTTS設定を使用
             user_tts_settings = {

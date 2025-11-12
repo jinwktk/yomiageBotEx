@@ -41,3 +41,4 @@
 - `README.md` に「辞書更新は即時適用」機能を追記し、ユーザー向けに改善点を明記。
 - `pytest` を実行し、24件すべて成功することを確認。
 - 変更ファイル: `tests/test_dictionary_realtime_updates.py` (新規), `cogs/message_reader.py`, `cogs/dictionary.py`, `bot.py`, `README.md`。
+- 挨拶メッセージに辞書が適用されない不具合を再現する `tests/test_tts_greeting_dictionary.py` を追加し、`cogs/tts.py` に辞書マネージャ共有ロジックと挨拶テキストへの適用処理を実装。`README.md` へ挨拶にも辞書が反映される旨を追記し、`pytest`（25件）で回帰確認。
