@@ -48,3 +48,4 @@
 - `utils/real_audio_recorder.py` に `_stop_recording_non_blocking` / `_start_recording_non_blocking` を実装し、録音開始・停止・定期チェックポイント・強制チェックポイントの各処理から呼び出すようにしてイベントループを塞がない構造へ変更。
 - `README.md` に録音チェックポイントの非ブロッキング化を追記し、改善点をユーザー向けに共有。
 - `pytest` を実行し、27件のテストが全て成功することを確認。
+- Opusデコードエラーのログが「SSRC=xxxx」だけで原因が追えなかった問題を改善し、`bot.py` のパッチでギルド/チャンネル/ユーザー名付きの文面に変更。READMEにも監視改善点を追記し、27件の `pytest` 成功を確認。

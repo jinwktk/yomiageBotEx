@@ -106,6 +106,39 @@ def patch_opus_decode_manager():
     if getattr(discord_opus.DecodeManager, "_yomiage_patch_applied", False):
         return
 
+    def _describe_ssrc_context(voice_client, ssrc):
+        if ssrc is None:
+            return "unknown source"
+        if voice_client is None:
+            return f"SSRC={ssrc}"
+        parts = [f"SSRC={ssrc}"]
+        try:
+            ws = getattr(voice_client, "ws", None)
+            ssrc_map = getattr(ws, "ssrc_map", {}) if ws else {}
+            info = ssrc_map.get(ssrc)
+            if info is None:
+                try:
+                    info = ssrc_map.get(int(ssrc))
+                except Exception:
+                    info = None
+            user_id = info.get("user_id") if isinstance(info, dict) else None
+            if user_id:
+                guild = getattr(voice_client, "guild", None)
+                member = guild.get_member(user_id) if guild else None
+                if member:
+                    parts.append(f"user={member.display_name}({user_id})")
+                else:
+                    parts.append(f"user_id={user_id}")
+            channel = getattr(getattr(voice_client, "channel", None), "name", None)
+            if channel:
+                parts.append(f"channel={channel}")
+            guild = getattr(voice_client, "guild", None)
+            if guild:
+                parts.append(f"guild={guild.name}({guild.id})")
+        except Exception:
+            parts.append("context=unavailable")
+        return " ".join(parts)
+
     def patched_run(self):
         opus_logger = logging.getLogger("discord.opus")
         if not hasattr(self, "_last_opus_error"):
@@ -127,6 +160,7 @@ def patch_opus_decode_manager():
                 data.decoded_data = decoder.decode(data.decrypted_data)
             except discord_opus.OpusError as err:
                 ssrc = getattr(data, "ssrc", "unknown")
+                ssrc_context = _describe_ssrc_context(getattr(self, "client", None), ssrc)
                 state = self._error_state.setdefault(ssrc, {"count": 0, "blocked_until": 0.0})
                 now = time.monotonic()
                 if now >= state["blocked_until"]:
@@ -139,13 +173,13 @@ def patch_opus_decode_manager():
                     state["blocked_until"] = now + 30.0
                     state["count"] = 0
                     opus_logger.warning(
-                        "Opus decode repeatedly failed (SSRC=%s). Muting errors for 30s.",
-                        ssrc,
+                        "Opus decode repeatedly failed (%s). Muting errors for 30s.",
+                        ssrc_context,
                     )
                 elif now - last_logged >= 5.0:
                     opus_logger.warning(
-                        "Opus decode error (SSRC=%s): %s. Decoder reset.",
-                        ssrc,
+                        "Opus decode error (%s): %s. Decoder reset.",
+                        ssrc_context,
                         err,
                     )
                     self._last_opus_error[ssrc] = now
