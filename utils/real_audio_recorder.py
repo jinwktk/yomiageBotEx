@@ -61,6 +61,20 @@ class RealTimeAudioRecorder:
         # 起動時にバッファを復元（サイズチェック付き）
         self.load_buffers_safe()
 
+    async def _stop_recording_non_blocking(self, voice_client):
+        """stop_recordingの同期ブロッキングをイベントループ外で実行"""
+        if not voice_client:
+            return
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, voice_client.stop_recording)
+
+    async def _start_recording_non_blocking(self, voice_client, sink, callback):
+        """start_recordingの同期ブロッキングをイベントループ外で実行"""
+        if not voice_client:
+            return
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, voice_client.start_recording, sink, callback)
+
     def _ensure_wav_format(self, pcm_data: bytes) -> bytes:
         """PCMデータを必ずWAVフォーマットに変換"""
         if not pcm_data:
@@ -125,7 +139,7 @@ class RealTimeAudioRecorder:
             # 既に録音中の場合は停止してから開始
             if hasattr(voice_client, 'recording') and voice_client.recording:
                 logger.info(f"RealTimeRecorder: Already recording for guild {guild_id}, stopping first")
-                voice_client.stop_recording()
+                await self._stop_recording_non_blocking(voice_client)
                 # 停止の完了を確実に待つ
                 for i in range(10):  # 最大1秒待機
                     await asyncio.sleep(0.1)
@@ -155,7 +169,7 @@ class RealTimeAudioRecorder:
             recording_start_time = time.time()
             self.recording_start_times[guild_id] = recording_start_time
             
-            voice_client.start_recording(sink, callback)
+            await self._start_recording_non_blocking(voice_client, sink, callback)
             # 録音状態を設定
             self.recording_status[guild_id] = True
             
@@ -189,7 +203,7 @@ class RealTimeAudioRecorder:
             if guild_id in self.connections:
                 vc = self.connections[guild_id]
                 if hasattr(vc, 'recording') and vc.recording:
-                    vc.stop_recording()
+                    await self._stop_recording_non_blocking(vc)
                 del self.connections[guild_id]
                 
                 # チェックポイントタスクをキャンセル
@@ -232,9 +246,9 @@ class RealTimeAudioRecorder:
                             await self._finished_callback(sink_obj, guild_id)
                         
                         # 録音を再開
-                        voice_client.stop_recording()
+                        await self._stop_recording_non_blocking(voice_client)
                         await asyncio.sleep(0.1)  # 少し待機
-                        voice_client.start_recording(new_sink, new_callback)
+                        await self._start_recording_non_blocking(voice_client, new_sink, new_callback)
 
                         # コールバックでrecording_statusがFalseになるため、再開後に更新
                         self.recording_status[guild_id] = True
@@ -699,7 +713,7 @@ class RealTimeAudioRecorder:
                     logger.info(f"RealTimeRecorder: Forcing checkpoint for guild {guild_id}")
                     
                     # 現在の録音を一時停止してバッファに保存
-                    vc.stop_recording()
+                    await self._stop_recording_non_blocking(vc)
                     await asyncio.sleep(0.5)  # コールバック完了を待つ
                     
                     # 録音を再開

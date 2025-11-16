@@ -42,3 +42,9 @@
 - `pytest` を実行し、24件すべて成功することを確認。
 - 変更ファイル: `tests/test_dictionary_realtime_updates.py` (新規), `cogs/message_reader.py`, `cogs/dictionary.py`, `bot.py`, `README.md`。
 - 挨拶メッセージに辞書が適用されない不具合を再現する `tests/test_tts_greeting_dictionary.py` を追加し、`cogs/tts.py` に辞書マネージャ共有ロジックと挨拶テキストへの適用処理を実装。`README.md` へ挨拶にも辞書が反映される旨を追記し、`pytest`（25件）で回帰確認。
+
+## 2025-11-16
+- ボイス心拍が10秒以上ブロックされる原因となっていた `voice_client.stop_recording()` の同期ブロックを再現するため、`tests/test_real_audio_recorder_async.py` を追加し、録音停止/開始処理がメインスレッド以外で実行されることをTDDで確認。
+- `utils/real_audio_recorder.py` に `_stop_recording_non_blocking` / `_start_recording_non_blocking` を実装し、録音開始・停止・定期チェックポイント・強制チェックポイントの各処理から呼び出すようにしてイベントループを塞がない構造へ変更。
+- `README.md` に録音チェックポイントの非ブロッキング化を追記し、改善点をユーザー向けに共有。
+- `pytest` を実行し、27件のテストが全て成功することを確認。
