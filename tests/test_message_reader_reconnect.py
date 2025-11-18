@@ -91,11 +91,14 @@ async def test_attempt_auto_reconnect_waits_for_handshake(tmp_path, monkeypatch)
     voice_client = DummyHandshakingVoiceClient(channel)
     guild = DummyGuild(voice_client=voice_client, channels=[channel])
 
+    real_sleep = asyncio.sleep
+
     async def fake_sleep(duration):
         voice_client._connect_attempts += 1
-        # 1回目の待機後に接続完了したとみなす
-        if voice_client._connect_attempts == 1:
+        # 8回目の待機で接続完了とみなす（旧仕様の待機時間を超える）
+        if voice_client._connect_attempts == 8:
             voice_client._connected = True
+        await real_sleep(0)
 
     monkeypatch.setattr("asyncio.sleep", fake_sleep)
 

@@ -30,6 +30,8 @@ class MessageReaderCog(commands.Cog):
         self.max_length = config.get("message_reading", {}).get("max_length", 100)
         self.ignore_prefixes = config.get("message_reading", {}).get("ignore_prefixes", ["!", "/", ".", "?"])
         self.ignore_bots = config.get("message_reading", {}).get("ignore_bots", True)
+        self.handshake_wait_timeout = float(config.get("message_reading", {}).get("handshake_wait_timeout", 8.0))
+        self.handshake_retry_interval = float(config.get("message_reading", {}).get("handshake_retry_interval", 0.5))
         
         # ギルドごとの読み上げ有効/無効状態
         self.guild_reading_enabled: Dict[int, bool] = {}
@@ -199,19 +201,8 @@ class MessageReaderCog(commands.Cog):
                 # すでにターゲットチャンネルに接続済みであれば再利用を試みる
                 try:
                     if existing_client.channel == target_channel:
-                        if existing_client.is_connected():
-                            self.logger.info("MessageReader: Existing voice client already connected to target channel")
+                        if await self._wait_for_existing_client(existing_client, target_channel):
                             return True
-
-                        # ハンドシェイク中の可能性があるため、短時間待機して状態を再確認
-                        for attempt in range(5):
-                            await asyncio.sleep(0.5)
-                            if existing_client.is_connected():
-                                self.logger.info(
-                                    "MessageReader: Existing voice client finished handshake for channel %s",
-                                    target_channel.name,
-                                )
-                                return True
 
                 except Exception as state_error:
                     self.logger.debug(f"MessageReader: Failed to inspect existing client state: {state_error}")
@@ -260,6 +251,50 @@ class MessageReaderCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"MessageReader: Auto-reconnect exception: {e}")
             return False
+
+    async def _wait_for_existing_client(self, existing_client, target_channel):
+        """既存のボイスクライアントが接続完了するのを待機"""
+        if existing_client.is_connected():
+            self.logger.info("MessageReader: Existing voice client already connected to target channel")
+            return True
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.handshake_wait_timeout
+        attempts = 0
+
+        while loop.time() < deadline:
+            attempts += 1
+            ws = getattr(existing_client, "ws", None)
+            ws_open = bool(getattr(ws, "open", False))
+            self.logger.debug(
+                "MessageReader: Waiting for existing voice client handshake (attempt %s, ws_open=%s)",
+                attempts,
+                ws_open,
+            )
+
+            if existing_client.is_connected():
+                self.logger.info(
+                    "MessageReader: Existing voice client finished handshake for channel %s after %s attempts",
+                    target_channel.name,
+                    attempts,
+                )
+                return True
+
+            await asyncio.sleep(self.handshake_retry_interval)
+
+            if existing_client.is_connected():
+                self.logger.info(
+                    "MessageReader: Existing voice client finished handshake for channel %s after %s attempts",
+                    target_channel.name,
+                    attempts,
+                )
+                return True
+
+        self.logger.warning(
+            "MessageReader: Existing voice client did not finish handshake within %.1fs, proceeding to reconnect",
+            self.handshake_wait_timeout,
+        )
+        return False
     
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

@@ -49,3 +49,4 @@
 - `README.md` に録音チェックポイントの非ブロッキング化を追記し、改善点をユーザー向けに共有。
 - `pytest` を実行し、27件のテストが全て成功することを確認。
 - Opusデコードエラーのログが「SSRC=xxxx」だけで原因が追えなかった問題を改善し、`bot.py` のパッチでギルド/チャンネル/ユーザー名付きの文面に変更。READMEにも監視改善点を追記し、27件の `pytest` 成功を確認。
+- `MessageReaderCog._attempt_auto_reconnect` のハンドシェイク待機を最大8秒まで延長する `_wait_for_existing_client` を実装し、既存VCが接続完了する前に切断されていたログ(Valworld)を再現テスト `tests/test_message_reader_reconnect.py` で検証。READMEに自動再接続の待機仕様を追記し、`pytest` 27件成功を確認。
