@@ -50,3 +50,9 @@
 - `pytest` を実行し、27件のテストが全て成功することを確認。
 - Opusデコードエラーのログが「SSRC=xxxx」だけで原因が追えなかった問題を改善し、`bot.py` のパッチでギルド/チャンネル/ユーザー名付きの文面に変更。READMEにも監視改善点を追記し、27件の `pytest` 成功を確認。
 - `MessageReaderCog._attempt_auto_reconnect` のハンドシェイク待機を最大8秒まで延長する `_wait_for_existing_client` を実装し、既存VCが接続完了する前に切断されていたログ(Valworld)を再現テスト `tests/test_message_reader_reconnect.py` で検証。READMEに自動再接続の待機仕様を追記し、`pytest` 27件成功を確認。
+
+## 2025-11-19
+- 読み上げだけを行う `/echo` コマンドを追加するため、`tests/test_message_reader_echo_command.py` を先に作成してTDDで仕様化。辞書適用・音声生成・エフェメラル応答の挙動を検証。
+- `cogs/message_reader.py` に `/echo` 実装を追加し、VC非接続時は自動再接続を試みつつ、成功時のみ TTS を生成して `play_audio_from_bytes` を呼び出す構造にした。読み上げ結果はVCのみで流し、テキストチャンネルには残らないようエフェメラルレスポンスに統一。
+- READMEのコマンド一覧に `/echo` を追記し、機能概要を共有。
+- `pytest` を実行し、28件のテスト（新規含む）が全て成功することを確認。

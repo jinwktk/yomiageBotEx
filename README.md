@@ -71,6 +71,7 @@ scripts\start.bat
 | `/start_record` | 手動録音を開始（WAV形式・リアルタイム録音を一時停止） |
 | `/stop_record` | 手動録音を停止し、混合WAVとユーザー別ZIPを返信 |
 | `/reading` | チャット読み上げのON/OFFを切り替え |
+| `/echo` | 指定したテキストをボイスチャットで読み上げ（メッセージは残さない） |
 | `/dict_add` | 辞書に単語を追加 |
 | `/dict_remove` | 辞書から単語を削除 |
 | `/my_settings` | 現在の個人設定を表示 |

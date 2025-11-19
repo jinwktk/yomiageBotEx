@@ -436,6 +436,67 @@ class MessageReaderCog(commands.Cog):
                 ephemeral=True
             )
 
+    @discord.slash_command(name="echo", description="指定テキストを音声で読み上げます（チャットには残しません）")
+    async def echo_command(
+        self,
+        ctx: discord.ApplicationContext,
+        text: discord.Option(str, "読み上げるテキスト", max_length=200),
+    ):
+        """任意テキストをボイスチャットで読み上げる"""
+        try:
+            if not ctx.guild:
+                await ctx.respond("❌ ギルド内で実行してください。", ephemeral=True)
+                return
+
+            guild = ctx.guild
+            voice_client = guild.voice_client
+            if not voice_client or not voice_client.is_connected():
+                reconnected = await self._attempt_auto_reconnect(guild)
+                voice_client = guild.voice_client
+                if not reconnected or not voice_client or not voice_client.is_connected():
+                    await ctx.respond("❌ ボイスチャンネルに接続してから実行してください。", ephemeral=True)
+                    return
+
+            message_text = text.strip()
+            if not message_text:
+                await ctx.respond("❌ 読み上げるテキストを入力してください。", ephemeral=True)
+                return
+
+            if len(message_text) > self.max_length:
+                message_text = message_text[: self.max_length] + "以下省略"
+
+            processed_text = self.dictionary_manager.apply_dictionary(message_text, guild.id)
+
+            tts_config = self.tts_manager.tts_config
+            tts_settings = {
+                "model_id": tts_config.get("model_id", 5),
+                "speaker_id": tts_config.get("speaker_id", 0),
+                "style": tts_config.get("style", "01"),
+            }
+
+            audio_data = await self.tts_manager.generate_speech(
+                text=processed_text,
+                model_id=tts_settings.get("model_id", 0),
+                speaker_id=tts_settings.get("speaker_id", 0),
+                style=tts_settings.get("style", "Neutral"),
+            )
+
+            if not audio_data:
+                await ctx.respond("❌ 音声生成に失敗しました。", ephemeral=True)
+                return
+
+            await self.play_audio_from_bytes(voice_client, audio_data)
+            await ctx.respond("🔊 読み上げました。", ephemeral=True)
+            self.logger.info(
+                "MessageReader: Echo command played %s characters for %s",
+                len(processed_text),
+                ctx.user.display_name if hasattr(ctx, "user") else "unknown",
+            )
+
+        except Exception as e:
+            self.logger.error(f"MessageReader: Echo command failed: {e}")
+            await ctx.respond("❌ 読み上げ中にエラーが発生しました。", ephemeral=True)
+
 
 def setup(bot):
     """Cogのセットアップ"""
