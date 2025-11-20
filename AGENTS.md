@@ -56,3 +56,4 @@
 - `cogs/message_reader.py` に `/echo` 実装を追加し、VC非接続時は自動再接続を試みつつ、成功時のみ TTS を生成して `play_audio_from_bytes` を呼び出す構造にした。読み上げ結果はVCのみで流し、テキストチャンネルには残らないようエフェメラルレスポンスに統一。
 - READMEのコマンド一覧に `/echo` を追記し、機能概要を共有。
 - `pytest` を実行し、28件のテスト（新規含む）が全て成功することを確認。
+- Discord側の切断でボットがVCを抜けたままになるケースを解消するため、`MessageReaderCog` に最終接続チャンネルを記録する仕組みと `sessions.json` フォールバックを追加。ユーザー検出に失敗しても最後のチャンネルへ再接続できるよう `_find_fallback_channel` を実装し、`tests/test_message_reader_reconnect.py` にフォールバック用テストを追加。READMEへ自動復帰仕様を追記し、`pytest` 29件成功を確認。

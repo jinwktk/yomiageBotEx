@@ -10,7 +10,7 @@ from cogs.message_reader import MessageReaderCog
 class DummyVoiceClient:
     def __init__(self):
         self._connected = True
-        self.channel = SimpleNamespace(name="dummy")
+        self.channel = SimpleNamespace(name="dummy", id=1)
 
     def is_connected(self):
         return self._connected
@@ -54,7 +54,13 @@ async def test_echo_command_reads_without_post(tmp_path, monkeypatch):
     cog = MessageReaderCog(bot, config)
 
     voice_client = DummyVoiceClient()
-    guild = SimpleNamespace(id=123, voice_client=voice_client)
+    guild = SimpleNamespace(
+        id=123,
+        name="Test",
+        voice_client=voice_client,
+        voice_channels=[],
+        get_channel=lambda cid: None,
+    )
     ctx = DummyContext(guild)
 
     tts_mock = AsyncMock(return_value=b"audio")

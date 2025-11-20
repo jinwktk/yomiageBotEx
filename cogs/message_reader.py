@@ -5,6 +5,7 @@
 import asyncio
 import logging
 import re
+import json
 from pathlib import Path
 from typing import Dict, Any
 
@@ -24,6 +25,8 @@ class MessageReaderCog(commands.Cog):
         self.logger = logging.getLogger(__name__)
         self.tts_manager = TTSManager(config)
         self.dictionary_manager = self._resolve_dictionary_manager()
+        self.last_voice_channel: Dict[int, int] = {}
+        self.sessions_file = Path("sessions.json")
         
         # 読み上げ設定
         self.reading_enabled = config.get("message_reading", {}).get("enabled", True)
@@ -193,8 +196,17 @@ class MessageReaderCog(commands.Cog):
                     break
             
             if not target_channel:
-                self.logger.warning(f"MessageReader: No voice channels with users found in {guild.name}")
-                return False
+                fallback_channel = self._find_fallback_channel(guild)
+                if fallback_channel:
+                    target_channel = fallback_channel
+                    self.logger.info(
+                        "MessageReader: Using fallback channel %s in %s for auto-reconnect",
+                        target_channel.name,
+                        guild.name,
+                    )
+                else:
+                    self.logger.warning(f"MessageReader: No voice channels with users found in {guild.name}")
+                    return False
 
             # 既存の接続をクリーンアップ（対象チャンネルが判明してから実施）
             if existing_client:
@@ -226,6 +238,8 @@ class MessageReaderCog(commands.Cog):
                 
                 if voice_client and voice_client.is_connected():
                     self.logger.info(f"MessageReader: Auto-reconnect successful to {target_channel.name}")
+                    if target_channel:
+                        self.last_voice_channel[guild.id] = target_channel.id
                     return True
                 self.logger.warning("MessageReader: Voice client not properly connected after join")
                 return False
@@ -240,6 +254,8 @@ class MessageReaderCog(commands.Cog):
                     await asyncio.sleep(1)
                     if voice_client and voice_client.is_connected():
                         self.logger.info(f"MessageReader: Auto-reconnect successful to {target_channel.name} after retry")
+                        if target_channel:
+                            self.last_voice_channel[guild.id] = target_channel.id
                         return True
                 except Exception as retry_error:
                     self.logger.error(f"MessageReader: Retry connect failed: {retry_error}")
@@ -295,6 +311,26 @@ class MessageReaderCog(commands.Cog):
             self.handshake_wait_timeout,
         )
         return False
+
+    def _find_fallback_channel(self, guild: discord.Guild):
+        """最後に接続したチャンネルや保存済みセッションから候補を取得"""
+        channel_id = self.last_voice_channel.get(guild.id)
+        if channel_id:
+            channel = guild.get_channel(channel_id)
+            if channel:
+                return channel
+        if self.sessions_file.exists():
+            try:
+                with open(self.sessions_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                saved_id = data.get(str(guild.id)) or data.get(guild.id)
+                if saved_id:
+                    channel = guild.get_channel(saved_id)
+                    if channel:
+                        return channel
+            except Exception as e:
+                self.logger.debug(f"MessageReader: Failed to load fallback channel info: {e}")
+        return None
     
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -330,6 +366,8 @@ class MessageReaderCog(commands.Cog):
                 self.logger.info(f"MessageReader: Voice connection confirmed - channel: {voice_client.channel.name if voice_client.channel else 'Unknown'}")
             
             self.logger.info(f"MessageReader: Bot connected to voice channel: {voice_client.channel.name}")
+            if voice_client.channel:
+                self.last_voice_channel[message.guild.id] = voice_client.channel.id
             
             # メッセージの前処理
             message_text = self.compose_message_text(message)
@@ -456,6 +494,8 @@ class MessageReaderCog(commands.Cog):
                 if not reconnected or not voice_client or not voice_client.is_connected():
                     await ctx.respond("❌ ボイスチャンネルに接続してから実行してください。", ephemeral=True)
                     return
+            if voice_client.channel:
+                self.last_voice_channel[guild.id] = voice_client.channel.id
 
             message_text = text.strip()
             if not message_text:

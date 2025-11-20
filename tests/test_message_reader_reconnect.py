@@ -12,9 +12,15 @@ class DummyMember:
 
 
 class DummyChannel:
-    def __init__(self, name: str, members):
+    _next_id = 1
+
+    def __init__(self, name: str, members, channel_id=None):
         self.name = name
         self.members = members
+        if channel_id is None:
+            channel_id = DummyChannel._next_id
+            DummyChannel._next_id += 1
+        self.id = channel_id
 
 
 class DummyVoiceClient:
@@ -37,10 +43,15 @@ class DummyHandshakingVoiceClient(DummyVoiceClient):
 
 
 class DummyGuild:
-    def __init__(self, *, voice_client, channels):
+    def __init__(self, *, voice_client, channels, guild_id=1):
         self.name = "テストギルド"
         self.voice_client = voice_client
         self.voice_channels = channels
+        self.id = guild_id
+        self._channels_by_id = {getattr(ch, "id", idx): ch for idx, ch in enumerate(channels, start=1)}
+
+    def get_channel(self, channel_id):
+        return self._channels_by_id.get(channel_id)
 
 
 @pytest.mark.asyncio
@@ -109,3 +120,34 @@ async def test_attempt_auto_reconnect_waits_for_handshake(tmp_path, monkeypatch)
     assert result is True
     # ハンドシェイク完了まで待機してから接続を再利用するため、切断は呼ばれない
     assert voice_client.disconnect_called is False
+
+
+@pytest.mark.asyncio
+async def test_attempt_auto_reconnect_uses_last_known_channel(tmp_path, monkeypatch):
+    config = {
+        "message_reading": {
+            "enabled": True,
+            "max_length": 100,
+        }
+    }
+
+    monkeypatch.setattr("utils.tts.Path", lambda p: tmp_path / p)
+
+    fallback_channel = DummyChannel("saved", [], channel_id=42)
+    bot = SimpleNamespace(connect_voice_safely=None, config=config)
+    guild = DummyGuild(voice_client=None, channels=[fallback_channel], guild_id=999)
+    cog = MessageReaderCog(bot, config)
+    cog.last_voice_channel[guild.id] = fallback_channel.id
+
+    async def fake_connect(channel):
+        vc = DummyVoiceClient(channel, connected=True)
+        guild.voice_client = vc
+        return vc
+
+    bot.connect_voice_safely = fake_connect
+
+    result = await cog._attempt_auto_reconnect(guild)
+
+    assert result is True
+    assert guild.voice_client is not None
+    assert guild.voice_client.channel == fallback_channel
