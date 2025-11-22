@@ -20,6 +20,10 @@ from typing import Optional
 
 import discord
 from discord import opus as discord_opus
+try:
+    from nacl.exceptions import CryptoError
+except Exception:  # pragma: no cover
+    CryptoError = None
 import yaml
 from dotenv import load_dotenv
 
@@ -200,6 +204,41 @@ def patch_opus_decode_manager():
 
 
 patch_opus_decode_manager()
+
+
+def patch_voice_decrypt_errors():
+    """Voice受信の復号エラーを抑制してフレームをスキップ"""
+    if not CryptoError:
+        logging.getLogger(__name__).warning("PyNaCl CryptoError unavailable; decrypt patch skipped")
+        return
+
+    VoiceClient = discord.voice_client.VoiceClient
+    if getattr(VoiceClient, "_yomiage_decrypt_patch", False):
+        return
+
+    original_unpack_audio = VoiceClient.unpack_audio
+    vc_logger = logging.getLogger("discord.voice_client")
+
+    def patched_unpack_audio(self, data):
+        try:
+            return original_unpack_audio(self, data)
+        except CryptoError as err:
+            guild = getattr(getattr(self, "guild", None), "name", "unknown")
+            channel = getattr(getattr(self, "channel", None), "name", "unknown")
+            vc_logger.warning(
+                "Voice decrypt error skipped (guild=%s channel=%s): %s",
+                guild,
+                channel,
+                err,
+            )
+            return None
+
+    VoiceClient.unpack_audio = patched_unpack_audio
+    VoiceClient._yomiage_decrypt_patch = True
+    vc_logger.info("Applied decrypt error patch to skip corrupted frames")
+
+
+patch_voice_decrypt_errors()
 
 
 def patch_wave_sink():
