@@ -75,4 +75,4 @@ async def test_echo_command_reads_without_post(tmp_path, monkeypatch):
     play_mock.assert_awaited_once()
     assert play_mock.await_args.args[0] is voice_client
     assert ctx.responses[-1]["ephemeral"] is True
-    assert "🔊" in ctx.responses[-1]["content"]
+    assert ctx.responses[-1]["content"] == "音声を流しました"

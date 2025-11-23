@@ -507,7 +507,7 @@ class MessageReaderCog(commands.Cog):
                 return
 
             await self.play_audio_from_bytes(voice_client, audio_data)
-            await ctx.respond("🔊 読み上げました。", ephemeral=True)
+            await ctx.respond("音声を流しました", ephemeral=True)
             self.logger.info(
                 "MessageReader: Echo command played %s characters for %s",
                 len(processed_text),

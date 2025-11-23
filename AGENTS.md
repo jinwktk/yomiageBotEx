@@ -60,3 +60,9 @@
 - VC受信スレッドが `nacl.exceptions.CryptoError` でクラッシュしていたため、`bot.py` で `discord.voice_client.VoiceClient.unpack_audio` をラップし、復号失敗フレームをスキップしてギルド/チャンネル名付きで警告ログを出すようパッチ。READMEに暗号化エラー耐性を追記し、`pytest` 29件成功を確認。
 - ログファイル圧縮時にメインスレッドがブロックされて心拍が止まる問題に対応するため、`utils/logger.py` の `CompressedRotatingFileHandler` を非同期圧縮化し、gzip処理をデーモンスレッドで実行するよう変更。READMEへイベントループ非ブロッキング化を追記し、`pytest` 29件成功を確認。
 - 読み上げリクエストがVC未接続時にスキップされるのを防ぐため、`MessageReaderCog` にギルド単位のメッセージキューと非同期ワーカーを実装。再接続後に順次処理する `_enqueue_message` / `_process_queue` を追加し、`tests/test_message_reader_queue.py` でTDD確認。READMEへ「読み上げはキュー処理で順番通り再生される」旨を追記し、`pytest` 30件成功を確認。
+
+## 2025-11-23
+- `/echo`コマンドのエフェメラル返信文言を「音声を流しました」に統一するため、`tests/test_message_reader_echo_command.py` の期待を先に更新し、対象テストが失敗することを確認。
+- `cogs/message_reader.py` の `/echo` 実装で `ctx.respond` の内容を「音声を流しました」に変更し、実装を仕様に合わせた。
+- READMEのコマンド一覧で `/echo` の説明に「返信は『音声を流しました』固定」と追記してユーザー向けに仕様を明記。
+- `python3 -m pytest` を実行し、30件すべてのテストが成功することを確認。
