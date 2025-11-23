@@ -27,6 +27,8 @@ class MessageReaderCog(commands.Cog):
         self.dictionary_manager = self._resolve_dictionary_manager()
         self.last_voice_channel: Dict[int, int] = {}
         self.sessions_file = Path("sessions.json")
+        self.guild_queues: Dict[int, asyncio.Queue] = {}
+        self.queue_workers: Dict[int, asyncio.Task] = {}
         
         # 読み上げ設定
         self.reading_enabled = config.get("message_reading", {}).get("enabled", True)
@@ -368,7 +370,7 @@ class MessageReaderCog(commands.Cog):
             self.logger.info(f"MessageReader: Bot connected to voice channel: {voice_client.channel.name}")
             if voice_client.channel:
                 self.last_voice_channel[message.guild.id] = voice_client.channel.id
-            
+
             # メッセージの前処理
             message_text = self.compose_message_text(message)
             if not message_text:
@@ -384,30 +386,9 @@ class MessageReaderCog(commands.Cog):
             else:
                 self.logger.debug(f"MessageReader: No dictionary changes applied to: '{original_content}'")
             
-            self.logger.info(f"MessageReader: Reading message from {message.author.display_name}: {processed_content[:50]}...")
-            
-            # 統一されたTTS設定を使用（data/tts_config.jsonから）
-            tts_config = self.tts_manager.tts_config
-            tts_settings = {
-                "model_id": tts_config.get("model_id", 5),
-                "speaker_id": tts_config.get("speaker_id", 0),
-                "style": tts_config.get("style", "01")
-            }
-            
-            # 音声生成と再生
-            audio_data = await self.tts_manager.generate_speech(
-                text=processed_content,
-                model_id=tts_settings.get("model_id", 0),
-                speaker_id=tts_settings.get("speaker_id", 0),
-                style=tts_settings.get("style", "Neutral")
-            )
-            
-            if audio_data:
-                await self.play_audio_from_bytes(voice_client, audio_data)
-                self.logger.info(f"MessageReader: Successfully read message")
-            else:
-                self.logger.warning(f"MessageReader: Failed to generate audio for message")
-                
+            self.logger.info(f"MessageReader: Queueing message from {message.author.display_name}: {processed_content[:50]}...")
+            await self._enqueue_message(message.guild, processed_content, message.author.display_name)
+
         except Exception as e:
             self.logger.error(f"MessageReader: Failed to read message: {e}")
     
@@ -536,6 +517,73 @@ class MessageReaderCog(commands.Cog):
         except Exception as e:
             self.logger.error(f"MessageReader: Echo command failed: {e}")
             await ctx.respond("❌ 読み上げ中にエラーが発生しました。", ephemeral=True)
+
+    async def _enqueue_message(self, guild: discord.Guild, text: str, author: str):
+        queue = self.guild_queues.setdefault(guild.id, asyncio.Queue())
+        await queue.put({"text": text, "author": author, "attempts": 0})
+        if guild.id not in self.queue_workers or self.queue_workers[guild.id].done():
+            self.queue_workers[guild.id] = asyncio.create_task(self._process_queue(guild.id))
+
+    async def _process_queue(self, guild_id: int):
+        queue = self.guild_queues.get(guild_id)
+        if not queue:
+            return
+        while True:
+            if queue.empty():
+                break
+            job = await queue.get()
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                queue.task_done()
+                break
+            success = await self._play_job(guild, job)
+            if not success and job["attempts"] < 3:
+                job["attempts"] += 1
+                await queue.put(job)
+                await asyncio.sleep(1.0)
+            queue.task_done()
+        self.queue_workers.pop(guild_id, None)
+
+    async def _play_job(self, guild: discord.Guild, job: Dict[str, str]) -> bool:
+        voice_client = await self._ensure_voice_connection(guild)
+        if not voice_client:
+            self.logger.warning(f"MessageReader: No voice client for guild {guild.name}, requeueing")
+            return False
+        tts_settings = self._tts_settings()
+        audio_data = await self.tts_manager.generate_speech(
+            text=job["text"],
+            model_id=tts_settings.get("model_id", 0),
+            speaker_id=tts_settings.get("speaker_id", 0),
+            style=tts_settings.get("style", "Neutral"),
+        )
+        if not audio_data:
+            self.logger.warning("MessageReader: Failed to generate audio for queued message")
+            return False
+        await self.play_audio_from_bytes(voice_client, audio_data)
+        self.logger.info(
+            "MessageReader: Played queued message (%s chars) for guild %s",
+            len(job["text"]),
+            guild.name,
+        )
+        return True
+
+    async def _ensure_voice_connection(self, guild: discord.Guild):
+        vc = guild.voice_client
+        if vc and vc.is_connected():
+            return vc
+        reconnected = await self._attempt_auto_reconnect(guild)
+        vc = guild.voice_client
+        if reconnected and vc and vc.is_connected():
+            return vc
+        return None
+
+    def _tts_settings(self):
+        tts_config = self.tts_manager.tts_config
+        return {
+            "model_id": tts_config.get("model_id", 5),
+            "speaker_id": tts_config.get("speaker_id", 0),
+            "style": tts_config.get("style", "01"),
+        }
 
 
 def setup(bot):

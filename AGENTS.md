@@ -59,3 +59,4 @@
 - Discord側の切断でボットがVCを抜けたままになるケースを解消するため、`MessageReaderCog` に最終接続チャンネルを記録する仕組みと `sessions.json` フォールバックを追加。ユーザー検出に失敗しても最後のチャンネルへ再接続できるよう `_find_fallback_channel` を実装し、`tests/test_message_reader_reconnect.py` にフォールバック用テストを追加。READMEへ自動復帰仕様を追記し、`pytest` 29件成功を確認。
 - VC受信スレッドが `nacl.exceptions.CryptoError` でクラッシュしていたため、`bot.py` で `discord.voice_client.VoiceClient.unpack_audio` をラップし、復号失敗フレームをスキップしてギルド/チャンネル名付きで警告ログを出すようパッチ。READMEに暗号化エラー耐性を追記し、`pytest` 29件成功を確認。
 - ログファイル圧縮時にメインスレッドがブロックされて心拍が止まる問題に対応するため、`utils/logger.py` の `CompressedRotatingFileHandler` を非同期圧縮化し、gzip処理をデーモンスレッドで実行するよう変更。READMEへイベントループ非ブロッキング化を追記し、`pytest` 29件成功を確認。
+- 読み上げリクエストがVC未接続時にスキップされるのを防ぐため、`MessageReaderCog` にギルド単位のメッセージキューと非同期ワーカーを実装。再接続後に順次処理する `_enqueue_message` / `_process_queue` を追加し、`tests/test_message_reader_queue.py` でTDD確認。READMEへ「読み上げはキュー処理で順番通り再生される」旨を追記し、`pytest` 30件成功を確認。
