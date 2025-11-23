@@ -12,6 +12,8 @@ from typing import Dict, Any
 import os
 import gzip
 import shutil
+import threading
+import time
 
 
 class CompressedRotatingFileHandler(logging.handlers.RotatingFileHandler):
@@ -32,15 +34,30 @@ class CompressedRotatingFileHandler(logging.handlers.RotatingFileHandler):
                         os.remove(dfn)
                     os.rename(sfn, dfn)
             
-            # 現在のファイルを圧縮
+            # 現在のファイルを非同期で圧縮
             dfn = f"{self.baseFilename}.1.gz"
             if os.path.exists(dfn):
                 os.remove(dfn)
-            
-            # ファイルを圧縮
-            with open(self.baseFilename, 'rb') as f_in:
-                with gzip.open(dfn, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+
+            source_path = f"{self.baseFilename}.{int(time.time())}.tmp"
+            if os.path.exists(self.baseFilename):
+                os.replace(self.baseFilename, source_path)
+
+                def _compress():
+                    try:
+                        with open(source_path, 'rb') as f_in:
+                            with gzip.open(dfn, 'wb') as f_out:
+                                shutil.copyfileobj(f_in, f_out)
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning(f"Log compression failed: {exc}")
+                    finally:
+                        try:
+                            if os.path.exists(source_path):
+                                os.remove(source_path)
+                        except Exception:
+                            pass
+
+                threading.Thread(target=_compress, name="LogCompressor", daemon=True).start()
         
         if not self.delay:
             self.stream = self._open()
