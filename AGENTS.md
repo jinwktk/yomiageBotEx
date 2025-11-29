@@ -66,3 +66,9 @@
 - `cogs/message_reader.py` の `/echo` 実装で `ctx.respond` の内容を「音声を流しました」に変更し、実装を仕様に合わせた。
 - READMEのコマンド一覧で `/echo` の説明に「返信は『音声を流しました』固定」と追記してユーザー向けに仕様を明記。
 - `python3 -m pytest` を実行し、30件すべてのテストが成功することを確認。
+
+## 2025-11-29
+- ユーザー参加時に古い `guild.voice_client` が残っていると再参加せず録音・挨拶が起動しない問題を再現するため、`tests/test_voice_auto_join.py` を新設し、切断済みボイスクライアントが存在するケースで `connect_to_voice` が呼ばれることを期待するテストを追加（先に失敗を確認）。
+- `cogs/voice.py` の `handle_user_join` を改修し、`voice_client.is_connected()` が `False` の場合は stale 接続として切断・再参加するよう分岐を整理。録音開始時の参照もローカル変数 `voice_client` に統一。
+- READMEのチャット読み上げ機能一覧に「古いボイス接続参照があってもユーザー参加で自動復帰」項目を追記。
+- `python3 -m pytest` を実行し、31件のテスト（新規含む）が全て成功することを確認。

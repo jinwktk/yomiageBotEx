@@ -286,10 +286,13 @@ class VoiceCog(commands.Cog):
         if not self.config["bot"]["auto_join"]:
             return
         
+        voice_client = guild.voice_client
+        is_connected = bool(voice_client and voice_client.is_connected())
+
         # 既に接続している場合
-        if guild.voice_client:
+        if is_connected:
             # 同じチャンネルの場合、録音が開始されているか確認
-            if guild.voice_client.channel == channel:
+            if voice_client.channel == channel:
                 # 新しいユーザーが参加した時の録音開始処理
                 self.logger.info(f"User joined same channel as bot: {channel.name}")
                 
@@ -298,9 +301,9 @@ class VoiceCog(commands.Cog):
                 if recording_cog:
                     try:
                         # 録音が既に開始されているかチェック
-                        if not getattr(guild.voice_client, 'recording', False):
+                        if not getattr(voice_client, 'recording', False):
                             self.logger.info(f"Starting recording for user join: {channel.name}")
-                            await recording_cog.real_time_recorder.start_recording(guild.id, guild.voice_client)
+                            await recording_cog.real_time_recorder.start_recording(guild.id, voice_client)
                             recording_cog.real_time_recorder.debug_recording_status(guild.id)
                         else:
                             self.logger.info(f"Recording already active in {channel.name}")
@@ -310,7 +313,7 @@ class VoiceCog(commands.Cog):
             
             # 別のチャンネルに移動
             try:
-                await guild.voice_client.move_to(channel)
+                await voice_client.move_to(channel)
                 self.logger.info(f"Moved to voice channel: {channel.name} in {guild.name}")
                 self.save_sessions()
                 # 移動後に他のCogに通知
@@ -318,13 +321,20 @@ class VoiceCog(commands.Cog):
             except Exception as e:
                 self.logger.error(f"Failed to move to voice channel: {e}")
         else:
+            if voice_client:
+                self.logger.warning(f"Detected stale voice client in {guild.name}, attempting reconnect")
+                try:
+                    await voice_client.disconnect()
+                except Exception as disconnect_error:
+                    self.logger.debug(f"Failed to cleanup stale voice client: {disconnect_error}")
+            
             # 新規接続（音声リレーで接続済みの場合はスキップ）
-            if guild.voice_client and guild.voice_client.is_connected():
+            current_client = guild.voice_client
+            if current_client and current_client.is_connected():
                 self.logger.info(f"Already connected to a voice channel via relay in {guild.name}, notifying only")
-                # 既存接続での録音確保のみ実行
                 await self.notify_bot_joined_channel(guild, channel, ensure_recording=True)
                 return
-                
+            
             try:
                 await self.bot.connect_to_voice(channel)
                 self.logger.info(f"Auto-joined voice channel: {channel.name} in {guild.name}")
