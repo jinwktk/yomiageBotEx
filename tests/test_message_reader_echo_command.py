@@ -8,9 +8,11 @@ from cogs.message_reader import MessageReaderCog
 
 
 class DummyVoiceClient:
-    def __init__(self):
+    def __init__(self, members=None):
+        if members is None:
+            members = [SimpleNamespace(bot=False)]
         self._connected = True
-        self.channel = SimpleNamespace(name="dummy", id=1)
+        self.channel = SimpleNamespace(name="dummy", id=1, members=members)
 
     def is_connected(self):
         return self._connected
@@ -76,3 +78,42 @@ async def test_echo_command_reads_without_post(tmp_path, monkeypatch):
     assert play_mock.await_args.args[0] is voice_client
     assert ctx.responses[-1]["ephemeral"] is True
     assert ctx.responses[-1]["content"] == "音声を流しました"
+
+
+@pytest.mark.asyncio
+async def test_echo_command_rejects_when_no_listeners(tmp_path, monkeypatch):
+    monkeypatch.setattr("utils.tts.Path", lambda p: tmp_path / p)
+
+    config = {
+        "bot": {"rate_limit_delay": [0, 0]},
+        "message_reading": {
+            "enabled": True,
+            "max_length": 200,
+        },
+    }
+
+    dictionary = DummyDictionaryManager()
+    bot = SimpleNamespace(config=config, dictionary_manager=dictionary, connect_voice_safely=None)
+    cog = MessageReaderCog(bot, config)
+
+    voice_client = DummyVoiceClient(members=[])
+    guild = SimpleNamespace(
+        id=555,
+        name="SilentGuild",
+        voice_client=voice_client,
+        voice_channels=[],
+        get_channel=lambda cid: None,
+    )
+    ctx = DummyContext(guild)
+
+    tts_mock = AsyncMock(return_value=b"audio")
+    cog.tts_manager.generate_speech = tts_mock
+    play_mock = AsyncMock()
+    cog.play_audio_from_bytes = play_mock
+
+    await MessageReaderCog.echo_command.callback(cog, ctx, "Nymeia test")
+
+    assert ctx.responses[-1]["ephemeral"] is True
+    assert ctx.responses[-1]["content"] == "❌ ボイスチャンネルに参加者がいません。"
+    tts_mock.assert_not_awaited()
+    play_mock.assert_not_awaited()
