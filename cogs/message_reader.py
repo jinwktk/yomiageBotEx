@@ -98,8 +98,24 @@ class MessageReaderCog(commands.Cog):
         # ギルドで読み上げが無効
         if not self.is_reading_enabled(message.guild.id):
             return False
-        
+
         return True
+
+    @staticmethod
+    def _has_non_bot_listeners(voice_client: discord.VoiceClient) -> bool:
+        """VCにBot以外の参加者がいるか判定"""
+        if not voice_client:
+            return False
+        channel = getattr(voice_client, "channel", None)
+        if not channel:
+            return False
+        members = getattr(channel, "members", None)
+        if not members:
+            return False
+        for member in members:
+            if not getattr(member, "bot", False):
+                return True
+        return False
     
     def preprocess_message(self, content: str) -> str:
         """メッセージの前処理"""
@@ -365,11 +381,17 @@ class MessageReaderCog(commands.Cog):
                 voice_client = message.guild.voice_client
                 self.logger.info(f"MessageReader: After reconnect - voice client exists: {voice_client is not None}, connected: {voice_client.is_connected() if voice_client else 'N/A'}")
             else:
-                self.logger.info(f"MessageReader: Voice connection confirmed - channel: {voice_client.channel.name if voice_client.channel else 'Unknown'}")
-            
+                self.logger.info(
+                    f"MessageReader: Voice connection confirmed - channel: {voice_client.channel.name if voice_client.channel else 'Unknown'}"
+                )
+
             self.logger.info(f"MessageReader: Bot connected to voice channel: {voice_client.channel.name}")
             if voice_client.channel:
                 self.last_voice_channel[message.guild.id] = voice_client.channel.id
+
+            if not self._has_non_bot_listeners(voice_client):
+                self.logger.info("MessageReader: No non-bot members in voice channel, skipping TTS queue")
+                return
 
             # メッセージの前処理
             message_text = self.compose_message_text(message)
@@ -478,6 +500,10 @@ class MessageReaderCog(commands.Cog):
             if voice_client.channel:
                 self.last_voice_channel[guild.id] = voice_client.channel.id
 
+            if not self._has_non_bot_listeners(voice_client):
+                await ctx.respond("❌ ボイスチャンネルに参加者がいません。", ephemeral=True)
+                return
+
             message_text = text.strip()
             if not message_text:
                 await ctx.respond("❌ 読み上げるテキストを入力してください。", ephemeral=True)
@@ -548,6 +574,12 @@ class MessageReaderCog(commands.Cog):
         voice_client = await self._ensure_voice_connection(guild)
         if not voice_client:
             self.logger.warning(f"MessageReader: No voice client for guild {guild.name}, requeueing")
+            return False
+        if not self._has_non_bot_listeners(voice_client):
+            self.logger.info(
+                "MessageReader: Skipping queued message because voice channel %s has no non-bot members",
+                voice_client.channel.name if getattr(voice_client, "channel", None) else "unknown",
+            )
             return False
         tts_settings = self._tts_settings()
         audio_data = await self.tts_manager.generate_speech(

@@ -72,3 +72,9 @@
 - `cogs/voice.py` の `handle_user_join` を改修し、`voice_client.is_connected()` が `False` の場合は stale 接続として切断・再参加するよう分岐を整理。録音開始時の参照もローカル変数 `voice_client` に統一。
 - READMEのチャット読み上げ機能一覧に「古いボイス接続参照があってもユーザー参加で自動復帰」項目を追記。
 - `python3 -m pytest` を実行し、31件のテスト（新規含む）が全て成功することを確認。
+
+## 2025-12-04
+- VC無人時の誤読上げを防ぐため、`tests/test_message_reader_queue.py` に「参加者ゼロなら読み上げキューに積まない」テストを、`tests/test_message_reader_echo_command.py` に「/echoは無人VCでエラー応答」テストを追加してTDD開始。
+- `cogs/message_reader.py` に ` _has_non_bot_listeners` を実装し、`on_message`・`_play_job`・`/echo` でBot以外の参加者がいない場合は読み上げをスキップするよう制御を追加。
+- READMEのコマンド一覧とチャット読み上げ機能にも「無人VCでは再生しない」仕様を追記。
+- `python3 -m pytest`（33件）を実行し、新旧テストが全て成功したことを確認。
