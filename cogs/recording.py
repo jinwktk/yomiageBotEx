@@ -49,7 +49,10 @@ class RecordingCog(commands.Cog):
         self.logger = logging.getLogger(__name__)
         # 一時的にNoneを渡す（後で適切に修正が必要）
         self.recording_manager = RealTimeAudioRecorder(None)
-        self.recording_enabled = config.get("recording", {}).get("enabled", False)
+        recording_config = config.get("recording", {})
+        self.recording_enabled = recording_config.get("enabled", False)
+        self.prefer_replay_buffer_manager = recording_config.get("prefer_replay_buffer_manager", True)
+        self._replay_buffer_manager_override = None
         
         # 初期化時の設定値をログ出力
         self.logger.info(f"Recording: Initializing with recording_enabled: {self.recording_enabled}")
@@ -335,7 +338,13 @@ class RecordingCog(commands.Cog):
             import io
             import asyncio
             from datetime import datetime
-            
+
+            # まずReplayBufferManager（新システム）が利用可能なら必ず試行
+            if self.prefer_replay_buffer_manager:
+                replay_result = await self._process_new_replay_async(ctx, duration, user, normalize)
+                if replay_result:
+                    return
+
             # リアルタイム録音データから直接バッファを取得（Guild別）
             guild_id = ctx.guild.id
             
@@ -390,7 +399,11 @@ class RecordingCog(commands.Cog):
                 if user:
                     # 特定ユーザーの音声
                     if user.id not in time_range_audio or not time_range_audio[user.id]:
-                        await ctx.followup.send(f"⚠️ {user.mention} の過去{duration}秒間の音声データが見つかりません。", ephemeral=True)
+                        hint = ""
+                        health = self.real_time_recorder.get_buffer_health_summary(guild_id, user.id)
+                        if health["entries"]:
+                            hint = f"\n（最後の記録は {health['entries'][0]['seconds_since_last']:.1f} 秒前）"
+                        await ctx.followup.send(f"⚠️ {user.mention} の過去{duration}秒間の音声データが見つかりません。{hint}", ephemeral=True)
                         return
                     
                     audio_data = time_range_audio[user.id]
@@ -960,19 +973,22 @@ class RecordingCog(commands.Cog):
             return original_data
     
     async def _process_new_replay_async(self, ctx, duration: float, user, normalize: bool):
-        """新システム（ReplayBufferManager）でのreplayコマンド処理"""
+        """新システム（ReplayBufferManager）でのreplayコマンド処理。成功時はTrueを返す"""
         try:
             from utils.replay_buffer_manager import replay_buffer_manager
             
-            if not replay_buffer_manager:
+            # 外部からテスト用に上書きされたマネージャーがあれば優先使用
+            manager = getattr(self, "_replay_buffer_manager_override", None) or replay_buffer_manager
+
+            if not manager:
                 await ctx.followup.send(content="❌ ReplayBufferManagerが利用できません。", ephemeral=True)
-                return
+                return False
             
             start_time = time.time()
             self.logger.info(f"Starting new replay processing: duration={duration}s, normalize={normalize}")
             
             # ReplayBufferManagerから音声データを取得
-            result = await replay_buffer_manager.get_replay_audio(
+            result = await manager.get_replay_audio(
                 guild_id=ctx.guild.id,
                 duration_seconds=duration,
                 user_id=user.id if user else None,
@@ -987,7 +1003,7 @@ class RecordingCog(commands.Cog):
                             "ボイスチャンネルで音声が発生してから、少し時間をおいて再度お試しください。",
                     ephemeral=True
                 )
-                return
+                return False
             
             # 統計情報をログ出力
             processing_time = time.time() - start_time
@@ -1014,7 +1030,7 @@ class RecordingCog(commands.Cog):
                             f"短い時間（{duration/2:.0f}秒以下）で再試行してください。",
                     ephemeral=True
                 )
-                return
+                return False
             
             self._store_replay_result(
                 guild_id=ctx.guild.id,
@@ -1055,6 +1071,7 @@ class RecordingCog(commands.Cog):
             )
             
             self.logger.info(f"New replay sent successfully: {filename}")
+            return True
             
         except Exception as e:
             self.logger.error(f"New replay processing failed: {e}", exc_info=True)
@@ -1066,6 +1083,7 @@ class RecordingCog(commands.Cog):
                 )
             except Exception as edit_error:
                 self.logger.error(f"Failed to edit response after error: {edit_error}")
+            return False
     
     def _mix_multiple_audio_streams(self, user_audio_dict: dict) -> bytes:
         """複数ユーザーの音声をミキシング（重ね合わせ）"""
@@ -1340,7 +1358,115 @@ class RecordingCog(commands.Cog):
                 f"❌ テストが失敗しました: {e}",
                 ephemeral=True
             )
-    
+
+    @discord.slash_command(name="replay_diag", description="リプレイ用の録音状態を診断します")
+    async def replay_diag(
+        self,
+        ctx,
+        user: discord.Option(discord.Member, "対象ユーザー（省略時は全員）", required=False) = None,
+        duration: discord.Option(float, "確認する時間範囲（秒）", default=30.0, min_value=5.0, max_value=300.0) = 30.0,
+    ):
+        """リプレイ前に音声バッファの状況を確認する診断コマンド"""
+        await ctx.defer(ephemeral=True)
+        guild_id = ctx.guild.id
+
+        recorder_summary = self.real_time_recorder.get_buffer_health_summary(
+            guild_id, user.id if user else None
+        )
+        recorder_lines = []
+        if recorder_summary["entries"]:
+            for entry in recorder_summary["entries"]:
+                mention = f"<@{entry['user_id']}>"
+                recorder_lines.append(
+                    f"{mention}: {entry['chunk_count']}チャンク / 最終 {entry['seconds_since_last']:.1f}秒前"
+                )
+        else:
+            target_label = user.mention if user else "ギルド全体"
+            recorder_lines.append(f"{target_label} の連続バッファにデータがありません")
+
+        callback_lines = []
+        recent_chunks = []
+        try:
+            from utils.recording_callback_manager import recording_callback_manager
+
+            if recording_callback_manager and recording_callback_manager.is_initialized:
+                callback_lines.append("初期化状態: ✅")
+                recent_chunks = await recording_callback_manager.get_recent_audio(
+                    guild_id=guild_id,
+                    duration_seconds=duration,
+                    user_id=user.id if user else None,
+                )
+            else:
+                callback_lines.append("初期化状態: ❌")
+        except Exception as e:
+            callback_lines.append(f"情報取得に失敗: {e}")
+
+        if recent_chunks:
+            latest = recent_chunks[-1]
+            age = max(0.0, time.time() - latest.timestamp)
+            callback_lines.append(f"過去{duration:.0f}秒のチャンク: {len(recent_chunks)}件")
+            callback_lines.append(f"最終チャンク: <@{latest.user_id}> / {age:.1f}秒前")
+        else:
+            callback_lines.append(f"過去{duration:.0f}秒で取得できたチャンクはありません")
+
+        embed = discord.Embed(
+            title="🔍 リプレイ診断",
+            description="`/replay` 実行前の録音状態を確認しました。",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="RealTimeAudioRecorder", value="\n".join(recorder_lines), inline=False)
+        embed.add_field(name="RecordingCallbackManager", value="\n".join(callback_lines), inline=False)
+        embed.set_footer(text="チャンクが0件の場合はボイスチャット側で音声が出ているか確認してください。")
+
+        await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @discord.slash_command(name="replay_probe", description="録音バッファの最新音声を診断用に取得します")
+    async def replay_probe(
+        self,
+        ctx,
+        user: discord.Option(discord.Member, "対象ユーザー（省略時は全員）", required=False) = None,
+        duration: discord.Option(float, "確認する時間範囲（秒）", default=10.0, min_value=5.0, max_value=60.0) = 10.0,
+    ):
+        """RecordingCallbackManagerから最新チャンクを取得し診断用WAVを返す"""
+        await ctx.defer(ephemeral=True)
+
+        try:
+            manager = recording_callback_manager
+            if not manager or not manager.is_initialized:
+                await ctx.followup.send(
+                    "❌ RecordingCallbackManager が初期化されていません。\n"
+                    "音声リレーが動作しているか確認してください。",
+                    ephemeral=True,
+                )
+                return
+
+            chunks = await manager.get_recent_audio(
+                guild_id=ctx.guild.id,
+                duration_seconds=duration,
+                user_id=user.id if user else None,
+            )
+
+            if not chunks:
+                await ctx.followup.send(
+                    "⚠️ 診断用の音声チャンクを取得できませんでした。\n"
+                    "音声リレーが動作しているか確認してください。",
+                    ephemeral=True,
+                )
+                return
+
+            latest = chunks[-1]
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"probe_{latest.user_id}_{duration:.0f}s_{timestamp}.wav"
+            discord_file = discord.File(io.BytesIO(latest.data), filename=filename)
+            await ctx.followup.send(
+                f"🎧 音声サンプル（ユーザーID: {latest.user_id}, {latest.duration:.2f}s）",
+                files=[discord_file],
+                ephemeral=True,
+            )
+        except Exception as e:
+            self.logger.error(f"Replay probe failed: {e}", exc_info=True)
+            await ctx.followup.send(f"❌ 診断に失敗しました: {e}", ephemeral=True)
+
     async def _process_direct_capture_replay_async(self, ctx, duration: float, user, normalize: bool):
         """直接音声キャプチャシステムでのreplayコマンド処理"""
         try:

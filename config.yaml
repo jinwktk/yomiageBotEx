@@ -23,6 +23,7 @@ recording:
   cleanup_hours: 1    # 録音ファイルの自動削除時間
   default_duration: 30 # デフォルト録音時間（秒）
   max_file_size_mb: 50 # 最大ファイルサイズ（MB）
+  prefer_replay_buffer_manager: true # 新リプレイシステムを常に優先するかどうか
 
 # 音声横流し（リレー）機能
 audio_relay:
@@ -32,6 +33,12 @@ audio_relay:
   max_duration_hours: 1  # セッション最大継続時間（時間）
   stream_cooldown: 2.0   # ユーザーのストリーム切り替えクールダウン（秒）
   buffer_interval: 5.0   # バッファフラッシュ間隔（秒）
+
+  # 無音が続く場合の自動再起動
+  silence_restart:
+    enabled: true
+    threshold_cycles: 6      # 無音判定が続く回数（1回=recording_duration）
+    cooldown_seconds: 30.0   # 再起動のクールダウン（秒）
   
   # 自動開始設定
   auto_start: true    # ボット起動時の自動リレー開始

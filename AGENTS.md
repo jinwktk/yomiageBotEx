@@ -78,3 +78,31 @@
 - `cogs/message_reader.py` に ` _has_non_bot_listeners` を実装し、`on_message`・`_play_job`・`/echo` でBot以外の参加者がいない場合は読み上げをスキップするよう制御を追加。
 - READMEのコマンド一覧とチャット読み上げ機能にも「無人VCでは再生しない」仕様を追記。
 - `python3 -m pytest`（33件）を実行し、新旧テストが全て成功したことを確認。
+
+## 2026-01-02
+- `logs/yomiage.log` でStyle-Bert-VITS2へのTTSリクエストが `max_text_length`（デフォルト100文字）を超過して422エラーになっていた点を確認。
+- `tests/test_tts_text_limit.py` を追加し、`generate_speech` がキャッシュ参照前に渡すテキスト長が設定上限を超えないことを確認するTDDテストを作成。
+- `utils/tts.py` の文字数制限処理を更新し、省略記号込みでも上限以内に収まるよう切り詰めつつ、上限より短い場合は省略記号を付けないフェイルセーフを追加。
+- READMEのTTS機能一覧に文字数上限を安全に短縮して422エラーを防止する仕様を追記。
+- `python3 -m pytest tests/test_tts_text_limit.py` を実行し、新規テストが成功することを確認。
+
+## 2026-01-03
+- ボイスチャンネルに非Bot参加者がいない場合はギルド単位で読み上げを自動一時停止し、参加者が戻ると自動再開する制御を `cogs/message_reader.py` に実装。`/reading` の設定値を変更せずに安全に自動停止できるようにした。
+- 自動再接続時に目標チャンネルが無人であれば接続を行わないようにし、無人状態では `guild_auto_paused` フラグを立ててメッセージ読み上げを抑止するよう `_attempt_auto_reconnect` を改修。
+- `tests/test_message_reader_reconnect.py` に自動一時停止の期待を確認するテスト、およびフォールバックチャンネルでの再接続テストを追加し、`tests/test_message_reader_queue.py` には無人検知で読み上げが止まり、参加者復帰で再開するシナリオを追加。
+- READMEに「無人VCでは読み上げを自動停止する」仕様を追記し、AGENTS.mdにも作業内容を記録。
+- `python3 -m pytest` を実行し、36件のテストが全て成功することを確認。
+
+## 2026-01-11
+- `/replay` で「@ソルト・ライオモッチ の過去30.0秒間の音声データが見つかりません」と表示された件を調査。`logs/yomiage.log`（タイムスタンプ 2026-01-11 07:57:39 付近）を確認し、`RealTimeRecorder` が同時刻にチェックポイントを作成しているが `sink.audio_data keys: []` と出力されており、WaveSinkから音声チャンクが戻っていない状態だったことを把握。
+- 同ログで `continuous_buffers` 内のユーザーID一覧は取得できているものの、リクエストした30秒範囲内に重なるチャンクが1件も無いため `_extract_audio_range` が `No matching chunks` を返し、該当ユーザーのデータが見つからない挙動を確認。
+- 07:53頃のログには該当ユーザーのチャンク追加 (`RealTimeRecorder: Added audio chunk ... user 1033950280871579648`) が記録されているが、07:57までに新しいチャンクが1件も記録されていないことから、ボイスチャネル側で有効な音声が4分以上発生していない（もしくはWaveSinkが受信できていない）場合に同エラーメッセージとなることを整理。
+- `/replay` は ReplayBufferManager（録音リレー経由の新システム）を常に優先し、取得に成功した場合は旧リアルタイムバッファへフォールバックしないよう `recording.prefer_replay_buffer_manager` フラグを追加。挙動を検証する `tests/test_replay_buffer_integration.py` も作成してTDD実施。
+- `RealTimeAudioRecorder` に `get_buffer_health_summary` を実装し、時間範囲にマッチするチャンクが無い場合は最後に記録された時刻をログへ出力。WaveSinkコールバックや `smooth_audio_relay` でも空データ時の警告ログを追加。
+- `/replay_diag` コマンドを新設し、RealTimeAudioRecorder/RecordingCallbackManager 双方のチャンク有無と最終記録時刻をエフェメラルEmbedで提示できるようにした。`/replay` のエラー応答にも最後に記録された経過秒数を追記。
+- `config.yaml` と README に `prefer_replay_buffer_manager` や `/replay_diag` の説明を追記し、診断フローを文書化。
+- `python3 -m pytest` を実行し、既存36件＋新テストを含む37件すべてが成功することを確認。
+- 録音の実音声確認用に `/replay_probe` を追加し、RecordingCallbackManager から最新チャンクをWAVで返す診断フローを実装。`tests/test_replay_probe_command.py` を追加してTDDで検証。
+- 音声リレーが無音状態のまま継続する場合に自動でセッションを再起動する仕組みを `utils/smooth_audio_relay.py` に追加し、`tests/test_smooth_audio_relay_silence_restart.py` で挙動を確認。
+- `config.yaml` に `audio_relay.silence_restart` を追加し、README に `/replay_probe` と無音時再起動の仕様を追記。
+- `python3 -m pytest tests/test_replay_probe_command.py tests/test_smooth_audio_relay_silence_restart.py` を実行し、5件のテストがすべて成功することを確認。

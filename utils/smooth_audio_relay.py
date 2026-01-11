@@ -45,6 +45,10 @@ class RelaySession:
     status: RelayStatus
     created_at: float
     last_activity: float
+    last_audio_time: float = 0.0
+    silence_cycles: int = 0
+    restart_requested: bool = False
+    last_restart_time: float = 0.0
 
 
 class SmoothAudioRelay:
@@ -66,6 +70,11 @@ class SmoothAudioRelay:
         self.volume = self.config.get("volume", 0.8)
         self.max_sessions = self.config.get("max_sessions", 10)
         self.max_duration_hours = self.config.get("max_duration_hours", 1)
+
+        silence_restart = self.config.get("silence_restart", {})
+        self.silence_restart_enabled = silence_restart.get("enabled", False)
+        self.silence_restart_threshold = int(silence_restart.get("threshold_cycles", 6))
+        self.silence_restart_cooldown = float(silence_restart.get("cooldown_seconds", 30.0))
         
         # RecordingCallbackManager連携設定
         self.recording_callback_enabled = RECORDING_CALLBACK_AVAILABLE and self.enabled
@@ -101,7 +110,8 @@ class SmoothAudioRelay:
                 target_channel_id=target_channel_id,
                 status=RelayStatus.STARTING,
                 created_at=time.time(),
-                last_activity=time.time()
+                last_activity=time.time(),
+                last_audio_time=time.time(),
             )
             
             self.active_sessions[session_id] = session
@@ -211,9 +221,22 @@ class SmoothAudioRelay:
                     # 録音停止
                     source_voice_client.stop_recording()
                     await asyncio.sleep(0.2)  # 安定化待機
-                    
+
+                    has_audio = bool(sink.audio_data)
+                    non_bot_present = self._has_non_bot_members(source_voice_client)
+                    if self._update_silence_state(session, has_audio=has_audio, non_bot_present=non_bot_present):
+                        session.restart_requested = True
+                        session.status = RelayStatus.STOPPING
+                        self.logger.warning(
+                            "SmoothAudioRelay: No audio detected for %s cycles; restarting session %s",
+                            self.silence_restart_threshold,
+                            session.session_id,
+                        )
+                        break
+
                     # スムーズな音声処理と再生
-                    await self._process_smooth_audio(sink, target_voice_client, session)
+                    if has_audio:
+                        await self._process_smooth_audio(sink, target_voice_client, session)
                     
                     session.last_activity = time.time()
                     
@@ -234,6 +257,68 @@ class SmoothAudioRelay:
         finally:
             # クリーンアップ
             await self._cleanup_smooth_session(session.session_id, source_voice_client)
+            self._finalize_session(session)
+            if session.restart_requested and self.enabled:
+                asyncio.create_task(self._restart_session(session))
+
+    def _finalize_session(self, session: RelaySession):
+        if session.session_id in self.relay_tasks:
+            self.relay_tasks.pop(session.session_id, None)
+        if session.session_id in self.active_sessions:
+            self.active_sessions.pop(session.session_id, None)
+
+    async def _restart_session(self, session: RelaySession):
+        await asyncio.sleep(2.0)
+        try:
+            await self.start_relay_session(
+                source_guild_id=session.source_guild_id,
+                source_channel_id=session.source_channel_id,
+                target_guild_id=session.target_guild_id,
+                target_channel_id=session.target_channel_id,
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to restart relay session {session.session_id}: {e}")
+
+    def _has_non_bot_members(self, voice_client: Optional[discord.VoiceClient]) -> bool:
+        if not voice_client or not voice_client.channel:
+            return False
+
+        for member in voice_client.channel.members:
+            if member.bot:
+                continue
+            state = getattr(member, "voice", None)
+            if state is None:
+                return True
+            if not (state.self_mute or state.mute or state.self_deaf or state.deaf):
+                return True
+
+        return False
+
+    def _update_silence_state(self, session: RelaySession, has_audio: bool, non_bot_present: bool) -> bool:
+        if not self.silence_restart_enabled:
+            return False
+
+        if has_audio:
+            session.silence_cycles = 0
+            session.last_audio_time = time.time()
+            return False
+
+        if not non_bot_present:
+            session.silence_cycles = 0
+            return False
+
+        session.silence_cycles += 1
+        if session.silence_cycles < self.silence_restart_threshold:
+            return False
+
+        now = time.time()
+        if now - session.last_restart_time < self.silence_restart_cooldown:
+            session.silence_cycles = 0
+            return False
+
+        session.silence_cycles = 0
+        session.last_restart_time = now
+        return True
 
     async def _process_smooth_audio(
         self, 
@@ -244,6 +329,11 @@ class SmoothAudioRelay:
         """スムーズな音声処理"""
         try:
             if not sink.audio_data:
+                self.logger.debug(
+                    "SmoothAudioRelay: WaveSink returned no audio chunks for session %s (source guild %s)",
+                    session.session_id,
+                    session.source_guild_id,
+                )
                 return
             
             # RecordingCallbackManagerに音声データを転送（個別ユーザーごと）
