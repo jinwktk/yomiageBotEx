@@ -33,13 +33,15 @@ class MessageReaderCog(commands.Cog):
         # 読み上げ設定
         self.reading_enabled = config.get("message_reading", {}).get("enabled", True)
         self.max_length = config.get("message_reading", {}).get("max_length", 100)
-        self.ignore_prefixes = config.get("message_reading", {}).get("ignore_prefixes", ["!", "/", ".", "?"])
+        self.ignore_prefixes = config.get("message_reading", {}).get("ignore_prefixes", ["!", "/", ".", "?", "`", ";"])
         self.ignore_bots = config.get("message_reading", {}).get("ignore_bots", True)
         self.handshake_wait_timeout = float(config.get("message_reading", {}).get("handshake_wait_timeout", 8.0))
         self.handshake_retry_interval = float(config.get("message_reading", {}).get("handshake_retry_interval", 0.5))
         
         # ギルドごとの読み上げ有効/無効状態
         self.guild_reading_enabled: Dict[int, bool] = {}
+        self.guild_auto_paused: Dict[int, bool] = {}
+        self.guild_auto_paused: Dict[int, bool] = {}
         
         # 初期化時の設定値をログ出力
         self.logger.info(f"MessageReader: Initializing with reading_enabled: {self.reading_enabled}")
@@ -63,6 +65,43 @@ class MessageReaderCog(commands.Cog):
                 self.logger.warning("MessageReader: Could not attach dictionary manager to bot instance")
         return manager
 
+    def _is_auto_paused(self, guild_id: int) -> bool:
+        return self.guild_auto_paused.get(guild_id, False)
+
+    def _clear_auto_pause_if_disconnected(self, guild_id: int):
+        if not self._is_auto_paused(guild_id):
+            return
+        guild_lookup = getattr(self.bot, "get_guild", None)
+        guild = guild_lookup(guild_id) if guild_lookup else None
+        voice_client = getattr(guild, "voice_client", None) if guild else None
+        if not voice_client or not voice_client.is_connected():
+            self.guild_auto_paused.pop(guild_id, None)
+
+    def _set_auto_pause_state(self, guild_id: int, should_pause: bool, reason: str):
+        previous = self.guild_auto_paused.get(guild_id, False)
+        if should_pause:
+            if not previous:
+                self.guild_auto_paused[guild_id] = True
+                self.logger.info("MessageReader: Auto-paused reading for guild %s (%s)", guild_id, reason)
+        else:
+            if previous:
+                self.logger.info("MessageReader: Auto-resumed reading for guild %s (%s)", guild_id, reason)
+            self.guild_auto_paused.pop(guild_id, None)
+
+    def _ensure_listeners_or_pause(self, guild_id: int, voice_client: discord.VoiceClient, context: str) -> bool:
+        has_listeners = self._has_non_bot_listeners(voice_client)
+        self._set_auto_pause_state(guild_id, not has_listeners, context)
+        return has_listeners
+
+    def _evaluate_auto_pause_for_guild(self, guild: discord.Guild, context: str):
+        voice_client = getattr(guild, "voice_client", None)
+        channel = getattr(voice_client, "channel", None) if voice_client else None
+        if not voice_client or not channel:
+            self._set_auto_pause_state(guild.id, False, context)
+            return
+        has_listeners = self._has_non_bot_listeners(voice_client)
+        self._set_auto_pause_state(guild.id, not has_listeners, context)
+
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
         asyncio.create_task(self.tts_manager.cleanup())
@@ -71,7 +110,12 @@ class MessageReaderCog(commands.Cog):
         """ギルドで読み上げが有効かチェック"""
         if not self.reading_enabled:
             return False
-        return self.guild_reading_enabled.get(guild_id, True)
+        if not self.guild_reading_enabled.get(guild_id, True):
+            return False
+        self._clear_auto_pause_if_disconnected(guild_id)
+        if self._is_auto_paused(guild_id):
+            return False
+        return True
     
     def _has_readable_content(self, message: discord.Message) -> bool:
         """本文または添付・スタンプがあるか確認"""
@@ -97,6 +141,11 @@ class MessageReaderCog(commands.Cog):
         
         # ギルドで読み上げが無効
         if not self.is_reading_enabled(message.guild.id):
+            if self._is_auto_paused(message.guild.id):
+                self.logger.debug(
+                    "MessageReader: Auto-paused reading in guild %s due to empty voice channel",
+                    message.guild.name,
+                )
             return False
 
         return True
@@ -109,6 +158,16 @@ class MessageReaderCog(commands.Cog):
         channel = getattr(voice_client, "channel", None)
         if not channel:
             return False
+        members = getattr(channel, "members", None)
+        if not members:
+            return False
+        for member in members:
+            if not getattr(member, "bot", False):
+                return True
+        return False
+
+    @staticmethod
+    def _channel_has_non_bot_members(channel) -> bool:
         members = getattr(channel, "members", None)
         if not members:
             return False
@@ -224,7 +283,16 @@ class MessageReaderCog(commands.Cog):
                     )
                 else:
                     self.logger.warning(f"MessageReader: No voice channels with users found in {guild.name}")
+                    self._set_auto_pause_state(guild.id, True, "auto-reconnect skipped due to no listeners")
                     return False
+
+            if not self._channel_has_non_bot_members(target_channel):
+                self.logger.warning(
+                    "MessageReader: Target channel %s has no non-bot listeners, skipping auto-reconnect",
+                    target_channel.name,
+                )
+                self._set_auto_pause_state(guild.id, True, "auto-reconnect target had no listeners")
+                return False
 
             # 既存の接続をクリーンアップ（対象チャンネルが判明してから実施）
             if existing_client:
@@ -232,6 +300,7 @@ class MessageReaderCog(commands.Cog):
                 try:
                     if existing_client.channel == target_channel:
                         if await self._wait_for_existing_client(existing_client, target_channel):
+                            self._set_auto_pause_state(guild.id, False, "existing voice client reused")
                             return True
 
                 except Exception as state_error:
@@ -258,6 +327,7 @@ class MessageReaderCog(commands.Cog):
                     self.logger.info(f"MessageReader: Auto-reconnect successful to {target_channel.name}")
                     if target_channel:
                         self.last_voice_channel[guild.id] = target_channel.id
+                    self._set_auto_pause_state(guild.id, False, "auto-reconnect succeeded")
                     return True
                 self.logger.warning("MessageReader: Voice client not properly connected after join")
                 return False
@@ -274,6 +344,7 @@ class MessageReaderCog(commands.Cog):
                         self.logger.info(f"MessageReader: Auto-reconnect successful to {target_channel.name} after retry")
                         if target_channel:
                             self.last_voice_channel[guild.id] = target_channel.id
+                        self._set_auto_pause_state(guild.id, False, "auto-reconnect retry succeeded")
                         return True
                 except Exception as retry_error:
                     self.logger.error(f"MessageReader: Retry connect failed: {retry_error}")
@@ -349,6 +420,34 @@ class MessageReaderCog(commands.Cog):
             except Exception as e:
                 self.logger.debug(f"MessageReader: Failed to load fallback channel info: {e}")
         return None
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        """VCの参加状況に応じて自動停止状態を更新"""
+        guild = getattr(member, "guild", None)
+        if not guild:
+            return
+        voice_client = getattr(guild, "voice_client", None)
+        if not voice_client:
+            self._set_auto_pause_state(guild.id, False, "voice client disconnected")
+            return
+        channel = getattr(voice_client, "channel", None)
+        if not channel:
+            self._set_auto_pause_state(guild.id, False, "voice client channel missing")
+            return
+
+        relevant = False
+        before_channel = getattr(before, "channel", None)
+        after_channel = getattr(after, "channel", None)
+        if before_channel and before_channel.id == channel.id:
+            relevant = True
+        if after_channel and after_channel.id == channel.id:
+            relevant = True
+        if not relevant:
+            return
+
+        has_listeners = self._has_non_bot_listeners(voice_client)
+        self._set_auto_pause_state(guild.id, not has_listeners, "voice_state_update")
     
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -389,7 +488,7 @@ class MessageReaderCog(commands.Cog):
             if voice_client.channel:
                 self.last_voice_channel[message.guild.id] = voice_client.channel.id
 
-            if not self._has_non_bot_listeners(voice_client):
+            if not self._ensure_listeners_or_pause(message.guild.id, voice_client, "on_message"):
                 self.logger.info("MessageReader: No non-bot members in voice channel, skipping TTS queue")
                 return
 
@@ -457,14 +556,17 @@ class MessageReaderCog(commands.Cog):
         """読み上げ機能のON/OFF切り替え"""
         try:
             guild_id = ctx.guild.id
-            current_state = self.is_reading_enabled(guild_id)
-            new_state = not current_state
+            manual_state = self.guild_reading_enabled.get(guild_id, True)
+            new_state = not manual_state
             
             self.guild_reading_enabled[guild_id] = new_state
             
             state_text = "有効" if new_state else "無効"
+            note = ""
+            if new_state and self._is_auto_paused(guild_id):
+                note = "\n⚠️ 現在VCに人がいないため、自動的に読み上げが一時停止中です。"
             await ctx.respond(
-                f"📢 チャット読み上げを{state_text}にしました。",
+                f"📢 チャット読み上げを{state_text}にしました。{note}",
                 ephemeral=True
             )
             
@@ -500,7 +602,7 @@ class MessageReaderCog(commands.Cog):
             if voice_client.channel:
                 self.last_voice_channel[guild.id] = voice_client.channel.id
 
-            if not self._has_non_bot_listeners(voice_client):
+            if not self._ensure_listeners_or_pause(guild.id, voice_client, "echo_command"):
                 await ctx.respond("❌ ボイスチャンネルに参加者がいません。", ephemeral=True)
                 return
 
@@ -575,7 +677,7 @@ class MessageReaderCog(commands.Cog):
         if not voice_client:
             self.logger.warning(f"MessageReader: No voice client for guild {guild.name}, requeueing")
             return False
-        if not self._has_non_bot_listeners(voice_client):
+        if not self._ensure_listeners_or_pause(guild.id, voice_client, "_play_job"):
             self.logger.info(
                 "MessageReader: Skipping queued message because voice channel %s has no non-bot members",
                 voice_client.channel.name if getattr(voice_client, "channel", None) else "unknown",

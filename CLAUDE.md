@@ -198,7 +198,7 @@ recording:
 message_reading:
   enabled: true                     # チャット読み上げ
   max_length: 100                   # 最大文字数
-  ignore_prefixes: ["!", "/"]       # 無視するプレフィックス
+  ignore_prefixes: ["!", "/", ".", "?", "`", ";"]       # 無視するプレフィックス
 ```
 
 ### `.env` - 秘密情報

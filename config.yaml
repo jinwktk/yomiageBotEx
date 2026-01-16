@@ -52,7 +52,7 @@ audio_relay:
 message_reading:
   enabled: true                           # チャット読み上げ機能の有効/無効
   max_length: 100                         # 読み上げる最大文字数
-  ignore_prefixes: ["!", "/", ".", "?"]   # 読み上げしないプレフィックス
+  ignore_prefixes: ["!", "/", ".", "?", "`", ";"]   # 読み上げしないプレフィックス
   ignore_bots: false                      # ボットのメッセージを無視（テスト用にfalse）
 
 logging:

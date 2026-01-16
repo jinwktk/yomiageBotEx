@@ -132,7 +132,7 @@ recording:
 
 message_reading:
   max_length: 100                   # 最大文字数
-  ignore_prefixes: ["!", "/", ".", "?"]
+  ignore_prefixes: ["!", "/", ".", "?", "`", ";"]
 ```
 
 ### 動的設定（`data/`）

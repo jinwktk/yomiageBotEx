@@ -106,3 +106,9 @@
 - 音声リレーが無音状態のまま継続する場合に自動でセッションを再起動する仕組みを `utils/smooth_audio_relay.py` に追加し、`tests/test_smooth_audio_relay_silence_restart.py` で挙動を確認。
 - `config.yaml` に `audio_relay.silence_restart` を追加し、README に `/replay_probe` と無音時再起動の仕様を追記。
 - `python3 -m pytest tests/test_replay_probe_command.py tests/test_smooth_audio_relay_silence_restart.py` を実行し、5件のテストがすべて成功することを確認。
+
+## 2026-01-16
+- `tests/test_message_reader_ignore_prefixes.py` を追加し、デフォルトの読み上げ除外プレフィックスで「`」「/」「;」始まりのメッセージがスキップされることをTDDで確認。
+- `cogs/message_reader.py` のデフォルト `ignore_prefixes` に「`」「;」を追加し、`config.yaml` の設定例も更新。
+- READMEの読み上げ機能説明と `TECHNICAL_SPECIFICATION.md` / `CLAUDE.md` の設定例を最新のプレフィックス一覧に合わせて更新。
+- `python3 -m pytest tests/test_message_reader_ignore_prefixes.py` を実行し、3件のテストが成功することを確認。
