@@ -142,6 +142,7 @@ scripts\start.bat
 - 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善
 - 自動復旧の再開処理で `Already recording.` 競合が出た場合は、1回だけ停止→再開を再試行して復旧成功率を上げるよう改善
 - `/replay` の `debug_audio_stages=true` で工程別音声（生データ/正規化後/加工後）を `recordings/replay/<GuildID>/debug/` に保存し、ZIPも生成
+- `aead_xchacha20_poly1305_rtpsize` 利用時の受信互換性向上として、Voice受信パイプラインに互換パッチ（RTP判定と復号互換）を適用
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
 
@@ -252,6 +253,7 @@ Could not find Opus library. Make sure it is installed.
 - パス解決が正しく機能しているかは `pytest tests/test_replay_file_storage.py` で回帰テストできます。
 - 1回目の `/replay` 実行後に「データが見つからない」応答が続く場合、2025-10-23 修正以降では定期チェックポイントでチャンクが継続的に蓄積されるようになっています。`pytest tests/test_real_audio_recorder_buffers.py` で時間管理ロジックを確認できます。
 - `logs/yomiage.log` に `WaveSink callback returned no audio data` が連続する場合は録音入力が詰まっている可能性があります。最新版では一定回数連続時に録音セッションを自動再起動します。
+- Discord側で `aead_xchacha20_poly1305_rtpsize` が選択される環境では、古い py-cord 実装との差分で受信品質が落ちる場合があります。最新版では受信互換パッチを適用してパケット判定と復号処理を補正しています。
 
 ## 📄 ライセンス
 

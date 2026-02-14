@@ -167,3 +167,8 @@
 - `RecordingCog._process_audio_buffer` にデバッグ出力引数を追加し、正規化前後と最終加工後のバイト列を取得可能にした。
 - `RecordingCog._store_replay_debug_stages` / `_maybe_send_replay_debug_stages` を新設し、`recordings/replay/<GuildID>/debug/` へ3段階WAVとZIPを保存・通知する処理を実装。
 - `tests/test_replay_debug_audio_stages.py` を追加し、`debug_audio_stages=true` 実行時に工程別ファイルとZIPが生成されることをTDDで確認。`python3 -m pytest` で55件成功を確認。
+- ライブラリ調査として、利用中の `py-cord` が `2.6.1.dev299+g59d48606`（PR #2651相当）であること、ログで音声モード `aead_xchacha20_poly1305_rtpsize` が選択されていることを確認。
+- `py-cord` 側の後続修正（PR #2925）との差分を踏まえ、`utils/voice_receive_patch.py` を新設。`VoiceClient.unpack_audio` のRTP判定を互換化し、旧実装の `aead_xchacha20_poly1305_rtpsize` 復号経路を補正するパッチを実装。
+- `bot.py` で旧 `patch_voice_decrypt_errors` を廃止し、新しい `apply_voice_receive_patch` を起動時に適用する構成へ変更。
+- `tests/test_voice_receive_patch.py` を追加し、(1) RTPマーカービット付きpayloadの受信、(2)非音声payloadの除外、(3)旧rtpsize復号経路の8バイト補正をTDDで検証。
+- `python3 -m pytest` を実行し、58件すべて成功を確認。
