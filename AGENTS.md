@@ -147,3 +147,7 @@
 - 同ファイルに `_trim_audio_to_duration` を追加し、`/replay` 生成結果を要求秒数（例: 30秒）以内に末尾優先でトリムするよう変更。
 - `tests/test_replay_buffer_manager_audio.py` に重複除去テストとトリムテストを追加し、尺伸び回帰をTDDで固定。
 - `python3 -m pytest tests/test_replay_buffer_manager_audio.py tests/test_replay_buffer_integration.py` と `python3 -m pytest` を実行し、50件のテストが全て成功することを確認。
+- 30秒指定で機械音が残る報告に対し、`ffmpeg -version` を確認（WSL上 `6.1.1`）し、バージョン起因より録音後処理経路の差分が主因と判断。
+- `cogs/recording.py` の `_process_new_replay_async` を修正し、ReplayBufferManager出力をそのまま送信せず `_process_audio_buffer` を必ず通すよう統一。新経路でも既存経路と同じノーマライズ/容量制御を適用。
+- `utils/audio_processor.py` の `normalize_audio` フィルターを `adeclip,highpass,lowpass,loudnorm` へ更新し、歪み成分を抑えてからラウドネス調整するよう変更。
+- `python3 -m pytest tests/test_replay_buffer_integration.py tests/test_recording_cog_manual_commands.py tests/test_tts_text_limit.py` と `python3 -m pytest` を実行し、50件のテストが全て成功することを確認。

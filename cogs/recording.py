@@ -983,7 +983,7 @@ class RecordingCog(commands.Cog):
                 guild_id=ctx.guild.id,
                 duration_seconds=duration,
                 user_id=user.id if user else None,
-                normalize=normalize,
+                normalize=False,
                 mix_users=True
             )
             
@@ -1013,8 +1013,14 @@ class RecordingCog(commands.Cog):
                 description += "、正規化済み"
             description += "）"
             
+            # 最終出力は既存の音声処理パイプラインへ統一
+            processed_audio = await self._process_audio_buffer(
+                io.BytesIO(result.audio_data),
+                normalize=normalize,
+            )
+
             # ファイルサイズチェック（Discord制限: 25MB）
-            file_size_mb = result.file_size / (1024 * 1024)
+            file_size_mb = len(processed_audio) / (1024 * 1024)
             if file_size_mb > 24:  # 余裕を持って24MBで制限
                 await ctx.followup.send(
                     content=f"❌ ファイルサイズが大きすぎます: {file_size_mb:.1f}MB\n"
@@ -1029,11 +1035,11 @@ class RecordingCog(commands.Cog):
                 duration=duration,
                 filename=filename,
                 normalize=normalize,
-                data=result.audio_data,
+                data=processed_audio,
             )
 
             # Discordファイルとして送信
-            file = discord.File(io.BytesIO(result.audio_data), filename=filename)
+            file = discord.File(io.BytesIO(processed_audio), filename=filename)
             
             # レスポンス更新（ファイル添付）
             embed = discord.Embed(

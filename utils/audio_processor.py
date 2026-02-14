@@ -118,11 +118,11 @@ class AudioProcessor:
                     output_path = temp_file.name
             
             # FFmpegコマンドでノーマライズ処理
-            # loudnormフィルターを使用してラウドネス正規化
+            # de-clip + loudnorm で歪みを抑えつつラウドネス正規化
             cmd = [
                 "ffmpeg", "-y",  # -y: 上書き確認なし
                 "-i", input_path,
-                "-af", f"loudnorm=I={self.target_level}:TP=-1.5:LRA=11",  # ラウドネス正規化
+                "-af", f"adeclip,highpass=f=80,lowpass=f=8000,loudnorm=I={self.target_level}:TP=-2.0:LRA=11",
                 "-c:a", "pcm_s16le",  # 16-bit PCM
                 "-ar", "48000",  # 48kHz（Discord標準）
                 "-ac", "2",  # ステレオ

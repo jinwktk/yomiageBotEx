@@ -137,6 +137,7 @@ scripts\start.bat
 - RealTimeAudioRecorder の `finished_callback` は接続中VoiceClientの `recording` 状態に同期してフラグ更新するよう修正し、チェックポイント後に録音ループが止まる競合を防止
 - ReplayBufferManager のユーザー結合時にチャンク時刻ベースで重複区間を除去し、同一区間の二重連結による機械音/尺伸びを抑制
 - `/replay` の出力は要求秒数を上限に末尾側へトリムするようにし、30秒指定で過剰な尺になるケースを防止
+- `/replay` 新経路の最終出力は既存の音声処理パイプライン（`_process_audio_buffer`）へ統一し、`adeclip + loudnorm` を適用して歪みを緩和
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
 
