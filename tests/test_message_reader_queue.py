@@ -95,3 +95,50 @@ async def test_on_message_skips_when_voice_channel_has_no_listeners(tmp_path, mo
     await cog.on_message(message)
 
     enqueue_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_auto_pause_blocks_until_member_returns(tmp_path, monkeypatch):
+    monkeypatch.setattr("utils.tts.Path", lambda p: tmp_path / p)
+
+    config = {
+        "bot": {"rate_limit_delay": [0, 0]},
+        "message_reading": {"enabled": True, "max_length": 200},
+    }
+
+    dictionary = SimpleNamespace(global_dictionary={}, guild_dictionaries={}, apply_dictionary=lambda text, gid: text)
+    voice_client = DummyVoiceClient(members=[])
+    guild = SimpleNamespace(
+        id=2,
+        name="PauseGuild",
+        voice_client=voice_client,
+        voice_channels=[],
+    )
+    bot = SimpleNamespace(config=config, dictionary_manager=dictionary, connect_voice_safely=None)
+    bot.get_guild = lambda gid, g=guild: g
+
+    message = SimpleNamespace(
+        guild=guild,
+        author=SimpleNamespace(bot=False, display_name="tester"),
+        content="こんにちは",
+        attachments=[],
+        stickers=[],
+    )
+
+    cog = MessageReaderCog(bot, config)
+    cog.dictionary_manager = dictionary
+    enqueue_mock = AsyncMock()
+    cog._enqueue_message = enqueue_mock
+
+    await cog.on_message(message)
+    assert cog._is_auto_paused(guild.id) is True
+    assert not cog.should_read_message(message)
+
+    human = SimpleNamespace(bot=False)
+    guild.voice_client.channel.members.append(human)
+    before_state = SimpleNamespace(channel=None)
+    after_state = SimpleNamespace(channel=guild.voice_client.channel)
+    await cog.on_voice_state_update(SimpleNamespace(guild=guild), before_state, after_state)
+
+    assert cog._is_auto_paused(guild.id) is False
+    assert cog.should_read_message(message)

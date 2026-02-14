@@ -393,6 +393,11 @@ class RealTimeAudioRecorder:
                     logger.warning(f"RealTimeRecorder: No audio.file for user {user_id}")
             
             logger.info(f"RealTimeRecorder: Processed {audio_count} audio files in callback")
+            if audio_count == 0:
+                logger.warning(
+                    "RealTimeRecorder: WaveSink callback returned no audio data for guild %s. Recording may be silent or stuck.",
+                    guild_id,
+                )
             
             # リレーコールバック呼び出し（音声リレー機能）
             if guild_id in self.relay_callbacks and audio_count > 0:
@@ -457,10 +462,44 @@ class RealTimeAudioRecorder:
         # バッファ保存頻度を下げる（10回に1回のみ保存）
         if not hasattr(self, '_save_counter'):
             self._save_counter = 0
-        self._save_counter += 1
+            self._save_counter += 1
         if self._save_counter >= 10:
             self._save_counter = 0
             self.save_buffers()
+
+    def get_buffer_health_summary(self, guild_id: int, user_id: Optional[int] = None, max_entries: int = 5) -> Dict[str, Any]:
+        """連続バッファの健全性を簡易集計"""
+        now = time.time()
+        buffers = self.continuous_buffers.get(guild_id, {})
+        target_user_ids = [user_id] if user_id else list(buffers.keys())
+        entries = []
+
+        for uid in target_user_ids:
+            chunks = buffers.get(uid)
+            if not chunks:
+                continue
+            last_chunk = max(chunks, key=lambda c: c[2])
+            seconds_since_last = max(0.0, now - last_chunk[2])
+            entries.append(
+                {
+                    "user_id": uid,
+                    "chunk_count": len(chunks),
+                    "last_start": last_chunk[1],
+                    "last_end": last_chunk[2],
+                    "seconds_since_last": seconds_since_last,
+                }
+            )
+
+        entries.sort(key=lambda item: item["seconds_since_last"])
+        if len(entries) > max_entries:
+            entries = entries[:max_entries]
+
+        return {
+            "guild_id": guild_id,
+            "tracked_users": len(buffers),
+            "entries": entries,
+            "has_data": bool(entries),
+        }
     
     def _add_to_continuous_buffer(self, guild_id: int, user_id: int, audio_data: bytes, timestamp: float):
         """連続音声バッファに音声データを追加"""
@@ -573,6 +612,18 @@ class RealTimeAudioRecorder:
                     logger.info(f"  - User {uid}: {len(audio_data)} bytes")
                 else:
                     logger.info(f"  - User {uid}: no data in time range")
+
+        if not result and guild_buffers:
+            health = self.get_buffer_health_summary(guild_id, user_id)
+            if health["entries"]:
+                stalest = max(health["entries"], key=lambda item: item["seconds_since_last"])
+                logger.warning(
+                    "RealTimeRecorder: No matching chunks in requested window. Last chunk for user %s ended %.1fs ago",
+                    stalest["user_id"],
+                    stalest["seconds_since_last"],
+                )
+            else:
+                logger.warning("RealTimeRecorder: No matching chunks and no entries for requested user %s", user_id)
         
         logger.info(f"RealTimeRecorder: Extracted {duration_seconds}s audio for guild {guild_id}, {len(result)} users with data")
         return result

@@ -323,8 +323,16 @@ class TTSManager:
         # 文字数制限
         max_length = self.tts_config.get("max_text_length", 100)
         if len(text) > max_length:
-            text = text[:max_length] + "..."
-            logger.warning(f"Text truncated to {max_length} characters")
+            ellipsis = "..."
+            ellipsis_budget = max(0, max_length - len(ellipsis))
+            if ellipsis_budget > 0:
+                text = text[:ellipsis_budget] + ellipsis
+            else:
+                # max_length が省略記号未満の場合は切り詰めのみ
+                text = text[:max_length]
+            logger.warning(
+                f"Text truncated to {len(text)} characters (max {max_length})"
+            )
         
         # キャッシュから取得を試行
         cached_audio = await self.cache.get(text, str(model_id))

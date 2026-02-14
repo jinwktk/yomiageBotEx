@@ -112,3 +112,8 @@
 - `cogs/message_reader.py` のデフォルト `ignore_prefixes` に「`」「;」を追加し、`config.yaml` の設定例も更新。
 - READMEの読み上げ機能説明と `TECHNICAL_SPECIFICATION.md` / `CLAUDE.md` の設定例を最新のプレフィックス一覧に合わせて更新。
 - `python3 -m pytest tests/test_message_reader_ignore_prefixes.py` を実行し、3件のテストが成功することを確認。
+
+## 2026-02-14
+- 現在の未コミット差分を整理して、機能削除前のベースラインを先にコミットする方針を確定。
+- 削除対象は `relay` 系と `admin` 系に限定し、`recording`（壊れている箇所は修正して継続利用）・`tts`・`user_settings`・`dictionary` は維持する方針で合意。
+- コミット前のドキュメント更新ルールに合わせ、`README.md` と `AGENTS.md` を更新。
