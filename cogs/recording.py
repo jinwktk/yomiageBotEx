@@ -164,6 +164,86 @@ class RecordingCog(commands.Cog):
         with open(path, "wb") as fp:
             fp.write(data)
         return path
+
+    def _store_replay_debug_stages(
+        self,
+        guild_id: int,
+        base_name: str,
+        raw_audio: bytes,
+        normalized_audio: Optional[bytes],
+        processed_audio: Optional[bytes],
+    ) -> Dict[str, Path]:
+        """リプレイの各工程音声を保存"""
+        guild_debug_dir = self.replay_dir_base / str(guild_id) / "debug"
+        guild_debug_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_base_name = re.sub(r"[^A-Za-z0-9_.-]", "_", base_name)
+
+        normalized_stage = normalized_audio or raw_audio
+        processed_stage = processed_audio or normalized_stage
+
+        stage_payloads = {
+            "raw": raw_audio,
+            "normalized": normalized_stage,
+            "processed": processed_stage,
+        }
+
+        stage_paths: Dict[str, Path] = {}
+        for index, (stage_name, payload) in enumerate(stage_payloads.items(), start=1):
+            stage_path = guild_debug_dir / f"{safe_base_name}_{index:02d}_{stage_name}.wav"
+            with open(stage_path, "wb") as fp:
+                fp.write(payload)
+            stage_paths[stage_name] = stage_path
+
+        zip_path = guild_debug_dir / f"{safe_base_name}_stages.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for stage_name in ("raw", "normalized", "processed"):
+                file_path = stage_paths[stage_name]
+                zip_file.write(file_path, arcname=file_path.name)
+        stage_paths["zip"] = zip_path
+
+        return stage_paths
+
+    async def _maybe_send_replay_debug_stages(
+        self,
+        ctx: discord.ApplicationContext,
+        enabled: bool,
+        guild_id: int,
+        base_name: str,
+        raw_audio: bytes,
+        stage_outputs: Dict[str, bytes],
+    ):
+        """デバッグ有効時に工程別音声を保存・通知"""
+        if not enabled:
+            return
+
+        stage_paths = self._store_replay_debug_stages(
+            guild_id=guild_id,
+            base_name=base_name,
+            raw_audio=raw_audio,
+            normalized_audio=stage_outputs.get("normalized"),
+            processed_audio=stage_outputs.get("processed"),
+        )
+
+        lines = [
+            "🧪 工程別音声を保存しました。",
+            f"- 生データ: `{stage_paths['raw']}`",
+            f"- 正規化後: `{stage_paths['normalized']}`",
+            f"- 加工後: `{stage_paths['processed']}`",
+            f"- ZIP: `{stage_paths['zip']}`",
+        ]
+
+        zip_size = stage_paths["zip"].stat().st_size
+        if zip_size <= 24 * 1024 * 1024:
+            with open(stage_paths["zip"], "rb") as fp:
+                await ctx.followup.send(
+                    content="\n".join(lines),
+                    file=discord.File(io.BytesIO(fp.read()), filename=stage_paths["zip"].name),
+                    ephemeral=True,
+                )
+        else:
+            lines.append("（ZIPサイズが24MBを超えるため、ファイル添付は省略しました）")
+            await ctx.followup.send(content="\n".join(lines), ephemeral=True)
     
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
@@ -305,7 +385,8 @@ class RecordingCog(commands.Cog):
         ctx: discord.ApplicationContext, 
         duration: discord.Option(float, "録音する時間（秒）", default=30.0, min_value=5.0, max_value=300.0) = 30.0,
         user: discord.Option(discord.Member, "対象ユーザー（省略時は全体）", required=False) = None,
-        normalize: discord.Option(bool, "音声正規化の有効/無効", default=True, required=False) = True
+        normalize: discord.Option(bool, "音声正規化の有効/無効", default=True, required=False) = True,
+        debug_audio_stages: discord.Option(bool, "工程別音声（生/正規化後/加工後）を保存する", default=False, required=False) = False,
     ):
         """過去の音声をWAVファイルとして出力"""
         if not self.recording_enabled:
@@ -314,16 +395,17 @@ class RecordingCog(commands.Cog):
         
         await ctx.respond("🎵 録音データを取得しています...", ephemeral=True)
         self.logger.info(
-            "Replay request: guild=%s, duration=%ss, user=%s, normalize=%s",
+            "Replay request: guild=%s, duration=%ss, user=%s, normalize=%s, debug_audio_stages=%s",
             ctx.guild.id,
             duration,
             user.id if user else "all",
             normalize,
+            debug_audio_stages,
         )
 
-        asyncio.create_task(self._process_replay_async(ctx, duration, user, normalize))
+        asyncio.create_task(self._process_replay_async(ctx, duration, user, normalize, debug_audio_stages))
     
-    async def _process_replay_async(self, ctx, duration: float, user, normalize: bool):
+    async def _process_replay_async(self, ctx, duration: float, user, normalize: bool, debug_audio_stages: bool = False):
         """replayコマンドの重い処理を非同期で実行"""
         try:
             import io
@@ -332,7 +414,13 @@ class RecordingCog(commands.Cog):
 
             # まずReplayBufferManager（新システム）が利用可能なら必ず試行
             if self.prefer_replay_buffer_manager:
-                replay_result = await self._process_new_replay_async(ctx, duration, user, normalize)
+                replay_result = await self._process_new_replay_async(
+                    ctx,
+                    duration,
+                    user,
+                    normalize,
+                    debug_audio_stages=debug_audio_stages,
+                )
                 if replay_result:
                     return
 
@@ -404,7 +492,12 @@ class RecordingCog(commands.Cog):
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"recording_user{user.id}_{duration}s_{timestamp}.wav"
                     
-                    processed_data = await self._process_audio_buffer(audio_buffer, normalize=normalize)
+                    stage_outputs: Dict[str, bytes] = {}
+                    processed_data = await self._process_audio_buffer(
+                        audio_buffer,
+                        normalize=normalize,
+                        debug_stage_output=stage_outputs if debug_audio_stages else None,
+                    )
                     self._store_replay_result(
                         guild_id=ctx.guild.id,
                         user_id=user.id,
@@ -418,6 +511,14 @@ class RecordingCog(commands.Cog):
                         f"🎵 {user.mention} の録音です（過去{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
                         file=discord.File(io.BytesIO(processed_data), filename=filename),
                         ephemeral=True
+                    )
+                    await self._maybe_send_replay_debug_stages(
+                        ctx=ctx,
+                        enabled=debug_audio_stages,
+                        guild_id=ctx.guild.id,
+                        base_name=filename.rsplit(".", 1)[0],
+                        raw_audio=audio_data,
+                        stage_outputs=stage_outputs,
                     )
                     return
                 
@@ -452,7 +553,14 @@ class RecordingCog(commands.Cog):
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"recording_all_{user_count}users_{duration}s_{timestamp}.wav"
                     
-                    processed_data = await self._process_audio_buffer(combined_audio, normalize=normalize)
+                    raw_all_audio = combined_audio.getvalue()
+                    combined_audio.seek(0)
+                    stage_outputs: Dict[str, bytes] = {}
+                    processed_data = await self._process_audio_buffer(
+                        combined_audio,
+                        normalize=normalize,
+                        debug_stage_output=stage_outputs if debug_audio_stages else None,
+                    )
                     self._store_replay_result(
                         guild_id=ctx.guild.id,
                         user_id=None,
@@ -466,6 +574,14 @@ class RecordingCog(commands.Cog):
                         f"🎵 全員の録音です（過去{duration}秒分、{user_count}人、{'ノーマライズ済み' if normalize else '無加工'}）",
                         file=discord.File(io.BytesIO(processed_data), filename=filename),
                         ephemeral=True
+                    )
+                    await self._maybe_send_replay_debug_stages(
+                        ctx=ctx,
+                        enabled=debug_audio_stages,
+                        guild_id=ctx.guild.id,
+                        base_name=filename.rsplit(".", 1)[0],
+                        raw_audio=raw_all_audio,
+                        stage_outputs=stage_outputs,
                     )
                     return
             
@@ -499,7 +615,14 @@ class RecordingCog(commands.Cog):
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"recording_user{user.id}_{timestamp}.wav"
                 
-                processed_data = await self._process_audio_buffer(audio_buffer, normalize=normalize)
+                raw_user_audio = audio_buffer.getvalue()
+                audio_buffer.seek(0)
+                stage_outputs: Dict[str, bytes] = {}
+                processed_data = await self._process_audio_buffer(
+                    audio_buffer,
+                    normalize=normalize,
+                    debug_stage_output=stage_outputs if debug_audio_stages else None,
+                )
                 self._store_replay_result(
                     guild_id=ctx.guild.id,
                     user_id=user.id,
@@ -513,6 +636,14 @@ class RecordingCog(commands.Cog):
                     f"🎵 {user.mention} の録音です（約{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
                     file=discord.File(io.BytesIO(processed_data), filename=filename),
                     ephemeral=True
+                )
+                await self._maybe_send_replay_debug_stages(
+                    ctx=ctx,
+                    enabled=debug_audio_stages,
+                    guild_id=ctx.guild.id,
+                    base_name=filename.rsplit(".", 1)[0],
+                    raw_audio=raw_user_audio,
+                    stage_outputs=stage_outputs,
                 )
                 
             else:
@@ -564,7 +695,14 @@ class RecordingCog(commands.Cog):
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"recording_all_{user_count}users_{timestamp}.wav"
                 
-                processed_data = await self._process_audio_buffer(merged_audio, normalize=normalize)
+                raw_merged_audio = merged_audio.getvalue()
+                merged_audio.seek(0)
+                stage_outputs: Dict[str, bytes] = {}
+                processed_data = await self._process_audio_buffer(
+                    merged_audio,
+                    normalize=normalize,
+                    debug_stage_output=stage_outputs if debug_audio_stages else None,
+                )
                 self._store_replay_result(
                     guild_id=ctx.guild.id,
                     user_id=None,
@@ -578,6 +716,14 @@ class RecordingCog(commands.Cog):
                     f"🎵 全員の録音です（{user_count}人分、{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
                     file=discord.File(io.BytesIO(processed_data), filename=filename),
                     ephemeral=True
+                )
+                await self._maybe_send_replay_debug_stages(
+                    ctx=ctx,
+                    enabled=debug_audio_stages,
+                    guild_id=ctx.guild.id,
+                    base_name=filename.rsplit(".", 1)[0],
+                    raw_audio=raw_merged_audio,
+                    stage_outputs=stage_outputs,
                 )
             
             self.logger.info(f"Replaying {duration}s audio (user: {user}) for {ctx.user} in {ctx.guild.name}")
@@ -866,7 +1012,12 @@ class RecordingCog(commands.Cog):
                 await self.real_time_recorder.start_recording(ctx.guild.id, ctx.guild.voice_client)
             except Exception as e:
                 self.logger.error(f"Manual recording: failed to resume real-time recorder after stop: {e}")
-    async def _process_audio_buffer(self, audio_buffer, normalize: bool = True) -> bytes:
+    async def _process_audio_buffer(
+        self,
+        audio_buffer,
+        normalize: bool = True,
+        debug_stage_output: Optional[Dict[str, bytes]] = None,
+    ) -> bytes:
         """音声バッファをノーマライズ処理（ファイルサイズ制限付き）"""
         try:
             import tempfile
@@ -896,8 +1047,11 @@ class RecordingCog(commands.Cog):
                     temp_input.write(original_data)
 
                 temp_input_path = temp_input.name
+                if debug_stage_output is not None:
+                    debug_stage_output["raw"] = original_data
 
             processed_data: Optional[bytes] = None
+            normalized_data: Optional[bytes] = None
 
             normalized_path = None
             if normalize:
@@ -905,7 +1059,8 @@ class RecordingCog(commands.Cog):
 
             if normalized_path and normalized_path != temp_input_path:
                 with open(normalized_path, "rb") as f:
-                    processed_data = f.read()
+                    normalized_data = f.read()
+                    processed_data = normalized_data
 
                 if len(processed_data) > MAX_FILE_SIZE:
                     self.logger.warning(
@@ -923,6 +1078,7 @@ class RecordingCog(commands.Cog):
             else:
                 with open(temp_input_path, "rb") as f:
                     processed_data = f.read()
+                    normalized_data = processed_data
 
                 if len(processed_data) > MAX_FILE_SIZE:
                     compression_ratio = MAX_FILE_SIZE / len(processed_data)
@@ -936,6 +1092,10 @@ class RecordingCog(commands.Cog):
 
             final_size_mb = len(processed_data) / 1024 / 1024
             self.logger.info("Final audio file size: %.1fMB", final_size_mb)
+
+            if debug_stage_output is not None:
+                debug_stage_output["normalized"] = normalized_data or processed_data
+                debug_stage_output["processed"] = processed_data
 
             if len(processed_data) > MAX_FILE_SIZE:
                 raise Exception(
@@ -954,6 +1114,10 @@ class RecordingCog(commands.Cog):
                 compression_ratio = MAX_FILE_SIZE / len(original_data)
                 compressed_size = int(len(original_data) * compression_ratio * 0.8)
                 compressed_data = original_data[:compressed_size]
+                if debug_stage_output is not None:
+                    debug_stage_output["raw"] = original_data
+                    debug_stage_output["normalized"] = original_data
+                    debug_stage_output["processed"] = compressed_data
                 self.logger.warning(
                     "Emergency compression: %.1fMB -> %.1fMB",
                     len(original_data) / 1024 / 1024,
@@ -961,9 +1125,20 @@ class RecordingCog(commands.Cog):
                 )
                 return compressed_data
 
+            if debug_stage_output is not None:
+                debug_stage_output["raw"] = original_data
+                debug_stage_output["normalized"] = original_data
+                debug_stage_output["processed"] = original_data
             return original_data
     
-    async def _process_new_replay_async(self, ctx, duration: float, user, normalize: bool):
+    async def _process_new_replay_async(
+        self,
+        ctx,
+        duration: float,
+        user,
+        normalize: bool,
+        debug_audio_stages: bool = False,
+    ):
         """新システム（ReplayBufferManager）でのreplayコマンド処理。成功時はTrueを返す"""
         try:
             from utils.replay_buffer_manager import replay_buffer_manager
@@ -1014,9 +1189,11 @@ class RecordingCog(commands.Cog):
             description += "）"
             
             # 最終出力は既存の音声処理パイプラインへ統一
+            stage_outputs: Dict[str, bytes] = {}
             processed_audio = await self._process_audio_buffer(
                 io.BytesIO(result.audio_data),
                 normalize=normalize,
+                debug_stage_output=stage_outputs if debug_audio_stages else None,
             )
 
             # ファイルサイズチェック（Discord制限: 25MB）
@@ -1065,6 +1242,14 @@ class RecordingCog(commands.Cog):
                 embed=embed,
                 file=file,
                 ephemeral=True
+            )
+            await self._maybe_send_replay_debug_stages(
+                ctx=ctx,
+                enabled=debug_audio_stages,
+                guild_id=ctx.guild.id,
+                base_name=filename.rsplit(".", 1)[0],
+                raw_audio=result.audio_data,
+                stage_outputs=stage_outputs,
             )
             
             self.logger.info(f"New replay sent successfully: {filename}")

@@ -163,3 +163,7 @@
 - 回帰テストとして `tests/test_real_audio_recorder_recovery.py` に「停止時エラーでも復旧再開が走る」ケースを追加し、`python3 -m pytest` で53件成功を確認。
 - さらに運用ログで `Recovery restart failed ... Already recording.` が連発し復旧が止まる事象を確認したため、`utils/real_audio_recorder.py` の復旧処理に「Already recording競合時の1回再試行（stop→start）」を追加。
 - `tests/test_real_audio_recorder_recovery.py` に `test_recovery_retries_once_when_start_reports_already_recording` を追加し、競合時でも復旧再開できることをTDDで固定。`python3 -m pytest` で54件成功を確認。
+- 機械音原因の切り分け用に `/replay` へ `debug_audio_stages` オプションを追加し、工程別音声（生データ/正規化後/加工後）を保存できるよう `cogs/recording.py` を拡張。
+- `RecordingCog._process_audio_buffer` にデバッグ出力引数を追加し、正規化前後と最終加工後のバイト列を取得可能にした。
+- `RecordingCog._store_replay_debug_stages` / `_maybe_send_replay_debug_stages` を新設し、`recordings/replay/<GuildID>/debug/` へ3段階WAVとZIPを保存・通知する処理を実装。
+- `tests/test_replay_debug_audio_stages.py` を追加し、`debug_audio_stages=true` 実行時に工程別ファイルとZIPが生成されることをTDDで確認。`python3 -m pytest` で55件成功を確認。

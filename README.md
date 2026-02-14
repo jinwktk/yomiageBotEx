@@ -66,7 +66,7 @@ scripts\start.bat
 |---------|------|
 | `/join` | ボイスチャンネルに参加 |
 | `/leave` | ボイスチャンネルから退出 |
-| `/replay` | 最近の音声を録音してチャットに投稿（1-300秒） |
+| `/replay` | 最近の音声を録音してチャットに投稿（1-300秒、`debug_audio_stages=true` で生/正規化後/加工後を保存） |
 | `/recordings` | 最近の録音リストを表示 |
 | `/start_record` | 手動録音を開始（WAV形式・リアルタイム録音を一時停止） |
 | `/stop_record` | 手動録音を停止し、混合WAVとユーザー別ZIPを返信 |
@@ -141,6 +141,7 @@ scripts\start.bat
 - WaveSink が空データ（`sink.audio_data keys: []`）を連続で返した場合、録音セッションを自動で再起動して復旧を試みる保護を追加
 - 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善
 - 自動復旧の再開処理で `Already recording.` 競合が出た場合は、1回だけ停止→再開を再試行して復旧成功率を上げるよう改善
+- `/replay` の `debug_audio_stages=true` で工程別音声（生データ/正規化後/加工後）を `recordings/replay/<GuildID>/debug/` に保存し、ZIPも生成
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
 
