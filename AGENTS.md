@@ -135,3 +135,7 @@
 - `utils/real_audio_recorder.py` に RecordingCallbackManager への直接転送処理を追加し、重複チャンク（同一シグネチャ・短時間）をスキップする保護を実装。
 - `cogs/recording.py` の録音停止を `await self.real_time_recorder.stop_recording(...)` へ修正し、WaveSink 単体では使えないシミュレーション録音分岐を安全化。`/replay_probe` の案内文もリレー依存の表現から録音機能依存の表現へ更新。
 - `python3 -m pytest tests/test_real_audio_recorder_buffers.py tests/test_recording_cog_voice_state.py` および `python3 -m pytest` を実行し、44件のテストが全て成功することを確認。
+- ユーザー指定 `/replay` で機械音化する報告への対応として、`utils/replay_buffer_manager.py` の `_process_user_audio` を修正。チャンク結合時の「先頭44バイト固定スキップ」を廃止し、`wave` で各チャンクのPCMを抽出して連結する方式に変更。
+- 同処理で `normalize=True` 時に16bit PCMピークを抑制する `_normalize_pcm_16bit` を追加し、`max_volume=0dB` 張り付きのクリップ歪みを軽減。
+- 回帰テスト `tests/test_replay_buffer_manager_audio.py` を新規追加し、可変WAVヘッダ（JUNKチャンク付き）でも正しく結合できることと、正規化時にピーク抑制されることをTDDで確認。
+- `python3 -m pytest tests/test_replay_buffer_manager_audio.py tests/test_replay_buffer_integration.py` と `python3 -m pytest` を実行し、46件のテストが全て成功することを確認。

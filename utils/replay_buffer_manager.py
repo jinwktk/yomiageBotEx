@@ -11,6 +11,7 @@ import logging
 import time
 import io
 import wave
+import array
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from collections import defaultdict, deque
@@ -283,36 +284,90 @@ class ReplayBufferManager:
             
             # チャンクをタイムスタンプでソート
             sorted_chunks = sorted(chunks, key=lambda c: c.timestamp)
-            
-            # 最初のチャンクのWAVヘッダーを基準とする
-            combined_audio = io.BytesIO()
-            first_chunk_data = sorted_chunks[0].data
-            
-            # WAVヘッダーを書き込み
-            if len(first_chunk_data) > 44:
-                wav_header = first_chunk_data[:44]
-                combined_audio.write(wav_header)
-                
-                # 各チャンクのPCMデータを結合
-                total_pcm_size = 0
-                for chunk in sorted_chunks:
-                    if len(chunk.data) > 44:
-                        pcm_data = chunk.data[44:]  # WAVヘッダーをスキップ
-                        combined_audio.write(pcm_data)
-                        total_pcm_size += len(pcm_data)
-                
-                # WAVヘッダーのファイルサイズを修正
-                combined_data = combined_audio.getvalue()
-                if len(combined_data) > 44 and total_pcm_size > 0:
-                    combined_data = self._fix_wav_header(combined_data, total_pcm_size)
-                
-                return combined_data
-            
-            return b""
+
+            combined_pcm = io.BytesIO()
+            target_params: Optional[Tuple[int, int, int]] = None  # (channels, sample_width, sample_rate)
+
+            for chunk in sorted_chunks:
+                if not chunk.data or len(chunk.data) <= 44:
+                    continue
+
+                try:
+                    with wave.open(io.BytesIO(chunk.data), "rb") as wav_file:
+                        params = (
+                            wav_file.getnchannels(),
+                            wav_file.getsampwidth(),
+                            wav_file.getframerate(),
+                        )
+
+                        if target_params is None:
+                            target_params = params
+                        elif params != target_params:
+                            self.logger.warning(
+                                "Skipping chunk with mismatched WAV params: expected=%s actual=%s",
+                                target_params,
+                                params,
+                            )
+                            continue
+
+                        frames = wav_file.readframes(wav_file.getnframes())
+                        if frames:
+                            combined_pcm.write(frames)
+                except Exception as e:
+                    self.logger.warning(f"Failed to parse user audio chunk as WAV: {e}")
+                    continue
+
+            if target_params is None:
+                return b""
+
+            pcm_bytes = combined_pcm.getvalue()
+            if not pcm_bytes:
+                return b""
+
+            channels, sample_width, sample_rate = target_params
+            if normalize and sample_width == 2:
+                pcm_bytes = self._normalize_pcm_16bit(pcm_bytes)
+
+            output = io.BytesIO()
+            with wave.open(output, "wb") as wav_out:
+                wav_out.setnchannels(channels)
+                wav_out.setsampwidth(sample_width)
+                wav_out.setframerate(sample_rate)
+                wav_out.writeframes(pcm_bytes)
+            return output.getvalue()
             
         except Exception as e:
             self.logger.error(f"Error processing user audio: {e}")
             return b""
+
+    def _normalize_pcm_16bit(self, pcm_bytes: bytes, target_peak_ratio: float = 0.90) -> bytes:
+        """16bit PCMのピークを抑えてクリップ歪みを軽減"""
+        try:
+            samples = array.array("h")
+            samples.frombytes(pcm_bytes)
+            if not samples:
+                return pcm_bytes
+
+            peak = max(abs(s) for s in samples)
+            if peak <= 0:
+                return pcm_bytes
+
+            target_peak = int(32767 * target_peak_ratio)
+            if peak <= target_peak:
+                return pcm_bytes
+
+            scale = target_peak / peak
+            normalized = array.array(
+                "h",
+                (
+                    max(-32768, min(32767, int(sample * scale)))
+                    for sample in samples
+                ),
+            )
+            return normalized.tobytes()
+        except Exception as e:
+            self.logger.warning(f"PCM normalization failed, using original data: {e}")
+            return pcm_bytes
     
     async def _mix_multiple_users(self, user_chunks: Dict[int, List[AudioChunk]], normalize: bool) -> bytes:
         """複数ユーザーの音声をミックス"""
