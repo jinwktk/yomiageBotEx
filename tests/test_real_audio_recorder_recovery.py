@@ -107,3 +107,39 @@ async def test_recovery_continues_when_stop_recording_reports_not_recording(monk
     await recorder._attempt_recover_stuck_recording(guild_id)
 
     assert calls["start"] == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_retries_once_when_start_reports_already_recording(monkeypatch):
+    recorder = RealTimeAudioRecorder(None)
+    guild_id = 1003
+
+    human = SimpleNamespace(bot=False)
+    vc = _DummyVoiceClient([human])
+    vc.recording = True
+
+    recorder.connections[guild_id] = vc
+    recorder.recording_status[guild_id] = True
+    recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
+
+    calls = {"stop": 0, "start": 0}
+
+    async def fake_stop(_vc):
+        calls["stop"] += 1
+        _vc.recording = False
+
+    async def fake_start(_vc, _sink, _callback):
+        calls["start"] += 1
+        if calls["start"] == 1:
+            _vc.recording = True
+            raise RuntimeError("Already recording.")
+        _vc.recording = True
+
+    monkeypatch.setattr(recorder, "_stop_recording_non_blocking", fake_stop)
+    monkeypatch.setattr(recorder, "_start_recording_non_blocking", fake_start)
+    monkeypatch.setattr(recorder, "_create_wave_sink", lambda: object())
+
+    await recorder._attempt_recover_stuck_recording(guild_id)
+
+    assert calls["start"] == 2
+    assert recorder.recording_status[guild_id] is True

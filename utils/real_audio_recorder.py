@@ -117,14 +117,10 @@ class RealTimeAudioRecorder:
             guild_id,
         )
 
-        try:
-            new_sink = self._create_wave_sink()
-
-            async def callback(sink_obj):
-                await self._finished_callback(sink_obj, guild_id)
-
+        async def _try_stop_for_recovery():
             try:
                 await self._stop_recording_non_blocking(voice_client)
+                return
             except Exception as stop_error:
                 # 競合で既に停止済みのケースは許容して再開処理を続ける
                 if "Not currently recording audio" in str(stop_error):
@@ -132,10 +128,30 @@ class RealTimeAudioRecorder:
                         "RealTimeRecorder: Recovery stop skipped for guild %s (already stopped).",
                         guild_id,
                     )
+                    return
+                raise
+
+        try:
+            new_sink = self._create_wave_sink()
+
+            async def callback(sink_obj):
+                await self._finished_callback(sink_obj, guild_id)
+
+            await _try_stop_for_recovery()
+            await asyncio.sleep(0.1)
+            try:
+                await self._start_recording_non_blocking(voice_client, new_sink, callback)
+            except Exception as start_error:
+                if "Already recording." in str(start_error):
+                    logger.warning(
+                        "RealTimeRecorder: Recovery start collided for guild %s. Retrying once.",
+                        guild_id,
+                    )
+                    await _try_stop_for_recovery()
+                    await asyncio.sleep(0.2)
+                    await self._start_recording_non_blocking(voice_client, new_sink, callback)
                 else:
                     raise
-            await asyncio.sleep(0.1)
-            await self._start_recording_non_blocking(voice_client, new_sink, callback)
             self.connections[guild_id] = voice_client
             self.recording_status[guild_id] = True
             self.empty_callback_counts[guild_id] = 0

@@ -161,3 +161,5 @@
 - `python3 -m pytest tests/test_real_audio_recorder_recovery.py`、`python3 -m pytest tests/test_real_audio_recorder_async.py tests/test_real_audio_recorder_buffers.py tests/test_real_audio_recorder_state.py`、`python3 -m pytest` を実行し、52件すべて成功を確認。
 - 空コールバック連続時の自動復旧で `Not currently recording audio.` が発生すると再開まで中断していたため、`utils/real_audio_recorder.py` の復旧処理を修正し、停止済みエラーは許容して `start_recording` へ進むよう変更。
 - 回帰テストとして `tests/test_real_audio_recorder_recovery.py` に「停止時エラーでも復旧再開が走る」ケースを追加し、`python3 -m pytest` で53件成功を確認。
+- さらに運用ログで `Recovery restart failed ... Already recording.` が連発し復旧が止まる事象を確認したため、`utils/real_audio_recorder.py` の復旧処理に「Already recording競合時の1回再試行（stop→start）」を追加。
+- `tests/test_real_audio_recorder_recovery.py` に `test_recovery_retries_once_when_start_reports_already_recording` を追加し、競合時でも復旧再開できることをTDDで固定。`python3 -m pytest` で54件成功を確認。
