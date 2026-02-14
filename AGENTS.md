@@ -159,3 +159,5 @@
 - 自動復旧はクールダウン付きで、Bot以外のメンバーがVCにいる場合のみ実行する制御を追加し、無人時の不要再起動を抑制。
 - `README.md` に録音機能の保護仕様（空コールバック連続時の自動再起動）とトラブルシュート項目を追記。
 - `python3 -m pytest tests/test_real_audio_recorder_recovery.py`、`python3 -m pytest tests/test_real_audio_recorder_async.py tests/test_real_audio_recorder_buffers.py tests/test_real_audio_recorder_state.py`、`python3 -m pytest` を実行し、52件すべて成功を確認。
+- 空コールバック連続時の自動復旧で `Not currently recording audio.` が発生すると再開まで中断していたため、`utils/real_audio_recorder.py` の復旧処理を修正し、停止済みエラーは許容して `start_recording` へ進むよう変更。
+- 回帰テストとして `tests/test_real_audio_recorder_recovery.py` に「停止時エラーでも復旧再開が走る」ケースを追加し、`python3 -m pytest` で53件成功を確認。

@@ -139,6 +139,7 @@ scripts\start.bat
 - `/replay` の出力は要求秒数を上限に末尾側へトリムするようにし、30秒指定で過剰な尺になるケースを防止
 - `/replay` 新経路の最終出力は既存の音声処理パイプライン（`_process_audio_buffer`）へ統一し、`adeclip + loudnorm` を適用して歪みを緩和
 - WaveSink が空データ（`sink.audio_data keys: []`）を連続で返した場合、録音セッションを自動で再起動して復旧を試みる保護を追加
+- 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
 

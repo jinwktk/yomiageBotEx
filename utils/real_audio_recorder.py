@@ -123,7 +123,17 @@ class RealTimeAudioRecorder:
             async def callback(sink_obj):
                 await self._finished_callback(sink_obj, guild_id)
 
-            await self._stop_recording_non_blocking(voice_client)
+            try:
+                await self._stop_recording_non_blocking(voice_client)
+            except Exception as stop_error:
+                # 競合で既に停止済みのケースは許容して再開処理を続ける
+                if "Not currently recording audio" in str(stop_error):
+                    logger.info(
+                        "RealTimeRecorder: Recovery stop skipped for guild %s (already stopped).",
+                        guild_id,
+                    )
+                else:
+                    raise
             await asyncio.sleep(0.1)
             await self._start_recording_non_blocking(voice_client, new_sink, callback)
             self.connections[guild_id] = voice_client
