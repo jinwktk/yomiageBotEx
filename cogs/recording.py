@@ -228,11 +228,8 @@ class RecordingCog(commands.Cog):
                 self.logger.info(f"Recording: Started real-time recording for {bot_channel.name}")
             except Exception as e:
                 self.logger.error(f"Recording: Failed to start real-time recording: {e}")
-                # フォールバック: シミュレーション録音
-                sink = self.get_recording_sink(guild.id)
-                if not sink.is_recording:
-                    sink.start_recording()
-                    self.logger.info(f"Recording: Started fallback simulation recording for {bot_channel.name}")
+                # フォールバック録音は非対応（WaveSink単体では録音開始不可）
+                self.logger.warning("Recording: Fallback simulation recording is unavailable on this runtime")
         
         # チャンネルが空になった場合は録音停止
         elif before.channel == bot_channel and after.channel != bot_channel:
@@ -243,16 +240,10 @@ class RecordingCog(commands.Cog):
             if members_count == 0:
                 # リアルタイム録音を停止
                 try:
-                    self.real_time_recorder.stop_recording(guild.id, voice_client)
+                    await self.real_time_recorder.stop_recording(guild.id, voice_client)
                     self.logger.info(f"Recording: Stopped real-time recording for {bot_channel.name}")
                 except Exception as e:
                     self.logger.error(f"Recording: Failed to stop real-time recording: {e}")
-                
-                # シミュレーション録音も停止
-                sink = self.get_recording_sink(guild.id)
-                if sink.is_recording:
-                    sink.stop_recording()
-                    self.logger.info(f"Recording: Stopped simulation recording for {bot_channel.name}")
     
     async def handle_bot_joined_with_user(self, guild: discord.Guild, member: discord.Member):
         """ボットがVCに参加した際、既にいるユーザーがいる場合の録音開始処理"""
@@ -1435,7 +1426,7 @@ class RecordingCog(commands.Cog):
             if not manager or not manager.is_initialized:
                 await ctx.followup.send(
                     "❌ RecordingCallbackManager が初期化されていません。\n"
-                    "音声リレーが動作しているか確認してください。",
+                    "録音機能が有効で、ボイスチャンネルで音声が発生しているか確認してください。",
                     ephemeral=True,
                 )
                 return
@@ -1449,7 +1440,7 @@ class RecordingCog(commands.Cog):
             if not chunks:
                 await ctx.followup.send(
                     "⚠️ 診断用の音声チャンクを取得できませんでした。\n"
-                    "音声リレーが動作しているか確認してください。",
+                    "録音機能が有効で、ボイスチャンネルで音声が発生しているか確認してください。",
                     ephemeral=True,
                 )
                 return

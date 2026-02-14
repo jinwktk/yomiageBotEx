@@ -77,3 +77,42 @@ async def test_checkpoint_and_finished_callback_do_not_duplicate_audio(monkeypat
 
     assert 123 in result
     assert result[123] == wav_bytes
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_data_is_forwarded_to_recording_callback_manager(monkeypatch):
+    recorder = RealTimeAudioRecorder(None)
+    time_state = {"value": 4000.0}
+    monkeypatch.setattr(recorder_module.time, "time", lambda: time_state["value"])
+
+    wav_bytes = make_silent_wav(1.0)
+
+    class StubCallbackManager:
+        def __init__(self):
+            self.is_initialized = True
+            self.calls = []
+
+        async def process_audio_data(self, guild_id, user_id, audio_data):
+            self.calls.append((guild_id, user_id, audio_data))
+            return True
+
+    stub_manager = StubCallbackManager()
+    monkeypatch.setattr(recorder_module, "recording_callback_manager", stub_manager, raising=False)
+
+    class MockAudio:
+        def __init__(self, payload: bytes):
+            self.file = io.BytesIO(payload)
+
+    mock_audio = MockAudio(wav_bytes)
+    await recorder._process_checkpoint_data(10, {321: mock_audio})
+
+    time_state["value"] += 0.05
+    mock_audio.file.seek(0)
+    sink = SimpleNamespace(audio_data={321: mock_audio})
+    await recorder._finished_callback(sink, 10)
+
+    assert len(stub_manager.calls) == 1
+    guild_id, user_id, forwarded_audio = stub_manager.calls[0]
+    assert guild_id == 10
+    assert user_id == 321
+    assert forwarded_audio == wav_bytes

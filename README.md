@@ -131,6 +131,7 @@ scripts\start.bat
 - `/start_record`・`/stop_record` で手動録音を制御（録音中はリアルタイム録音を一時停止し、停止時にミックス済みWAVとユーザー別ZIPを返却）
 - 録音の定期チェックポイントはイベントループをブロックしないよう非同期化し、VC心拍ブロックを防止
 - `/replay` は RecordingCallbackManager からの ReplayBufferManager を常に優先し、取得できた場合は旧バッファ経路へフォールバックしない仕組み
+- RealTimeAudioRecorder で取得したチャンクを RecordingCallbackManager に直接転送し、リレー機能なしでも `/replay` 新経路の取得精度を維持
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
 

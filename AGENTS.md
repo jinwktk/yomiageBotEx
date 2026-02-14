@@ -130,3 +130,8 @@
   - `utils/simple_audio_relay_old.py`
   - `tests/test_smooth_audio_relay_silence_restart.py`
 - `python3 -m pytest` を実行し、42件のテストが全て成功することを確認。
+- 録音機能の不具合修正として `tests/test_real_audio_recorder_buffers.py` に RecordingCallbackManager 連携確認テストを追加し、チェックポイントと finished callback の重複経路でもチャンク転送が1回に抑制されることをTDDで固定。
+- `tests/test_recording_cog_voice_state.py` を新規追加し、`RecordingCog.on_voice_state_update` で録音停止が await されることを検証。
+- `utils/real_audio_recorder.py` に RecordingCallbackManager への直接転送処理を追加し、重複チャンク（同一シグネチャ・短時間）をスキップする保護を実装。
+- `cogs/recording.py` の録音停止を `await self.real_time_recorder.stop_recording(...)` へ修正し、WaveSink 単体では使えないシミュレーション録音分岐を安全化。`/replay_probe` の案内文もリレー依存の表現から録音機能依存の表現へ更新。
+- `python3 -m pytest tests/test_real_audio_recorder_buffers.py tests/test_recording_cog_voice_state.py` および `python3 -m pytest` を実行し、44件のテストが全て成功することを確認。

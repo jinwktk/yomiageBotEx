@@ -23,6 +23,11 @@ except ImportError:
     PYCORD_AVAILABLE = False
     logging.warning("py-cord not available. Real audio recording will not work.")
 
+try:
+    from utils.recording_callback_manager import recording_callback_manager
+except Exception:  # pragma: no cover - optional integration
+    recording_callback_manager = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +43,7 @@ class RealTimeAudioRecorder:
         # Guild別の連続音声バッファ: {guild_id: {user_id: [(audio_chunk, start_time, end_time), ...]}}
         self.continuous_buffers: Dict[int, Dict[int, list]] = {}
         self._last_chunk_meta: Dict[int, Dict[int, Tuple[bytes, float, float]]] = {}
+        self._last_callback_chunk_meta: Dict[int, Dict[int, Tuple[bytes, float]]] = {}
         self.active_recordings: Dict[int, asyncio.Task] = {}
         # 録音状態管理（Guild別）
         self.recording_status: Dict[int, bool] = {}
@@ -276,7 +282,13 @@ class RealTimeAudioRecorder:
                     
                     if len(wav_data) > 44:  # WAVヘッダー + 音声データが存在
                         # continuous_buffersに追加
-                        self._add_to_continuous_buffer(guild_id, user_id, wav_data, current_time)
+                        added = self._add_to_continuous_buffer(guild_id, user_id, wav_data, current_time)
+                        if added:
+                            await self._forward_to_recording_callback_manager(
+                                guild_id=guild_id,
+                                user_id=user_id,
+                                audio_data=wav_data,
+                            )
                     
                         # 従来のバッファにも追加
                         buffer = io.BytesIO(wav_data)
@@ -380,7 +392,13 @@ class RealTimeAudioRecorder:
                         self.guild_user_buffers[guild_id][user_id].append((user_audio_buffer, current_time))
                         
                         # 連続バッファにも追加（時間情報付き）
-                        self._add_to_continuous_buffer(guild_id, user_id, audio_data, current_time)
+                        added = self._add_to_continuous_buffer(guild_id, user_id, audio_data, current_time)
+                        if added:
+                            await self._forward_to_recording_callback_manager(
+                                guild_id=guild_id,
+                                user_id=user_id,
+                                audio_data=audio_data,
+                            )
                         
                         # continuous_bufferにデータを追加（RecordingManagerへの参照は削除）
                         
@@ -501,7 +519,7 @@ class RealTimeAudioRecorder:
             "has_data": bool(entries),
         }
     
-    def _add_to_continuous_buffer(self, guild_id: int, user_id: int, audio_data: bytes, timestamp: float):
+    def _add_to_continuous_buffer(self, guild_id: int, user_id: int, audio_data: bytes, timestamp: float) -> bool:
         """連続音声バッファに音声データを追加"""
         if guild_id not in self.continuous_buffers:
             self.continuous_buffers[guild_id] = {}
@@ -544,7 +562,7 @@ class RealTimeAudioRecorder:
                     start_time,
                     end_time,
                 )
-                return
+                return False
 
         self.continuous_buffers[guild_id][user_id].append((audio_data, start_time, end_time))
         
@@ -574,6 +592,38 @@ class RealTimeAudioRecorder:
         logger.info(f"  - Duration: {actual_duration:.1f}s")
         logger.info(f"  - Time range: {current_time - end_time:.1f}s ago to {current_time - start_time:.1f}s ago")
         logger.info(f"  - Start: {start_time:.1f}, End: {end_time:.1f}, Now: {current_time:.1f}")
+        return True
+
+    async def _forward_to_recording_callback_manager(self, guild_id: int, user_id: int, audio_data: bytes):
+        """ReplayBufferManager 用に RecordingCallbackManager へ音声を転送"""
+        manager = recording_callback_manager
+        if not manager or not getattr(manager, "is_initialized", False):
+            return
+
+        now = time.time()
+        signature = hashlib.blake2b(audio_data, digest_size=16).digest()
+        guild_meta = self._last_callback_chunk_meta.setdefault(guild_id, {})
+        last_meta = guild_meta.get(user_id)
+        if last_meta:
+            last_signature, last_timestamp = last_meta
+            if signature == last_signature and abs(now - last_timestamp) <= 0.2:
+                logger.debug(
+                    "RealTimeRecorder: Skipped duplicate callback chunk for guild %s user %s",
+                    guild_id,
+                    user_id,
+                )
+                return
+
+        guild_meta[user_id] = (signature, now)
+        try:
+            await manager.process_audio_data(guild_id=guild_id, user_id=user_id, audio_data=audio_data)
+        except Exception as e:
+            logger.warning(
+                "RealTimeRecorder: Failed to forward audio chunk to RecordingCallbackManager (guild=%s user=%s): %s",
+                guild_id,
+                user_id,
+                e,
+            )
     
     def get_audio_for_time_range(self, guild_id: int, duration_seconds: float, user_id: Optional[int] = None) -> Dict[int, bytes]:
         """指定した時間範囲の音声データを取得（現在時刻から過去N秒分）"""
