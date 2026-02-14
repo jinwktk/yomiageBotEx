@@ -434,14 +434,15 @@ class RealTimeAudioRecorder:
                 if self._finished_save_counter >= 20:
                     self._finished_save_counter = 0
                     self.save_buffers()
-            
-            # 録音状態をクリア
-            self.recording_status[guild_id] = False
+
+            # stop/start の競合で状態を誤って落とさないよう、実接続状態に同期
+            vc = self.connections.get(guild_id)
+            self.recording_status[guild_id] = bool(vc and getattr(vc, "recording", False))
                         
         except Exception as e:
             logger.error(f"RealTimeRecorder: Error in finished_callback: {e}", exc_info=True)
-            # エラー時も状態をクリア
-            self.recording_status[guild_id] = False
+            vc = self.connections.get(guild_id)
+            self.recording_status[guild_id] = bool(vc and getattr(vc, "recording", False))
 
 
     async def clean_old_buffers(self, guild_id: Optional[int] = None):

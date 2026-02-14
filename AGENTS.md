@@ -139,3 +139,6 @@
 - 同処理で `normalize=True` 時に16bit PCMピークを抑制する `_normalize_pcm_16bit` を追加し、`max_volume=0dB` 張り付きのクリップ歪みを軽減。
 - 回帰テスト `tests/test_replay_buffer_manager_audio.py` を新規追加し、可変WAVヘッダ（JUNKチャンク付き）でも正しく結合できることと、正規化時にピーク抑制されることをTDDで確認。
 - `python3 -m pytest tests/test_replay_buffer_manager_audio.py tests/test_replay_buffer_integration.py` と `python3 -m pytest` を実行し、46件のテストが全て成功することを確認。
+- 「1回録音コマンド実行後に再度録音が自動再開せず、/replay で再取得できない」報告に対応し、`utils/real_audio_recorder.py` の `_finished_callback` を修正。固定で `recording_status=False` にする処理を廃止し、`self.connections[guild_id].recording` の実状態に同期するよう変更。
+- 回帰テスト `tests/test_real_audio_recorder_state.py` を新規追加し、(1) 録音継続中は `recording_status` が維持されること、(2) 録音停止時は `False` へ落ちることを確認。
+- `python3 -m pytest tests/test_real_audio_recorder_state.py tests/test_real_audio_recorder_buffers.py` と `python3 -m pytest` を実行し、48件のテストが全て成功することを確認。
