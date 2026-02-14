@@ -475,10 +475,8 @@ class YomiageBot(discord.Bot):
         return vc.is_connected()
 
     def _should_listen_to_channel_audio(self) -> bool:
-        """録音やリレー機能のためにチャンネル音声を受信する必要があるか"""
-        recording_enabled = self.config.get("recording", {}).get("enabled", False)
-        relay_enabled = self.config.get("audio_relay", {}).get("enabled", False)
-        return recording_enabled or relay_enabled
+        """録音機能のためにチャンネル音声を受信する必要があるか"""
+        return self.config.get("recording", {}).get("enabled", False)
 
     async def _configure_voice_state(self, channel):
         """音声状態を設定"""
@@ -528,8 +526,6 @@ class YomiageBot(discord.Bot):
             "cogs.message_reader",
             "cogs.dictionary",
             "cogs.user_settings",
-            "cogs.relay",
-            "cogs.admin",
         ]
         
         for cog in cogs:

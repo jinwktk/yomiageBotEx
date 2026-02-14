@@ -89,7 +89,6 @@ scripts\start.bat
 - レート制限設定
 - 辞書設定
 - 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用するか制御可能）
-- 音声リレー設定（`silence_restart` で無音時の自動リレー再起動を制御可能）
 
 詳細は`config.yaml`のコメントを参照してください。
 
@@ -134,7 +133,6 @@ scripts\start.bat
 - `/replay` は RecordingCallbackManager からの ReplayBufferManager を常に優先し、取得できた場合は旧バッファ経路へフォールバックしない仕組み
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
-- 音声リレーが一定回数無音の場合は自動でセッションを再起動（`audio_relay.silence_restart`）
 
 ### 手動録音ワークフロー
 1. ボイスチャンネルに参加し、ボットが同じチャンネルに接続していることを確認します。
@@ -208,7 +206,6 @@ uv run pytest
 ### ホットリロード
 - `config.yaml` の `development.hot_reload.enabled` を `true` にすると、Cog ファイル（`cogs/*.py`）の更新をポーリングで検知して自動的に `reload_extension` が走ります。
 - 間隔は `development.hot_reload.poll_interval`（秒）で調整できます。デフォルトは 1.0 秒です。
-- 実行中に `/reload_cog` コマンドを使う従来の手動リロードとも併用できます。
 
 ### 2026-02-14 メンテナンスメモ
 - 読み上げ機能を中心に運用する方針に合わせ、機能整理前の状態を一度コミットする運用に変更。

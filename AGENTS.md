@@ -117,3 +117,16 @@
 - 現在の未コミット差分を整理して、機能削除前のベースラインを先にコミットする方針を確定。
 - 削除対象は `relay` 系と `admin` 系に限定し、`recording`（壊れている箇所は修正して継続利用）・`tts`・`user_settings`・`dictionary` は維持する方針で合意。
 - コミット前のドキュメント更新ルールに合わせ、`README.md` と `AGENTS.md` を更新。
+- `bot.py` の読み込みCogから `cogs.relay` / `cogs.admin` を除外し、音声受信判定を録音機能のみ参照する実装に整理。
+- `config.yaml` から `audio_relay` 設定ブロックを削除し、設定項目を読み上げ・録音中心へ整理。
+- `README.md` から音声リレー関連の説明と `/reload_cog` 記述を削除し、現行運用に合わせて更新。
+- 以下の不要ファイルを削除:
+  - `cogs/relay.py`
+  - `cogs/admin.py`
+  - `check_relay_status.py`
+  - `utils/smooth_audio_relay.py`
+  - `utils/audio_relay.py`
+  - `utils/audio_relay_old.py`
+  - `utils/simple_audio_relay_old.py`
+  - `tests/test_smooth_audio_relay_silence_restart.py`
+- `python3 -m pytest` を実行し、42件のテストが全て成功することを確認。

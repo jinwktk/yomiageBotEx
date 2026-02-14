@@ -328,10 +328,10 @@ class VoiceCog(commands.Cog):
                 except Exception as disconnect_error:
                     self.logger.debug(f"Failed to cleanup stale voice client: {disconnect_error}")
             
-            # 新規接続（音声リレーで接続済みの場合はスキップ）
+            # 新規接続
             current_client = guild.voice_client
             if current_client and current_client.is_connected():
-                self.logger.info(f"Already connected to a voice channel via relay in {guild.name}, notifying only")
+                self.logger.info(f"Already connected to a voice channel in {guild.name}, notifying only")
                 await self.notify_bot_joined_channel(guild, channel, ensure_recording=True)
                 return
             
@@ -419,7 +419,7 @@ class VoiceCog(commands.Cog):
                 first_member = members[0]
                 await self._process_member_recording(guild, first_member)
             
-            # 音声接続完了（RelayCogは独立して自動開始）
+            # 音声接続完了
                     
         except Exception as e:
             self.logger.error(f"Failed to notify other cogs: {e}")
