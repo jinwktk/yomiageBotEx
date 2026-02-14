@@ -138,6 +138,7 @@ scripts\start.bat
 - ReplayBufferManager のユーザー結合時にチャンク時刻ベースで重複区間を除去し、同一区間の二重連結による機械音/尺伸びを抑制
 - `/replay` の出力は要求秒数を上限に末尾側へトリムするようにし、30秒指定で過剰な尺になるケースを防止
 - `/replay` 新経路の最終出力は既存の音声処理パイプライン（`_process_audio_buffer`）へ統一し、`adeclip + loudnorm` を適用して歪みを緩和
+- WaveSink が空データ（`sink.audio_data keys: []`）を連続で返した場合、録音セッションを自動で再起動して復旧を試みる保護を追加
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
 
@@ -247,6 +248,7 @@ Could not find Opus library. Make sure it is installed.
 - サービスを別ディレクトリから起動している場合でも、上記ディレクトリを確認してください。
 - パス解決が正しく機能しているかは `pytest tests/test_replay_file_storage.py` で回帰テストできます。
 - 1回目の `/replay` 実行後に「データが見つからない」応答が続く場合、2025-10-23 修正以降では定期チェックポイントでチャンクが継続的に蓄積されるようになっています。`pytest tests/test_real_audio_recorder_buffers.py` で時間管理ロジックを確認できます。
+- `logs/yomiage.log` に `WaveSink callback returned no audio data` が連続する場合は録音入力が詰まっている可能性があります。最新版では一定回数連続時に録音セッションを自動再起動します。
 
 ## 📄 ライセンス
 

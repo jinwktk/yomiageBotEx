@@ -151,3 +151,11 @@
 - `cogs/recording.py` の `_process_new_replay_async` を修正し、ReplayBufferManager出力をそのまま送信せず `_process_audio_buffer` を必ず通すよう統一。新経路でも既存経路と同じノーマライズ/容量制御を適用。
 - `utils/audio_processor.py` の `normalize_audio` フィルターを `adeclip,highpass,lowpass,loudnorm` へ更新し、歪み成分を抑えてからラウドネス調整するよう変更。
 - `python3 -m pytest tests/test_replay_buffer_integration.py tests/test_recording_cog_manual_commands.py tests/test_tts_text_limit.py` と `python3 -m pytest` を実行し、50件のテストが全て成功することを確認。
+
+## 2026-02-15
+- 「話しているのに `/replay` が音声データなしになる」報告を再調査し、`logs/yomiage.log` で `WaveSink callback returned no audio data` / `sink.audio_data keys: []` が連続発生していることを確認。
+- TDDとして `tests/test_real_audio_recorder_recovery.py` を新規追加し、(1) 空コールバック連続時に録音再起動が走ること、(2) 正常な音声取得時に空カウンタがリセットされることを先に失敗で確認。
+- `utils/real_audio_recorder.py` に空コールバック監視（`empty_callback_counts`）と自動復旧処理（閾値超過時に `stop_recording/start_recording` でセッション再起動）を実装。
+- 自動復旧はクールダウン付きで、Bot以外のメンバーがVCにいる場合のみ実行する制御を追加し、無人時の不要再起動を抑制。
+- `README.md` に録音機能の保護仕様（空コールバック連続時の自動再起動）とトラブルシュート項目を追記。
+- `python3 -m pytest tests/test_real_audio_recorder_recovery.py`、`python3 -m pytest tests/test_real_audio_recorder_async.py tests/test_real_audio_recorder_buffers.py tests/test_real_audio_recorder_state.py`、`python3 -m pytest` を実行し、52件すべて成功を確認。

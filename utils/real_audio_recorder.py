@@ -47,6 +47,11 @@ class RealTimeAudioRecorder:
         self.active_recordings: Dict[int, asyncio.Task] = {}
         # 録音状態管理（Guild別）
         self.recording_status: Dict[int, bool] = {}
+        # 空コールバック監視（Guild別）
+        self.empty_callback_counts: Dict[int, int] = {}
+        self._last_recovery_attempt_at: Dict[int, float] = {}
+        self.EMPTY_CALLBACK_RECOVERY_THRESHOLD = 6
+        self.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 20.0
         # 録音開始時刻記録（Guild別）
         self.recording_start_times: Dict[int, float] = {}
         self.BUFFER_EXPIRATION = 300  # 5分
@@ -80,6 +85,53 @@ class RealTimeAudioRecorder:
             return
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, voice_client.start_recording, sink, callback)
+
+    def _create_wave_sink(self):
+        """録音再開に使うWaveSinkを生成"""
+        return WaveSink()
+
+    def _has_non_bot_members(self, voice_client) -> bool:
+        """VCにBot以外のメンバーがいるか判定"""
+        channel = getattr(voice_client, "channel", None)
+        members = getattr(channel, "members", []) if channel else []
+        return any(not getattr(member, "bot", False) for member in members)
+
+    async def _attempt_recover_stuck_recording(self, guild_id: int):
+        """空コールバック連続時に録音セッションを再起動"""
+        voice_client = self.connections.get(guild_id)
+        if not voice_client or not voice_client.is_connected():
+            return
+        if not self.recording_status.get(guild_id, False):
+            return
+        if not self._has_non_bot_members(voice_client):
+            return
+
+        now = time.time()
+        last_attempt = self._last_recovery_attempt_at.get(guild_id, 0.0)
+        if now - last_attempt < self.EMPTY_CALLBACK_RECOVERY_COOLDOWN:
+            return
+        self._last_recovery_attempt_at[guild_id] = now
+
+        logger.warning(
+            "RealTimeRecorder: Empty callbacks reached threshold for guild %s. Restarting recording session.",
+            guild_id,
+        )
+
+        try:
+            new_sink = self._create_wave_sink()
+
+            async def callback(sink_obj):
+                await self._finished_callback(sink_obj, guild_id)
+
+            await self._stop_recording_non_blocking(voice_client)
+            await asyncio.sleep(0.1)
+            await self._start_recording_non_blocking(voice_client, new_sink, callback)
+            self.connections[guild_id] = voice_client
+            self.recording_status[guild_id] = True
+            self.empty_callback_counts[guild_id] = 0
+            logger.info("RealTimeRecorder: Recovery restart completed for guild %s", guild_id)
+        except Exception as e:
+            logger.error("RealTimeRecorder: Recovery restart failed for guild %s: %s", guild_id, e)
 
     def _ensure_wav_format(self, pcm_data: bytes) -> bytes:
         """PCMデータを必ずWAVフォーマットに変換"""
@@ -178,6 +230,7 @@ class RealTimeAudioRecorder:
             await self._start_recording_non_blocking(voice_client, sink, callback)
             # 録音状態を設定
             self.recording_status[guild_id] = True
+            self.empty_callback_counts[guild_id] = 0
             
             # 定期的なチェックポイント作成タスクを開始
             checkpoint_task = asyncio.create_task(self._periodic_checkpoint_task(guild_id, voice_client))
@@ -412,10 +465,16 @@ class RealTimeAudioRecorder:
             
             logger.info(f"RealTimeRecorder: Processed {audio_count} audio files in callback")
             if audio_count == 0:
+                empty_count = self.empty_callback_counts.get(guild_id, 0) + 1
+                self.empty_callback_counts[guild_id] = empty_count
                 logger.warning(
                     "RealTimeRecorder: WaveSink callback returned no audio data for guild %s. Recording may be silent or stuck.",
                     guild_id,
                 )
+                if empty_count >= self.EMPTY_CALLBACK_RECOVERY_THRESHOLD:
+                    await self._attempt_recover_stuck_recording(guild_id)
+            else:
+                self.empty_callback_counts[guild_id] = 0
             
             # リレーコールバック呼び出し（音声リレー機能）
             if guild_id in self.relay_callbacks and audio_count > 0:
