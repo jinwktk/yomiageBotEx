@@ -142,3 +142,8 @@
 - 「1回録音コマンド実行後に再度録音が自動再開せず、/replay で再取得できない」報告に対応し、`utils/real_audio_recorder.py` の `_finished_callback` を修正。固定で `recording_status=False` にする処理を廃止し、`self.connections[guild_id].recording` の実状態に同期するよう変更。
 - 回帰テスト `tests/test_real_audio_recorder_state.py` を新規追加し、(1) 録音継続中は `recording_status` が維持されること、(2) 録音停止時は `False` へ落ちることを確認。
 - `python3 -m pytest tests/test_real_audio_recorder_state.py tests/test_real_audio_recorder_buffers.py` と `python3 -m pytest` を実行し、48件のテストが全て成功することを確認。
+- `/replay user` で 30秒指定なのに 51秒前後へ伸びる事象を `logs/yomiage.log` で確認（2026-02-15 03:47:53 に `Retrieved 7 chunks` / `Replay audio generated ... 51.5s`）。WaveSink チャンクのオーバーラップ二重連結が原因と判断。
+- `utils/replay_buffer_manager.py` を修正し、ユーザー結合時に `chunk.timestamp` と実フレーム長から重複秒数を算出して先頭をスキップするオーバーラップ除去ロジックを追加。
+- 同ファイルに `_trim_audio_to_duration` を追加し、`/replay` 生成結果を要求秒数（例: 30秒）以内に末尾優先でトリムするよう変更。
+- `tests/test_replay_buffer_manager_audio.py` に重複除去テストとトリムテストを追加し、尺伸び回帰をTDDで固定。
+- `python3 -m pytest tests/test_replay_buffer_manager_audio.py tests/test_replay_buffer_integration.py` と `python3 -m pytest` を実行し、50件のテストが全て成功することを確認。

@@ -84,3 +84,30 @@ async def test_process_user_audio_normalize_limits_peak():
         pcm = wav_file.readframes(wav_file.getnframes())
     # 正規化で最大値32767張り付きが解消されること
     assert b"\xff\x7f" not in pcm[:200]
+
+
+@pytest.mark.asyncio
+async def test_process_user_audio_skips_overlapping_region():
+    manager = ReplayBufferManager(config={})
+    # 5秒 + 5秒チャンクだが、時刻上は2秒重複
+    c1 = AudioChunk(user_id=1, guild_id=1, data=make_wav(5.0), timestamp=10.0, duration=5.0)
+    c2 = AudioChunk(user_id=1, guild_id=1, data=make_wav(5.0), timestamp=13.0, duration=5.0)
+
+    merged = await manager._process_user_audio([c1, c2], normalize=False)
+    with wave.open(io.BytesIO(merged), "rb") as wav_file:
+        duration = wav_file.getnframes() / wav_file.getframerate()
+
+    assert 7.8 <= duration <= 8.2
+
+
+def test_trim_audio_to_duration_keeps_tail():
+    manager = ReplayBufferManager(config={})
+    src = make_wav(12.0, channels=1)
+    trimmed = manager._trim_audio_to_duration(src, 5.0)
+
+    with wave.open(io.BytesIO(trimmed), "rb") as wav_file:
+        duration = wav_file.getnframes() / wav_file.getframerate()
+        channels = wav_file.getnchannels()
+
+    assert 4.9 <= duration <= 5.1
+    assert channels == 1

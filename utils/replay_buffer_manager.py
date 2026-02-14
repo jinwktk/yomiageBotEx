@@ -246,6 +246,12 @@ class ReplayBufferManager:
             if not processed_audio or len(processed_audio) <= 44:
                 self.logger.warning("Processed audio is empty or invalid")
                 return None
+
+            # 要求秒数を超える場合は末尾側を優先してトリム
+            processed_audio = self._trim_audio_to_duration(
+                processed_audio,
+                request.duration_seconds,
+            )
             
             # ファイルサイズチェック
             max_size_bytes = self.max_file_size_mb * 1024 * 1024
@@ -287,6 +293,7 @@ class ReplayBufferManager:
 
             combined_pcm = io.BytesIO()
             target_params: Optional[Tuple[int, int, int]] = None  # (channels, sample_width, sample_rate)
+            last_end_time: Optional[float] = None
 
             for chunk in sorted_chunks:
                 if not chunk.data or len(chunk.data) <= 44:
@@ -310,9 +317,28 @@ class ReplayBufferManager:
                             )
                             continue
 
-                        frames = wav_file.readframes(wav_file.getnframes())
+                        frame_count = wav_file.getnframes()
+                        frames = wav_file.readframes(frame_count)
                         if frames:
+                            # チャンク間の重複区間を除去（チェックポイント再開時の重複対策）
+                            sample_rate = params[2]
+                            channels = params[0]
+                            sample_width = params[1]
+                            duration = frame_count / sample_rate if sample_rate > 0 else 0.0
+                            chunk_end = float(getattr(chunk, "timestamp", 0.0))
+                            chunk_start = chunk_end - duration
+
+                            if last_end_time is not None and chunk_start < last_end_time:
+                                overlap_seconds = last_end_time - chunk_start
+                                if overlap_seconds > 0 and sample_rate > 0:
+                                    skip_frames = int(overlap_seconds * sample_rate)
+                                    skip_bytes = skip_frames * channels * sample_width
+                                    if skip_bytes >= len(frames):
+                                        continue
+                                    frames = frames[skip_bytes:]
+
                             combined_pcm.write(frames)
+                            last_end_time = chunk_end if last_end_time is None else max(last_end_time, chunk_end)
                 except Exception as e:
                     self.logger.warning(f"Failed to parse user audio chunk as WAV: {e}")
                     continue
@@ -368,6 +394,40 @@ class ReplayBufferManager:
         except Exception as e:
             self.logger.warning(f"PCM normalization failed, using original data: {e}")
             return pcm_bytes
+
+    def _trim_audio_to_duration(self, audio_data: bytes, max_duration_seconds: float) -> bytes:
+        """WAV音声の長さを上限秒数以内に収める（末尾優先）"""
+        if max_duration_seconds <= 0:
+            return audio_data
+        try:
+            with wave.open(io.BytesIO(audio_data), "rb") as wav_file:
+                channels = wav_file.getnchannels()
+                sample_width = wav_file.getsampwidth()
+                sample_rate = wav_file.getframerate()
+                total_frames = wav_file.getnframes()
+                frames = wav_file.readframes(total_frames)
+
+            if sample_rate <= 0:
+                return audio_data
+
+            max_frames = int(max_duration_seconds * sample_rate)
+            if total_frames <= max_frames:
+                return audio_data
+
+            frame_size = channels * sample_width
+            keep_bytes = max_frames * frame_size
+            trimmed_frames = frames[-keep_bytes:]
+
+            output = io.BytesIO()
+            with wave.open(output, "wb") as wav_out:
+                wav_out.setnchannels(channels)
+                wav_out.setsampwidth(sample_width)
+                wav_out.setframerate(sample_rate)
+                wav_out.writeframes(trimmed_frames)
+            return output.getvalue()
+        except Exception as e:
+            self.logger.warning(f"Failed to trim audio to {max_duration_seconds}s: {e}")
+            return audio_data
     
     async def _mix_multiple_users(self, user_chunks: Dict[int, List[AudioChunk]], normalize: bool) -> bytes:
         """複数ユーザーの音声をミックス"""
