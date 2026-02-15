@@ -176,3 +176,8 @@
 - `cogs/recording.py` の `_process_new_replay_async` に `suppress_no_data_message` を追加し、フォールバック前提呼び出しでは新経路の失敗メッセージを抑止するよう修正。
 - `tests/test_replay_fallback_messaging.py` を追加し、`❌` が先行せず最終結果のみ通知されることをTDDで固定。
 - `python3 -m pytest` を実行し、59件すべて成功を確認。
+- `/replay` の工程別音声デバッグ機能（`debug_audio_stages`）が不要になったため、`cogs/recording.py` からオプション引数・工程別ファイル保存処理・関連通知処理を削除。
+- `RecordingCog._process_audio_buffer` から工程別デバッグ出力引数を削除し、通常の正規化/容量制御フローに一本化。
+- 役目を終えた `tests/test_replay_debug_audio_stages.py` を削除し、`tests/test_replay_fallback_messaging.py` の呼び出しシグネチャを現行実装に合わせて更新。
+- `README.md` の `/replay` 説明から工程別音声保存オプションの記述を削除。
+- `python3 -m pytest` を実行し、58件すべて成功を確認。

@@ -62,7 +62,7 @@ async def test_replay_fallback_does_not_send_new_system_no_data_message(monkeypa
     ctx = FakeContext(guild_id=123)
     user = FakeUser(42, "Nymeia")
 
-    await cog._process_replay_async(ctx, duration=30.0, user=user, normalize=True, debug_audio_stages=False)
+    await cog._process_replay_async(ctx, duration=30.0, user=user, normalize=True)
 
     assert ctx.followup.messages, "フォローアップメッセージが送信されていません"
     all_content = "\n".join((m.get("content") or "") for m in ctx.followup.messages)
