@@ -192,3 +192,8 @@
 - 起動時の自動参加チェック（`_check_guild_for_auto_join`）でも同方針に揃え、既存接続がある場合の自動移動を抑止。
 - `README.md` の基本機能に「既接続中は別VC参加イベントで自動移動しない」仕様を追記。
 - `python3 -m pytest tests/test_voice_auto_join.py` と `python3 -m pytest` を実行し、61件すべて成功を確認。
+- `/replay` で「過去30秒データなし（最後の記録は約1481秒前）」が返る事象を `logs/yomiage.log` で調査し、`WaveSink callback returned no audio data` が連続して `sink.audio_data keys: []` のままになっていることを確認。
+- `utils/real_audio_recorder.py` の復旧ロジックを強化し、空コールバック連続時の軽い再開を複数回試しても改善しない場合は、同一チャンネルへVCを張り直すハードリカバリ（disconnect→connect→録音再開）を実装。
+- `tests/test_real_audio_recorder_recovery.py` にハードリカバリへの昇格テストを追加し、既存の復旧テストと合わせてTDDで挙動を固定。
+- `README.md` に空コールバック連続時のハードリカバリ仕様を追記。
+- `python3 -m pytest tests/test_real_audio_recorder_recovery.py` と `python3 -m pytest` を実行し、62件すべて成功を確認。

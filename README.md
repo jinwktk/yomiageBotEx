@@ -144,6 +144,7 @@ scripts\start.bat
 - WaveSink が空データ（`sink.audio_data keys: []`）を連続で返した場合、録音セッションを自動で再起動して復旧を試みる保護を追加
 - 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善
 - 自動復旧の再開処理で `Already recording.` 競合が出た場合は、1回だけ停止→再開を再試行して復旧成功率を上げるよう改善
+- 空コールバックが連続し軽い再開で復旧しない場合は、同一チャンネルへVCを張り直すハードリカバリを実行して録音の自己復旧を強化
 - `/replay` は新経路（ReplayBufferManager）で音声が見つからなくても即エラー返信せず、旧経路フォールバックの結果を優先して通知（`❌`→成功の二重メッセージを抑制）
 - `aead_xchacha20_poly1305_rtpsize` 利用時の受信互換性向上として、Voice受信パイプラインに互換パッチ（RTP判定と復号互換）を適用
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能

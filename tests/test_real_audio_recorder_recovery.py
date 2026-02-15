@@ -23,6 +23,7 @@ class _DummyVoiceClient:
     def __init__(self, members):
         self.recording = True
         self.channel = SimpleNamespace(members=members, name="test")
+        self.disconnect = None
 
     def is_connected(self):
         return True
@@ -142,4 +143,56 @@ async def test_recovery_retries_once_when_start_reports_already_recording(monkey
     await recorder._attempt_recover_stuck_recording(guild_id)
 
     assert calls["start"] == 2
+    assert recorder.recording_status[guild_id] is True
+
+
+@pytest.mark.asyncio
+async def test_recovery_escalates_to_hard_reconnect_after_repeated_soft_restarts(monkeypatch):
+    recorder = RealTimeAudioRecorder(None)
+    guild_id = 1004
+
+    human = SimpleNamespace(bot=False)
+    old_vc = _DummyVoiceClient([human])
+    old_vc.recording = True
+
+    connect_calls = {"count": 0}
+    new_vc = _DummyVoiceClient([human])
+    new_vc.recording = False
+
+    async def fake_disconnect():
+        return None
+
+    async def fake_connect(*, cls, reconnect):
+        connect_calls["count"] += 1
+        assert reconnect is True
+        assert cls is type(old_vc)
+        return new_vc
+
+    old_vc.disconnect = fake_disconnect
+    old_vc.channel.connect = fake_connect
+
+    recorder.connections[guild_id] = old_vc
+    recorder.recording_status[guild_id] = True
+    recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
+    recorder.HARD_RECOVERY_AFTER_SOFT_RESTARTS = 2
+    recorder._soft_recovery_restart_counts[guild_id] = 1
+
+    start_calls = {"count": 0}
+
+    async def fake_start(vc, _sink, _callback):
+        start_calls["count"] += 1
+        vc.recording = True
+
+    async def fake_stop(_vc):
+        raise AssertionError("soft restart should not run when hard reconnect is used")
+
+    monkeypatch.setattr(recorder, "_start_recording_non_blocking", fake_start)
+    monkeypatch.setattr(recorder, "_stop_recording_non_blocking", fake_stop)
+    monkeypatch.setattr(recorder, "_create_wave_sink", lambda: object())
+
+    await recorder._attempt_recover_stuck_recording(guild_id)
+
+    assert connect_calls["count"] == 1
+    assert start_calls["count"] == 1
+    assert recorder.connections[guild_id] is new_vc
     assert recorder.recording_status[guild_id] is True

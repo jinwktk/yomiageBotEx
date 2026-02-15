@@ -52,6 +52,8 @@ class RealTimeAudioRecorder:
         self._last_recovery_attempt_at: Dict[int, float] = {}
         self.EMPTY_CALLBACK_RECOVERY_THRESHOLD = 6
         self.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 20.0
+        self.HARD_RECOVERY_AFTER_SOFT_RESTARTS = 3
+        self._soft_recovery_restart_counts: Dict[int, int] = {}
         # 録音開始時刻記録（Guild別）
         self.recording_start_times: Dict[int, float] = {}
         self.BUFFER_EXPIRATION = 300  # 5分
@@ -112,6 +114,15 @@ class RealTimeAudioRecorder:
             return
         self._last_recovery_attempt_at[guild_id] = now
 
+        soft_restart_count = self._soft_recovery_restart_counts.get(guild_id, 0) + 1
+        self._soft_recovery_restart_counts[guild_id] = soft_restart_count
+
+        if soft_restart_count >= self.HARD_RECOVERY_AFTER_SOFT_RESTARTS:
+            recovered = await self._attempt_hard_reconnect(guild_id, voice_client)
+            if recovered:
+                self._soft_recovery_restart_counts[guild_id] = 0
+                return
+
         logger.warning(
             "RealTimeRecorder: Empty callbacks reached threshold for guild %s. Restarting recording session.",
             guild_id,
@@ -158,6 +169,50 @@ class RealTimeAudioRecorder:
             logger.info("RealTimeRecorder: Recovery restart completed for guild %s", guild_id)
         except Exception as e:
             logger.error("RealTimeRecorder: Recovery restart failed for guild %s: %s", guild_id, e)
+
+    async def _attempt_hard_reconnect(self, guild_id: int, voice_client) -> bool:
+        """軽い再開で復旧しない場合、VCを張り直して録音を再開"""
+        channel = getattr(voice_client, "channel", None)
+        if not channel:
+            return False
+
+        logger.warning(
+            "RealTimeRecorder: Escalating to hard reconnect for guild %s on channel %s",
+            guild_id,
+            getattr(channel, "name", "unknown"),
+        )
+
+        try:
+            try:
+                await voice_client.disconnect()
+            except Exception as disconnect_error:
+                logger.warning(
+                    "RealTimeRecorder: Hard reconnect disconnect failed for guild %s: %s",
+                    guild_id,
+                    disconnect_error,
+                )
+
+            guild = getattr(channel, "guild", None)
+            if guild is not None and getattr(guild, "_voice_client", None) is voice_client:
+                guild._voice_client = None
+
+            await asyncio.sleep(0.5)
+            new_voice_client = await channel.connect(cls=type(voice_client), reconnect=True)
+
+            new_sink = self._create_wave_sink()
+
+            async def callback(sink_obj):
+                await self._finished_callback(sink_obj, guild_id)
+
+            await self._start_recording_non_blocking(new_voice_client, new_sink, callback)
+            self.connections[guild_id] = new_voice_client
+            self.recording_status[guild_id] = True
+            self.empty_callback_counts[guild_id] = 0
+            logger.info("RealTimeRecorder: Hard reconnect completed for guild %s", guild_id)
+            return True
+        except Exception as e:
+            logger.error("RealTimeRecorder: Hard reconnect failed for guild %s: %s", guild_id, e)
+            return False
 
     def _ensure_wav_format(self, pcm_data: bytes) -> bytes:
         """PCMデータを必ずWAVフォーマットに変換"""
@@ -501,6 +556,7 @@ class RealTimeAudioRecorder:
                     await self._attempt_recover_stuck_recording(guild_id)
             else:
                 self.empty_callback_counts[guild_id] = 0
+                self._soft_recovery_restart_counts[guild_id] = 0
             
             # リレーコールバック呼び出し（音声リレー機能）
             if guild_id in self.relay_callbacks and audio_count > 0:
