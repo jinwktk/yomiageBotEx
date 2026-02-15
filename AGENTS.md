@@ -181,3 +181,9 @@
 - 役目を終えた `tests/test_replay_debug_audio_stages.py` を削除し、`tests/test_replay_fallback_messaging.py` の呼び出しシグネチャを現行実装に合わせて更新。
 - `README.md` の `/replay` 説明から工程別音声保存オプションの記述を削除。
 - `python3 -m pytest` を実行し、58件すべて成功を確認。
+- パフォーマンスチューニングとして `AudioChunk` に `pcm_data` キャッシュを追加し、`RecordingCallbackManager.process_audio_data` でWAV解析時に抽出したPCMを保持するよう変更。
+- `ReplayBufferManager._process_user_audio` を更新し、`pcm_data` があるチャンクは `wave.open` を再実行せずメタデータとPCMを直接利用する高速経路を追加。
+- `ReplayBufferManager._trim_audio_to_duration` を更新し、全フレーム読込ではなく末尾に必要なフレームだけを読み込むよう改善（大きいWAVでのメモリ負荷を低減）。
+- 新規テスト `tests/test_recording_callback_manager_pcm_cache.py` を追加し、PCMキャッシュがバッファに保存されることをTDDで固定。
+- `tests/test_replay_buffer_manager_audio.py` にPCMキャッシュ利用時の再パース回避テストを追加。
+- `python3 -m pytest tests/test_recording_callback_manager_pcm_cache.py tests/test_replay_buffer_manager_audio.py` と `python3 -m pytest` を実行し、60件すべて成功を確認。

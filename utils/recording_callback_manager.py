@@ -27,6 +27,7 @@ class AudioChunk:
     sample_rate: int = 48000
     channels: int = 2
     sample_width: int = 2
+    pcm_data: bytes = b""
 
 class RecordingCallbackManager:
     """
@@ -110,6 +111,7 @@ class RecordingCallbackManager:
             sample_rate = 48000
             channels = 2
             sample_width = 2
+            pcm_data = b""
             
             try:
                 with wave.open(io.BytesIO(audio_data), 'rb') as wav_file:
@@ -139,7 +141,8 @@ class RecordingCallbackManager:
                 duration=duration,
                 sample_rate=sample_rate,
                 channels=channels,
-                sample_width=sample_width
+                sample_width=sample_width,
+                pcm_data=pcm_data,
             )
             
             # バッファに追加

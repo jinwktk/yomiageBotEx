@@ -100,6 +100,37 @@ async def test_process_user_audio_skips_overlapping_region():
     assert 7.8 <= duration <= 8.2
 
 
+@pytest.mark.asyncio
+async def test_process_user_audio_uses_cached_pcm_when_available(monkeypatch):
+    manager = ReplayBufferManager(config={})
+    wav_data = make_wav(0.3)
+    cached_pcm = pcm_bytes(wav_data)
+    chunk = AudioChunk(
+        user_id=1,
+        guild_id=1,
+        data=wav_data,
+        timestamp=1.0,
+        duration=0.3,
+        sample_rate=48000,
+        channels=2,
+        sample_width=2,
+        pcm_data=cached_pcm,
+    )
+
+    original_wave_open = wave.open
+
+    def block_read_wave_open(file_obj, mode="rb", *args, **kwargs):
+        if "r" in mode:
+            raise AssertionError("wave.open(read) should not be called when pcm_data is available")
+        return original_wave_open(file_obj, mode, *args, **kwargs)
+
+    monkeypatch.setattr("utils.replay_buffer_manager.wave.open", block_read_wave_open)
+    merged = await manager._process_user_audio([chunk], normalize=False)
+    monkeypatch.undo()
+
+    assert pcm_bytes(merged) == cached_pcm
+
+
 def test_trim_audio_to_duration_keeps_tail():
     manager = ReplayBufferManager(config={})
     src = make_wav(12.0, channels=1)

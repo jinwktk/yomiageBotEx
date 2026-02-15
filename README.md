@@ -138,6 +138,8 @@ scripts\start.bat
 - ReplayBufferManager のユーザー結合時にチャンク時刻ベースで重複区間を除去し、同一区間の二重連結による機械音/尺伸びを抑制
 - `/replay` の出力は要求秒数を上限に末尾側へトリムするようにし、30秒指定で過剰な尺になるケースを防止
 - `/replay` 新経路の最終出力は既存の音声処理パイプライン（`_process_audio_buffer`）へ統一し、`adeclip + loudnorm` を適用して歪みを緩和
+- RecordingCallbackManager が WAV解析済みPCMを `AudioChunk` に保持し、ReplayBufferManager が再利用することで `/replay` 時のチャンク再パース負荷を軽減
+- ReplayBufferManager の末尾トリム処理は必要フレームのみ読み込む方式にして、大きなWAVのメモリ負荷を抑制
 - WaveSink が空データ（`sink.audio_data keys: []`）を連続で返した場合、録音セッションを自動で再起動して復旧を試みる保護を追加
 - 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善
 - 自動復旧の再開処理で `Already recording.` 競合が出た場合は、1回だけ停止→再開を再試行して復旧成功率を上げるよう改善

@@ -296,52 +296,71 @@ class ReplayBufferManager:
             last_end_time: Optional[float] = None
 
             for chunk in sorted_chunks:
-                if not chunk.data or len(chunk.data) <= 44:
-                    continue
+                params: Optional[Tuple[int, int, int]] = None
+                frame_count = 0
+                frames = b""
 
-                try:
-                    with wave.open(io.BytesIO(chunk.data), "rb") as wav_file:
-                        params = (
-                            wav_file.getnchannels(),
-                            wav_file.getsampwidth(),
-                            wav_file.getframerate(),
-                        )
+                cached_pcm = getattr(chunk, "pcm_data", b"")
+                cached_channels = int(getattr(chunk, "channels", 0) or 0)
+                cached_sample_width = int(getattr(chunk, "sample_width", 0) or 0)
+                cached_sample_rate = int(getattr(chunk, "sample_rate", 0) or 0)
 
-                        if target_params is None:
-                            target_params = params
-                        elif params != target_params:
-                            self.logger.warning(
-                                "Skipping chunk with mismatched WAV params: expected=%s actual=%s",
-                                target_params,
-                                params,
+                if cached_pcm and cached_channels > 0 and cached_sample_width > 0 and cached_sample_rate > 0:
+                    frame_size = cached_channels * cached_sample_width
+                    if frame_size > 0:
+                        frame_count = len(cached_pcm) // frame_size
+                        if frame_count > 0:
+                            frames = cached_pcm[: frame_count * frame_size]
+                            params = (cached_channels, cached_sample_width, cached_sample_rate)
+
+                if not frames:
+                    if not chunk.data or len(chunk.data) <= 44:
+                        continue
+                    try:
+                        with wave.open(io.BytesIO(chunk.data), "rb") as wav_file:
+                            params = (
+                                wav_file.getnchannels(),
+                                wav_file.getsampwidth(),
+                                wav_file.getframerate(),
                             )
-                            continue
+                            frame_count = wav_file.getnframes()
+                            frames = wav_file.readframes(frame_count)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to parse user audio chunk as WAV: {e}")
+                        continue
 
-                        frame_count = wav_file.getnframes()
-                        frames = wav_file.readframes(frame_count)
-                        if frames:
-                            # チャンク間の重複区間を除去（チェックポイント再開時の重複対策）
-                            sample_rate = params[2]
-                            channels = params[0]
-                            sample_width = params[1]
-                            duration = frame_count / sample_rate if sample_rate > 0 else 0.0
-                            chunk_end = float(getattr(chunk, "timestamp", 0.0))
-                            chunk_start = chunk_end - duration
-
-                            if last_end_time is not None and chunk_start < last_end_time:
-                                overlap_seconds = last_end_time - chunk_start
-                                if overlap_seconds > 0 and sample_rate > 0:
-                                    skip_frames = int(overlap_seconds * sample_rate)
-                                    skip_bytes = skip_frames * channels * sample_width
-                                    if skip_bytes >= len(frames):
-                                        continue
-                                    frames = frames[skip_bytes:]
-
-                            combined_pcm.write(frames)
-                            last_end_time = chunk_end if last_end_time is None else max(last_end_time, chunk_end)
-                except Exception as e:
-                    self.logger.warning(f"Failed to parse user audio chunk as WAV: {e}")
+                if not params or not frames:
                     continue
+
+                if target_params is None:
+                    target_params = params
+                elif params != target_params:
+                    self.logger.warning(
+                        "Skipping chunk with mismatched WAV params: expected=%s actual=%s",
+                        target_params,
+                        params,
+                    )
+                    continue
+
+                # チャンク間の重複区間を除去（チェックポイント再開時の重複対策）
+                sample_rate = params[2]
+                channels = params[0]
+                sample_width = params[1]
+                duration = frame_count / sample_rate if sample_rate > 0 else 0.0
+                chunk_end = float(getattr(chunk, "timestamp", 0.0))
+                chunk_start = chunk_end - duration
+
+                if last_end_time is not None and chunk_start < last_end_time:
+                    overlap_seconds = last_end_time - chunk_start
+                    if overlap_seconds > 0 and sample_rate > 0:
+                        skip_frames = int(overlap_seconds * sample_rate)
+                        skip_bytes = skip_frames * channels * sample_width
+                        if skip_bytes >= len(frames):
+                            continue
+                        frames = frames[skip_bytes:]
+
+                combined_pcm.write(frames)
+                last_end_time = chunk_end if last_end_time is None else max(last_end_time, chunk_end)
 
             if target_params is None:
                 return b""
@@ -405,18 +424,16 @@ class ReplayBufferManager:
                 sample_width = wav_file.getsampwidth()
                 sample_rate = wav_file.getframerate()
                 total_frames = wav_file.getnframes()
-                frames = wav_file.readframes(total_frames)
+                if sample_rate <= 0:
+                    return audio_data
 
-            if sample_rate <= 0:
-                return audio_data
+                max_frames = int(max_duration_seconds * sample_rate)
+                if total_frames <= max_frames:
+                    return audio_data
 
-            max_frames = int(max_duration_seconds * sample_rate)
-            if total_frames <= max_frames:
-                return audio_data
-
-            frame_size = channels * sample_width
-            keep_bytes = max_frames * frame_size
-            trimmed_frames = frames[-keep_bytes:]
+                start_frame = max(total_frames - max_frames, 0)
+                wav_file.setpos(start_frame)
+                trimmed_frames = wav_file.readframes(max_frames)
 
             output = io.BytesIO()
             with wave.open(output, "wb") as wav_out:
