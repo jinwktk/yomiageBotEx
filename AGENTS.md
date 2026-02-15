@@ -172,3 +172,7 @@
 - `bot.py` で旧 `patch_voice_decrypt_errors` を廃止し、新しい `apply_voice_receive_patch` を起動時に適用する構成へ変更。
 - `tests/test_voice_receive_patch.py` を追加し、(1) RTPマーカービット付きpayloadの受信、(2)非音声payloadの除外、(3)旧rtpsize復号経路の8バイト補正をTDDで検証。
 - `python3 -m pytest` を実行し、58件すべて成功を確認。
+- `/replay` 実行時に新経路が音声データなしでも旧経路フォールバックで成功するケースで、先に `❌` が出る二重通知を確認。
+- `cogs/recording.py` の `_process_new_replay_async` に `suppress_no_data_message` を追加し、フォールバック前提呼び出しでは新経路の失敗メッセージを抑止するよう修正。
+- `tests/test_replay_fallback_messaging.py` を追加し、`❌` が先行せず最終結果のみ通知されることをTDDで固定。
+- `python3 -m pytest` を実行し、59件すべて成功を確認。

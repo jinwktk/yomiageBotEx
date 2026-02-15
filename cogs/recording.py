@@ -420,6 +420,7 @@ class RecordingCog(commands.Cog):
                     user,
                     normalize,
                     debug_audio_stages=debug_audio_stages,
+                    suppress_no_data_message=True,
                 )
                 if replay_result:
                     return
@@ -1138,6 +1139,7 @@ class RecordingCog(commands.Cog):
         user,
         normalize: bool,
         debug_audio_stages: bool = False,
+        suppress_no_data_message: bool = False,
     ):
         """新システム（ReplayBufferManager）でのreplayコマンド処理。成功時はTrueを返す"""
         try:
@@ -1163,12 +1165,13 @@ class RecordingCog(commands.Cog):
             )
             
             if not result:
-                user_mention = f"@{user.display_name}" if user else "全ユーザー"
-                await ctx.followup.send(
-                    content=f"❌ {user_mention} の過去{duration:.1f}秒間の音声データが見つかりません。\n"
-                            "ボイスチャンネルで音声が発生してから、少し時間をおいて再度お試しください。",
-                    ephemeral=True
-                )
+                if not suppress_no_data_message:
+                    user_mention = f"@{user.display_name}" if user else "全ユーザー"
+                    await ctx.followup.send(
+                        content=f"❌ {user_mention} の過去{duration:.1f}秒間の音声データが見つかりません。\n"
+                                "ボイスチャンネルで音声が発生してから、少し時間をおいて再度お試しください。",
+                        ephemeral=True
+                    )
                 return False
             
             # 統計情報をログ出力
