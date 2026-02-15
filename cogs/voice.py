@@ -220,10 +220,14 @@ class VoiceCog(commands.Cog):
                     # 既に接続中かチェック
                     if guild.voice_client:
                         self.logger.info(f"Already connected to {guild.voice_client.channel.name} in {guild.name}, skipping join")
-                        # 接続チャンネルが異なる場合は移動
+                        # 既存接続を優先し、自動移動は行わない
                         if guild.voice_client.channel != channel:
-                            self.logger.info(f"Moving from {guild.voice_client.channel.name} to {channel.name}")
-                            await guild.voice_client.move_to(channel)
+                            self.logger.info(
+                                "Keeping current channel %s in %s; skip auto-move to %s",
+                                guild.voice_client.channel.name,
+                                guild.name,
+                                channel.name,
+                            )
                         continue
                     
                     try:
@@ -311,15 +315,14 @@ class VoiceCog(commands.Cog):
                         self.logger.error(f"Failed to start recording on user join: {e}")
                 return
             
-            # 別のチャンネルに移動
-            try:
-                await voice_client.move_to(channel)
-                self.logger.info(f"Moved to voice channel: {channel.name} in {guild.name}")
-                self.save_sessions()
-                # 移動後に他のCogに通知
-                await self.notify_bot_joined_channel(guild, channel)
-            except Exception as e:
-                self.logger.error(f"Failed to move to voice channel: {e}")
+            # 既存接続を維持（ユーザー参加トリガーでの自動移動はしない）
+            self.logger.info(
+                "Already connected to %s in %s; skip auto-move to %s",
+                voice_client.channel.name,
+                guild.name,
+                channel.name,
+            )
+            return
         else:
             if voice_client:
                 self.logger.warning(f"Detected stale voice client in {guild.name}, attempting reconnect")

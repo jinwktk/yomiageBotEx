@@ -187,3 +187,8 @@
 - 新規テスト `tests/test_recording_callback_manager_pcm_cache.py` を追加し、PCMキャッシュがバッファに保存されることをTDDで固定。
 - `tests/test_replay_buffer_manager_audio.py` にPCMキャッシュ利用時の再パース回避テストを追加。
 - `python3 -m pytest tests/test_recording_callback_manager_pcm_cache.py tests/test_replay_buffer_manager_audio.py` と `python3 -m pytest` を実行し、60件すべて成功を確認。
+- 「Botが既にVC接続中に、別チャンネルへ人が参加すると勝手に移動する」報告に対応するため、`tests/test_voice_auto_join.py` に「別VC参加時は移動しない」回帰テストを追加してTDDで先に失敗を確認。
+- `cogs/voice.py` の `handle_user_join` を修正し、接続中チャンネルと異なるVCへの参加イベントでは `move_to` せず現在の接続先を維持するよう変更。
+- 起動時の自動参加チェック（`_check_guild_for_auto_join`）でも同方針に揃え、既存接続がある場合の自動移動を抑止。
+- `README.md` の基本機能に「既接続中は別VC参加イベントで自動移動しない」仕様を追記。
+- `python3 -m pytest tests/test_voice_auto_join.py` と `python3 -m pytest` を実行し、61件すべて成功を確認。
