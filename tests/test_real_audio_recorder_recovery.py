@@ -1,4 +1,5 @@
 import io
+import time
 import wave
 from types import SimpleNamespace
 
@@ -40,6 +41,7 @@ async def test_finished_callback_recovers_when_empty_callbacks_repeat(monkeypatc
 
     recorder.connections[guild_id] = vc
     recorder.recording_status[guild_id] = True
+    recorder._last_non_empty_audio_at[guild_id] = time.time()
     recorder.EMPTY_CALLBACK_RECOVERY_THRESHOLD = 2
     recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
 
@@ -91,6 +93,7 @@ async def test_recovery_continues_when_stop_recording_reports_not_recording(monk
 
     recorder.connections[guild_id] = vc
     recorder.recording_status[guild_id] = True
+    recorder._last_non_empty_audio_at[guild_id] = time.time()
     recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
 
     calls = {"start": 0}
@@ -121,6 +124,7 @@ async def test_recovery_retries_once_when_start_reports_already_recording(monkey
 
     recorder.connections[guild_id] = vc
     recorder.recording_status[guild_id] = True
+    recorder._last_non_empty_audio_at[guild_id] = time.time()
     recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
 
     calls = {"stop": 0, "start": 0}
@@ -173,6 +177,7 @@ async def test_recovery_escalates_to_hard_reconnect_after_repeated_soft_restarts
 
     recorder.connections[guild_id] = old_vc
     recorder.recording_status[guild_id] = True
+    recorder._last_non_empty_audio_at[guild_id] = time.time()
     recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
     recorder.HARD_RECOVERY_AFTER_SOFT_RESTARTS = 2
     recorder._soft_recovery_restart_counts[guild_id] = 1
@@ -196,3 +201,38 @@ async def test_recovery_escalates_to_hard_reconnect_after_repeated_soft_restarts
     assert start_calls["count"] == 1
     assert recorder.connections[guild_id] is new_vc
     assert recorder.recording_status[guild_id] is True
+
+
+@pytest.mark.asyncio
+async def test_recovery_skips_when_no_recent_non_empty_audio(monkeypatch):
+    recorder = RealTimeAudioRecorder(None)
+    guild_id = 1005
+
+    human = SimpleNamespace(bot=False)
+    vc = _DummyVoiceClient([human])
+    vc.recording = True
+
+    recorder.connections[guild_id] = vc
+    recorder.recording_status[guild_id] = True
+    recorder.EMPTY_CALLBACK_RECOVERY_THRESHOLD = 2
+    recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
+    recorder.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS = 60.0
+
+    calls = {"stop": 0, "start": 0}
+
+    async def fake_stop(_vc):
+        calls["stop"] += 1
+
+    async def fake_start(_vc, _sink, _callback):
+        calls["start"] += 1
+
+    monkeypatch.setattr(recorder, "_stop_recording_non_blocking", fake_stop)
+    monkeypatch.setattr(recorder, "_start_recording_non_blocking", fake_start)
+    monkeypatch.setattr(recorder, "_create_wave_sink", lambda: object())
+
+    empty_sink = SimpleNamespace(audio_data={})
+    await recorder._finished_callback(empty_sink, guild_id)
+    await recorder._finished_callback(empty_sink, guild_id)
+
+    assert calls["stop"] == 0
+    assert calls["start"] == 0

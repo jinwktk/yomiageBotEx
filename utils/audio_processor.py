@@ -20,8 +20,31 @@ class AudioProcessor:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.ffmpeg_available = self._check_ffmpeg()
-        self.normalize_enabled = config.get("audio_processing", {}).get("normalize", True)
-        self.target_level = config.get("audio_processing", {}).get("target_level", -16.0)  # dBFS
+        audio_config = config.get("audio_processing", {})
+        self.normalize_enabled = audio_config.get("normalize", True)
+        self.target_level = audio_config.get("target_level", -16.0)  # dBFS
+        self.trim_silence = audio_config.get("trim_silence", False)
+        self.silence_remove_min_duration = float(audio_config.get("silence_remove_min_duration", 2.0))
+        self.silence_threshold_db = float(audio_config.get("silence_threshold_db", -45.0))
+
+    def _build_normalize_filter_chain(self) -> str:
+        """ノーマライズ用フィルターチェーンを構築"""
+        filters = [
+            "adeclip",
+            "highpass=f=80",
+            "lowpass=f=8000",
+        ]
+
+        # 2秒以上の無音を除去（先頭/末尾/中間）
+        if self.trim_silence:
+            filters.append(
+                "silenceremove="
+                f"start_periods=1:start_duration={self.silence_remove_min_duration}:start_threshold={self.silence_threshold_db}dB:"
+                f"stop_periods=-1:stop_duration={self.silence_remove_min_duration}:stop_threshold={self.silence_threshold_db}dB"
+            )
+
+        filters.append(f"loudnorm=I={self.target_level}:TP=-2.0:LRA=11")
+        return ",".join(filters)
         
     def _check_ffmpeg(self) -> bool:
         """FFmpegの利用可能性をチェック"""
@@ -122,7 +145,7 @@ class AudioProcessor:
             cmd = [
                 "ffmpeg", "-y",  # -y: 上書き確認なし
                 "-i", input_path,
-                "-af", f"adeclip,highpass=f=80,lowpass=f=8000,loudnorm=I={self.target_level}:TP=-2.0:LRA=11",
+                "-af", self._build_normalize_filter_chain(),
                 "-c:a", "pcm_s16le",  # 16-bit PCM
                 "-ar", "48000",  # 48kHz（Discord標準）
                 "-ac", "2",  # ステレオ

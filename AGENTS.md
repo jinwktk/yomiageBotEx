@@ -197,3 +197,15 @@
 - `tests/test_real_audio_recorder_recovery.py` にハードリカバリへの昇格テストを追加し、既存の復旧テストと合わせてTDDで挙動を固定。
 - `README.md` に空コールバック連続時のハードリカバリ仕様を追記。
 - `python3 -m pytest tests/test_real_audio_recorder_recovery.py` と `python3 -m pytest` を実行し、62件すべて成功を確認。
+- 「2秒以上の無音を削除したい」要望に対応するため、`tests/test_audio_processor_silence_trim.py` を追加し、ノーマライズ用フィルターチェーンで `silenceremove` の有効/無効が切り替わることをTDDで先に失敗確認。
+- `utils/audio_processor.py` に `_build_normalize_filter_chain` を追加し、`audio_processing.trim_silence=true` のとき `silenceremove`（`start_duration/stop_duration`）を組み込むよう実装。
+- `normalize_audio` で固定文字列ではなくフィルタービルダーを使うよう変更し、無音除去の閾値を設定から制御可能にした。
+- `config.yaml` に `audio_processing.trim_silence` / `silence_remove_min_duration` / `silence_threshold_db` を追加（デフォルトで2秒以上無音を除去）。
+- `README.md` に `/replay` 正規化時の2秒無音除去仕様を追記。
+- `python3 -m pytest tests/test_audio_processor_silence_trim.py` と `python3 -m pytest` を実行し、64件すべて成功を確認。
+- 「Botが出入りを繰り返す」報告を `logs/yomiage.log` で調査し、`WaveSink callback returned no audio data` が継続する無音状態でも自動復旧がエスカレートしてVC再接続（ハードリカバリ）を繰り返す経路を確認。
+- `tests/test_real_audio_recorder_recovery.py` を更新し、最近の非空音声取得実績が無い場合は復旧をスキップするテストを追加。既存復旧テストには直近音声時刻をセットして期待挙動を維持するよう調整。
+- `utils/real_audio_recorder.py` に `RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS` / `_last_non_empty_audio_at` を追加し、最近の非空音声が無いギルドでは自動復旧を抑止してVC出入りループを防止。
+- 非空音声を受信したタイミングで `self._last_non_empty_audio_at[guild_id]` を更新し、復旧判定を再開するよう修正。
+- `README.md` に「無音時の過剰な自動再接続抑止」仕様を追記。
+- `python3 -m pytest tests/test_real_audio_recorder_recovery.py`、`python3 -m pytest tests/test_audio_processor_silence_trim.py tests/test_real_audio_recorder_recovery.py`、`python3 -m pytest` を実行し、65件すべて成功を確認。

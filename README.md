@@ -139,12 +139,14 @@ scripts\start.bat
 - ReplayBufferManager のユーザー結合時にチャンク時刻ベースで重複区間を除去し、同一区間の二重連結による機械音/尺伸びを抑制
 - `/replay` の出力は要求秒数を上限に末尾側へトリムするようにし、30秒指定で過剰な尺になるケースを防止
 - `/replay` 新経路の最終出力は既存の音声処理パイプライン（`_process_audio_buffer`）へ統一し、`adeclip + loudnorm` を適用して歪みを緩和
+- `/replay` の正規化処理で `silenceremove` を適用し、2秒以上の無音区間を自動除去（`audio_processing.trim_silence` で切替可能）
 - RecordingCallbackManager が WAV解析済みPCMを `AudioChunk` に保持し、ReplayBufferManager が再利用することで `/replay` 時のチャンク再パース負荷を軽減
 - ReplayBufferManager の末尾トリム処理は必要フレームのみ読み込む方式にして、大きなWAVのメモリ負荷を抑制
 - WaveSink が空データ（`sink.audio_data keys: []`）を連続で返した場合、録音セッションを自動で再起動して復旧を試みる保護を追加
 - 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善
 - 自動復旧の再開処理で `Already recording.` 競合が出た場合は、1回だけ停止→再開を再試行して復旧成功率を上げるよう改善
 - 空コールバックが連続し軽い再開で復旧しない場合は、同一チャンネルへVCを張り直すハードリカバリを実行して録音の自己復旧を強化
+- 直近に非空の音声取得実績がない場合は自動復旧を抑止し、無音時のVC再接続ループ（出入り繰り返し）を防止
 - `/replay` は新経路（ReplayBufferManager）で音声が見つからなくても即エラー返信せず、旧経路フォールバックの結果を優先して通知（`❌`→成功の二重メッセージを抑制）
 - `aead_xchacha20_poly1305_rtpsize` 利用時の受信互換性向上として、Voice受信パイプラインに互換パッチ（RTP判定と復号互換）を適用
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能

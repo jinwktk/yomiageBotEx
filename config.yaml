@@ -13,6 +13,9 @@ bot:
 audio_processing:
   normalize: true           # 音声ノーマライズ機能の有効/無効
   target_level: -16.0       # ターゲットレベル（dBFS）
+  trim_silence: true        # 2秒以上の無音区間を除去
+  silence_remove_min_duration: 2.0  # 無音として除去する最小継続秒数
+  silence_threshold_db: -45.0        # 無音判定しきい値（dB）
   filters:                  # 適用するフィルター
     - "highpass=f=80"       # ローカットフィルター
     - "lowpass=f=8000"      # ハイカットフィルター

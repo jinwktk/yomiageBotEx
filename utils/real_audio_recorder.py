@@ -54,6 +54,8 @@ class RealTimeAudioRecorder:
         self.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 20.0
         self.HARD_RECOVERY_AFTER_SOFT_RESTARTS = 3
         self._soft_recovery_restart_counts: Dict[int, int] = {}
+        self.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS = 180.0
+        self._last_non_empty_audio_at: Dict[int, float] = {}
         # 録音開始時刻記録（Guild別）
         self.recording_start_times: Dict[int, float] = {}
         self.BUFFER_EXPIRATION = 300  # 5分
@@ -113,6 +115,15 @@ class RealTimeAudioRecorder:
         if now - last_attempt < self.EMPTY_CALLBACK_RECOVERY_COOLDOWN:
             return
         self._last_recovery_attempt_at[guild_id] = now
+
+        last_audio_at = self._last_non_empty_audio_at.get(guild_id)
+        if not last_audio_at or (now - last_audio_at) > self.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS:
+            logger.info(
+                "RealTimeRecorder: Skip auto-recovery for guild %s (no recent non-empty audio in %.1fs)",
+                guild_id,
+                self.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS,
+            )
+            return
 
         soft_restart_count = self._soft_recovery_restart_counts.get(guild_id, 0) + 1
         self._soft_recovery_restart_counts[guild_id] = soft_restart_count
@@ -557,6 +568,7 @@ class RealTimeAudioRecorder:
             else:
                 self.empty_callback_counts[guild_id] = 0
                 self._soft_recovery_restart_counts[guild_id] = 0
+                self._last_non_empty_audio_at[guild_id] = time.time()
             
             # リレーコールバック呼び出し（音声リレー機能）
             if guild_id in self.relay_callbacks and audio_count > 0:
