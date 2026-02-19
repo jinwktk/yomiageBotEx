@@ -111,4 +111,5 @@ async def test_replay_prefers_replay_buffer_manager(monkeypatch, tmp_path):
     assert fake_manager.calls, "ReplayBufferManager を呼び出していません"
     assert sent_files, "Discord.File が作成されていません"
     assert ctx.followup.messages, "フォローアップ応答が送信されていません"
+    assert ctx.followup.messages[-1].get("view") is not None, "公開送信用ボタンViewが付与されていません"
     assert not cog.real_time_recorder.accessed, "ReplayBufferManager 成功時に旧システムへフォールバックしています"

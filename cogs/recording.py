@@ -40,6 +40,55 @@ class ReplayEntry:
     path: Path
 
 
+class ReplayShareView(discord.ui.View):
+    """エフェメラルの /replay 結果を公開チャンネルへ共有するボタン"""
+
+    def __init__(self, requester_id: Optional[int], filename: str, audio_data: bytes, public_content: str):
+        super().__init__(timeout=600)
+        self.requester_id = requester_id
+        self.filename = filename
+        self.audio_data = audio_data
+        self.public_content = public_content
+        self._shared = False
+
+    @discord.ui.button(
+        label="みんなに見えるメッセージで送信",
+        style=discord.ButtonStyle.primary,
+    )
+    async def share_public(self, button: discord.ui.Button, interaction: discord.Interaction):
+        if self.requester_id is not None and interaction.user and interaction.user.id != self.requester_id:
+            await interaction.response.send_message(
+                "⚠️ このボタンはコマンド実行者のみ使用できます。",
+                ephemeral=True,
+            )
+            return
+
+        if self._shared:
+            await interaction.response.send_message(
+                "ℹ️ すでに公開送信済みです。",
+                ephemeral=True,
+            )
+            return
+
+        if not interaction.channel:
+            await interaction.response.send_message(
+                "⚠️ 送信先チャンネルを取得できませんでした。",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.channel.send(
+            content=self.public_content,
+            file=discord.File(io.BytesIO(self.audio_data), filename=self.filename),
+        )
+        self._shared = True
+        button.disabled = True
+        await interaction.response.send_message(
+            "✅ みんなに見えるメッセージで送信しました。",
+            ephemeral=True,
+        )
+
+
 class RecordingCog(commands.Cog):
     """録音・リプレイ機能を提供するCog"""
     
@@ -145,6 +194,46 @@ class RecordingCog(commands.Cog):
         )
         self.replay_history[guild_id].append(entry)
         self._cleanup_replay_history(guild_id)
+
+    def _resolve_requester(self, ctx) -> Optional[discord.abc.User]:
+        return getattr(ctx, "user", None) or getattr(ctx, "author", None)
+
+    def _build_replay_public_content(self, private_content: Optional[str], ctx) -> str:
+        requester = self._resolve_requester(ctx)
+        requester_mention = getattr(requester, "mention", None)
+        header = "📢 /replay で生成した音声です。"
+        if requester_mention:
+            header = f"📢 {requester_mention} が /replay で生成した音声です。"
+        if private_content:
+            return f"{header}\n{private_content}"
+        return header
+
+    async def _send_replay_with_share_button(
+        self,
+        ctx,
+        *,
+        filename: str,
+        audio_data: bytes,
+        content: Optional[str] = None,
+        embed: Optional[discord.Embed] = None,
+        public_content: Optional[str] = None,
+    ):
+        requester = self._resolve_requester(ctx)
+        requester_id = getattr(requester, "id", None)
+        resolved_public_content = public_content or self._build_replay_public_content(content, ctx)
+        view = ReplayShareView(
+            requester_id=requester_id,
+            filename=filename,
+            audio_data=audio_data,
+            public_content=resolved_public_content,
+        )
+        await ctx.followup.send(
+            content=content,
+            embed=embed,
+            file=discord.File(io.BytesIO(audio_data), filename=filename),
+            view=view,
+            ephemeral=True,
+        )
 
     def _store_manual_recording(
         self,
@@ -423,10 +512,11 @@ class RecordingCog(commands.Cog):
                         data=processed_data,
                     )
 
-                    await ctx.followup.send(
-                        f"🎵 {user.mention} の録音です（過去{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
-                        file=discord.File(io.BytesIO(processed_data), filename=filename),
-                        ephemeral=True
+                    await self._send_replay_with_share_button(
+                        ctx,
+                        content=f"🎵 {user.mention} の録音です（過去{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
+                        filename=filename,
+                        audio_data=processed_data,
                     )
                     return
                 
@@ -474,10 +564,11 @@ class RecordingCog(commands.Cog):
                         data=processed_data,
                     )
 
-                    await ctx.followup.send(
-                        f"🎵 全員の録音です（過去{duration}秒分、{user_count}人、{'ノーマライズ済み' if normalize else '無加工'}）",
-                        file=discord.File(io.BytesIO(processed_data), filename=filename),
-                        ephemeral=True
+                    await self._send_replay_with_share_button(
+                        ctx,
+                        content=f"🎵 全員の録音です（過去{duration}秒分、{user_count}人、{'ノーマライズ済み' if normalize else '無加工'}）",
+                        filename=filename,
+                        audio_data=processed_data,
                     )
                     return
             
@@ -524,10 +615,11 @@ class RecordingCog(commands.Cog):
                     data=processed_data,
                 )
 
-                await ctx.followup.send(
-                    f"🎵 {user.mention} の録音です（約{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
-                    file=discord.File(io.BytesIO(processed_data), filename=filename),
-                    ephemeral=True
+                await self._send_replay_with_share_button(
+                    ctx,
+                    content=f"🎵 {user.mention} の録音です（約{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
+                    filename=filename,
+                    audio_data=processed_data,
                 )
                 
             else:
@@ -592,10 +684,11 @@ class RecordingCog(commands.Cog):
                     data=processed_data,
                 )
 
-                await ctx.followup.send(
-                    f"🎵 全員の録音です（{user_count}人分、{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
-                    file=discord.File(io.BytesIO(processed_data), filename=filename),
-                    ephemeral=True
+                await self._send_replay_with_share_button(
+                    ctx,
+                    content=f"🎵 全員の録音です（{user_count}人分、{duration}秒分、{'ノーマライズ済み' if normalize else '無加工'}）",
+                    filename=filename,
+                    audio_data=processed_data,
                 )
             
             self.logger.info(f"Replaying {duration}s audio (user: {user}) for {ctx.user} in {ctx.guild.name}")
@@ -1068,9 +1161,6 @@ class RecordingCog(commands.Cog):
                 data=processed_audio,
             )
 
-            # Discordファイルとして送信
-            file = discord.File(io.BytesIO(processed_audio), filename=filename)
-            
             # レスポンス更新（ファイル添付）
             embed = discord.Embed(
                 title="🎵 録音完了（新システム）",
@@ -1090,11 +1180,13 @@ class RecordingCog(commands.Cog):
             
             embed.set_footer(text=f"新録音システム • {timestamp}")
             
-            await ctx.followup.send(
+            await self._send_replay_with_share_button(
+                ctx,
                 content="",
                 embed=embed,
-                file=file,
-                ephemeral=True
+                filename=filename,
+                audio_data=processed_audio,
+                public_content=f"🎵 /replay の音声を共有します。\n{description}",
             )
             
             self.logger.info(f"New replay sent successfully: {filename}")

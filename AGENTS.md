@@ -216,3 +216,10 @@
 - `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv sync --all-extras` 後に `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest` を実行し、65件すべて成功することを確認。
 - `README.md` のTTS機能説明を更新し、入退室挨拶の対応表記を `py-cord 2.7.1` ベースへ修正。
 - 変更ファイル: `pyproject.toml`, `uv.lock`, `README.md`, `AGENTS.md`。
+- `/replay` 結果を公開投稿できるよう、`cogs/recording.py` に `ReplayShareView`（ボタン）と共通送信ヘルパー `_send_replay_with_share_button` を追加。
+- `/replay` の成功返信（新経路・旧経路の両方）をボタン付きエフェメラル送信へ統一し、ボタン押下で同じWAVを通常チャネルへ送信できるようにした。
+- 実行者以外のボタン利用を拒否する制御を `ReplayShareView` に追加し、誤操作を防止。
+- TDDとして `tests/test_replay_share_view.py` を新規追加し、(1)公開投稿されること、(2)実行者以外は拒否されることを先に失敗で確認してから実装。
+- 既存回帰として `tests/test_replay_buffer_integration.py` に `view` 付与の検証を追加。
+- `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest tests/test_replay_buffer_integration.py tests/test_replay_share_view.py` と `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest` を実行し、67件すべて成功を確認。
+- 変更ファイル: `cogs/recording.py`, `tests/test_replay_share_view.py`, `tests/test_replay_buffer_integration.py`, `README.md`, `AGENTS.md`。
