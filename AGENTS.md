@@ -209,3 +209,10 @@
 - 非空音声を受信したタイミングで `self._last_non_empty_audio_at[guild_id]` を更新し、復旧判定を再開するよう修正。
 - `README.md` に「無音時の過剰な自動再接続抑止」仕様を追記。
 - `python3 -m pytest tests/test_real_audio_recorder_recovery.py`、`python3 -m pytest tests/test_audio_processor_silence_trim.py tests/test_real_audio_recorder_recovery.py`、`python3 -m pytest` を実行し、65件すべて成功を確認。
+
+## 2026-02-19
+- 依存ライブラリを更新するため、`pyproject.toml` の `py-cord[voice]` を PRブランチ参照から `2.7.1` 固定へ変更。
+- `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv lock` を実行し、`uv.lock` の依存解決結果を更新（`py-cord 2.7.1` / `PyNaCl 1.6.2` などへ反映）。
+- `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv sync --all-extras` 後に `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest` を実行し、65件すべて成功することを確認。
+- `README.md` のTTS機能説明を更新し、入退室挨拶の対応表記を `py-cord 2.7.1` ベースへ修正。
+- 変更ファイル: `pyproject.toml`, `uv.lock`, `README.md`, `AGENTS.md`。
