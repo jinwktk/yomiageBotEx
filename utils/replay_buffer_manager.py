@@ -59,6 +59,9 @@ class ReplayBufferManager:
         self.max_duration = self.replay_config.get("max_duration", 300)  # 最大5分
         self.max_file_size_mb = self.replay_config.get("max_file_size_mb", 50)  # 最大50MB
         self.default_duration = self.replay_config.get("default_duration", 30)  # デフォルト30秒
+        self.chunk_gap_silence_seconds = float(
+            self.replay_config.get("chunk_gap_silence_seconds", 0.5)
+        )
         
         # リクエスト処理管理
         self.processing_requests: Dict[str, asyncio.Event] = {}
@@ -358,6 +361,15 @@ class ReplayBufferManager:
                         if skip_bytes >= len(frames):
                             continue
                         frames = frames[skip_bytes:]
+                elif (
+                    last_end_time is not None
+                    and self.chunk_gap_silence_seconds > 0
+                    and chunk_start >= last_end_time
+                ):
+                    silence_frames = int(sample_rate * self.chunk_gap_silence_seconds)
+                    silence_bytes = silence_frames * channels * sample_width
+                    if silence_bytes > 0:
+                        combined_pcm.write(b"\x00" * silence_bytes)
 
                 combined_pcm.write(frames)
                 last_end_time = chunk_end if last_end_time is None else max(last_end_time, chunk_end)

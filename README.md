@@ -88,7 +88,7 @@ scripts\start.bat
 - ロギング設定
 - レート制限設定
 - 辞書設定
-- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用するか制御可能）
+- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能）
 
 詳細は`config.yaml`のコメントを参照してください。
 
@@ -137,6 +137,7 @@ scripts\start.bat
 - `/replay`（ユーザー指定）の結合時に16bit PCMピークを抑制するクリップ保護を追加
 - RealTimeAudioRecorder の `finished_callback` は接続中VoiceClientの `recording` 状態に同期してフラグ更新するよう修正し、チェックポイント後に録音ループが止まる競合を防止
 - ReplayBufferManager のユーザー結合時にチャンク時刻ベースで重複区間を除去し、同一区間の二重連結による機械音/尺伸びを抑制
+- ReplayBufferManager のユーザー音声連結時にチャンク間へデフォルト0.5秒の無音を挿入し、連結境界を聞き取りやすく改善（`recording.chunk_gap_silence_seconds` で調整可能）
 - `/replay` の出力は要求秒数を上限に末尾側へトリムするようにし、30秒指定で過剰な尺になるケースを防止
 - `/replay` 新経路の最終出力は既存の音声処理パイプライン（`_process_audio_buffer`）へ統一し、`adeclip + loudnorm` を適用して歪みを緩和
 - `/replay` の正規化処理で `silenceremove` を適用し、2秒以上の無音区間を自動除去（`audio_processing.trim_silence` で切替可能）

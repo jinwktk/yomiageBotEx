@@ -53,7 +53,12 @@ async def test_process_user_audio_parses_variable_wav_header():
 
     merged = await manager._process_user_audio(chunks, normalize=False)
 
-    expected_pcm = pcm_bytes(chunk1) + pcm_bytes(chunk2)
+    channels = 2
+    sample_width = 2
+    sample_rate = 48000
+    silence_frames = int(sample_rate * 0.5)
+    expected_silence = b"\x00" * silence_frames * channels * sample_width
+    expected_pcm = pcm_bytes(chunk1) + expected_silence + pcm_bytes(chunk2)
     actual_pcm = pcm_bytes(merged)
 
     assert actual_pcm == expected_pcm

@@ -223,3 +223,8 @@
 - 既存回帰として `tests/test_replay_buffer_integration.py` に `view` 付与の検証を追加。
 - `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest tests/test_replay_buffer_integration.py tests/test_replay_share_view.py` と `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest` を実行し、67件すべて成功を確認。
 - 変更ファイル: `cogs/recording.py`, `tests/test_replay_share_view.py`, `tests/test_replay_buffer_integration.py`, `README.md`, `AGENTS.md`。
+- `/replay` の音声連結境界を聞き取りやすくするため、`ReplayBufferManager._process_user_audio` で非重複チャンク間へ0.5秒の無音を挿入する仕様に変更。
+- 設定値 `recording.chunk_gap_silence_seconds` を追加し、無音挿入秒数を `config.yaml` で調整可能にした（デフォルト0.5秒）。
+- TDDとして `tests/test_replay_buffer_manager_audio.py::test_process_user_audio_parses_variable_wav_header` を更新し、連結時に0.5秒無音が挿入されることを先に失敗で確認してから実装。
+- `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest tests/test_replay_buffer_manager_audio.py` と `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest` を実行し、67件すべて成功を確認。
+- 変更ファイル: `utils/replay_buffer_manager.py`, `tests/test_replay_buffer_manager_audio.py`, `config.yaml`, `README.md`, `AGENTS.md`。
