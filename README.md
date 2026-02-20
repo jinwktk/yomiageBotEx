@@ -88,7 +88,7 @@ scripts\start.bat
 - ロギング設定
 - レート制限設定
 - 辞書設定
-- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能、`callback_buffer_max_*_mb` で録音チャンク保持メモリ上限を制御）
+- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能、`callback_buffer_max_*_mb` で録音チャンク保持メモリ上限を制御。デフォルトは `user=32MB / guild=128MB / total=512MB`）
 
 詳細は`config.yaml`のコメントを参照してください。
 

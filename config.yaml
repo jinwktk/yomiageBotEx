@@ -29,9 +29,9 @@ recording:
   prefer_replay_buffer_manager: true # 新リプレイシステムを常に優先するかどうか
   chunk_gap_silence_seconds: 0.5 # 連結するチャンク間に挿入する無音秒数
   callback_max_chunk_size_mb: 10 # RecordingCallbackManagerが受け付ける1チャンク上限
-  callback_buffer_max_user_mb: 64 # RecordingCallbackManagerのユーザー別メモリ上限
-  callback_buffer_max_guild_mb: 256 # RecordingCallbackManagerのギルド別メモリ上限
-  callback_buffer_max_total_mb: 1024 # RecordingCallbackManager全体メモリ上限
+  callback_buffer_max_user_mb: 32 # RecordingCallbackManagerのユーザー別メモリ上限
+  callback_buffer_max_guild_mb: 128 # RecordingCallbackManagerのギルド別メモリ上限
+  callback_buffer_max_total_mb: 512 # RecordingCallbackManager全体メモリ上限
 
 message_reading:
   enabled: true                           # チャット読み上げ機能の有効/無効

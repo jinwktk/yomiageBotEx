@@ -240,3 +240,5 @@
 - `config.yaml` の `recording` セクションに上記4設定（MB単位）を追加し、運用で上限値を調整できるようにした。
 - `README.md` に RecordingCallbackManager のメモリ上限制御仕様を追記。
 - `python3 -m pytest tests/test_recording_callback_manager_memory_limits.py` と `python3 -m pytest tests/test_recording_callback_manager_pcm_cache.py tests/test_replay_buffer_manager_audio.py` を実行し、8件すべて成功を確認。
+- OOM再発を抑えるため `config.yaml` の `recording.callback_buffer_max_*_mb` を運用寄りに引き下げ（`user: 32MB / guild: 128MB / total: 512MB`）。
+- `README.md` に新しいデフォルト上限値を追記。
