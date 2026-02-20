@@ -88,7 +88,7 @@ scripts\start.bat
 - ロギング設定
 - レート制限設定
 - 辞書設定
-- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能）
+- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能、`callback_buffer_max_*_mb` で録音チャンク保持メモリ上限を制御）
 
 詳細は`config.yaml`のコメントを参照してください。
 
@@ -153,6 +153,7 @@ scripts\start.bat
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
 - `/replay` のエフェメラル返信に「みんなに見えるメッセージで送信」ボタンを追加し、必要時だけ同じ音声ファイルを公開投稿できる
+- RecordingCallbackManager にユーザー/ギルド/全体のメモリ上限を追加し、長時間稼働で古い録音チャンクを自動破棄してOOMを抑制
 
 ### 手動録音ワークフロー
 1. ボイスチャンネルに参加し、ボットが同じチャンネルに接続していることを確認します。

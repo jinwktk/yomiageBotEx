@@ -559,6 +559,7 @@ class YomiageBot(discord.Bot):
         # RecordingCallbackManagerの初期化
         try:
             from utils.recording_callback_manager import recording_callback_manager
+            recording_callback_manager.apply_recording_config(self.config.get("recording", {}))
             await recording_callback_manager.initialize()
             logger.info("RecordingCallbackManager initialized successfully")
         except Exception as e:

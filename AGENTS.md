@@ -228,3 +228,15 @@
 - TDDとして `tests/test_replay_buffer_manager_audio.py::test_process_user_audio_parses_variable_wav_header` を更新し、連結時に0.5秒無音が挿入されることを先に失敗で確認してから実装。
 - `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest tests/test_replay_buffer_manager_audio.py` と `UV_PROJECT_ENVIRONMENT=/tmp/yomiagebotex-uv-env uv run python -m pytest` を実行し、67件すべて成功を確認。
 - 変更ファイル: `utils/replay_buffer_manager.py`, `tests/test_replay_buffer_manager_audio.py`, `config.yaml`, `README.md`, `AGENTS.md`。
+
+## 2026-02-20
+- WSL切断の要因を再調査し、`/var/log/syslog` の `2026-02-21 00:47:15` で `python3` が `anon-rss:18844860kB`（約18GB）を消費してOOM killされた記録を確認。メモリ逼迫が再接続/切断の主因と判断。
+- OOM緩和のTDDとして `tests/test_recording_callback_manager_memory_limits.py` を新規追加し、RecordingCallbackManagerで
+  1) ユーザー上限超過時に最古チャンクを削除
+  2) 全体上限超過時にグローバル最古チャンクを削除
+  を先に失敗で確認。
+- `utils/recording_callback_manager.py` を改修し、`callback_buffer_max_user_mb` / `callback_buffer_max_guild_mb` / `callback_buffer_max_total_mb` / `callback_max_chunk_size_mb` を反映する `apply_recording_config` を追加。ユーザー・ギルド・全体の3段階メモリ上限で古いチャンクを自動破棄する制御を実装。
+- `bot.py` の起動時初期化で `recording_callback_manager.apply_recording_config(self.config.get(\"recording\", {}))` を呼び出し、`config.yaml` の上限値が実行時に有効になるよう接続。
+- `config.yaml` の `recording` セクションに上記4設定（MB単位）を追加し、運用で上限値を調整できるようにした。
+- `README.md` に RecordingCallbackManager のメモリ上限制御仕様を追記。
+- `python3 -m pytest tests/test_recording_callback_manager_memory_limits.py` と `python3 -m pytest tests/test_recording_callback_manager_pcm_cache.py tests/test_replay_buffer_manager_audio.py` を実行し、8件すべて成功を確認。

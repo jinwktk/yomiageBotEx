@@ -43,9 +43,157 @@ class RecordingCallbackManager:
         self.max_buffer_duration = 300  # 最大5分間保持
         self.cleanup_interval = 30  # 30秒ごとにクリーンアップ
         self.max_chunk_size = 1024 * 1024 * 10  # 最大10MBまでのチャンク
+        self.max_user_buffer_bytes = 64 * 1024 * 1024  # ユーザーごとに最大64MB
+        self.max_guild_buffer_bytes = 256 * 1024 * 1024  # ギルドごとに最大256MB
+        self.max_total_buffer_bytes = 1024 * 1024 * 1024  # 全体で最大1GB
         self.is_initialized = False
         
         logger.info("RecordingCallbackManager: Initialized")
+
+    def apply_recording_config(self, recording_config: Dict[str, Any]) -> None:
+        """recording設定を反映"""
+        if not isinstance(recording_config, dict):
+            return
+
+        def _coerce_mb(value: Any, default_bytes: int) -> int:
+            try:
+                mb = float(value)
+                if mb <= 0:
+                    return default_bytes
+                return int(mb * 1024 * 1024)
+            except (TypeError, ValueError):
+                return default_bytes
+
+        current_chunk_mb = self.max_chunk_size / (1024 * 1024)
+        self.max_chunk_size = _coerce_mb(
+            recording_config.get("callback_max_chunk_size_mb", current_chunk_mb),
+            self.max_chunk_size,
+        )
+        self.max_user_buffer_bytes = _coerce_mb(
+            recording_config.get("callback_buffer_max_user_mb", self.max_user_buffer_bytes / (1024 * 1024)),
+            self.max_user_buffer_bytes,
+        )
+        self.max_guild_buffer_bytes = _coerce_mb(
+            recording_config.get("callback_buffer_max_guild_mb", self.max_guild_buffer_bytes / (1024 * 1024)),
+            self.max_guild_buffer_bytes,
+        )
+        self.max_total_buffer_bytes = _coerce_mb(
+            recording_config.get("callback_buffer_max_total_mb", self.max_total_buffer_bytes / (1024 * 1024)),
+            self.max_total_buffer_bytes,
+        )
+
+        logger.info(
+            "RecordingCallbackManager: Applied config user=%sMB guild=%sMB total=%sMB chunk=%sMB",
+            self.max_user_buffer_bytes // (1024 * 1024),
+            self.max_guild_buffer_bytes // (1024 * 1024),
+            self.max_total_buffer_bytes // (1024 * 1024),
+            self.max_chunk_size // (1024 * 1024),
+        )
+
+    def _chunk_memory_bytes(self, chunk: AudioChunk) -> int:
+        return len(chunk.data) + len(chunk.pcm_data)
+
+    def _user_buffer_bytes_unlocked(self, guild_id: int, user_id: int) -> int:
+        return sum(
+            self._chunk_memory_bytes(chunk)
+            for chunk in self.audio_buffers.get(guild_id, {}).get(user_id, [])
+        )
+
+    def _guild_buffer_bytes_unlocked(self, guild_id: int) -> int:
+        guild_users = self.audio_buffers.get(guild_id, {})
+        return sum(
+            self._chunk_memory_bytes(chunk)
+            for user_chunks in guild_users.values()
+            for chunk in user_chunks
+        )
+
+    def _total_buffer_bytes_unlocked(self) -> int:
+        return sum(
+            self._chunk_memory_bytes(chunk)
+            for guild_users in self.audio_buffers.values()
+            for user_chunks in guild_users.values()
+            for chunk in user_chunks
+        )
+
+    def _prune_empty_user_unlocked(self, guild_id: int, user_id: int) -> None:
+        guild_users = self.audio_buffers.get(guild_id, {})
+        if user_id in guild_users and not guild_users[user_id]:
+            del guild_users[user_id]
+        if guild_id in self.audio_buffers and not self.audio_buffers[guild_id]:
+            del self.audio_buffers[guild_id]
+
+    def _remove_oldest_from_user_unlocked(self, guild_id: int, user_id: int) -> bool:
+        user_chunks = self.audio_buffers.get(guild_id, {}).get(user_id, [])
+        if not user_chunks:
+            return False
+        oldest_index = min(range(len(user_chunks)), key=lambda idx: user_chunks[idx].timestamp)
+        user_chunks.pop(oldest_index)
+        self._prune_empty_user_unlocked(guild_id, user_id)
+        return True
+
+    def _remove_oldest_from_guild_unlocked(self, guild_id: int) -> bool:
+        guild_users = self.audio_buffers.get(guild_id, {})
+        oldest_user_id = None
+        oldest_index = None
+        oldest_timestamp = None
+        for user_id, chunks in guild_users.items():
+            for idx, chunk in enumerate(chunks):
+                if oldest_timestamp is None or chunk.timestamp < oldest_timestamp:
+                    oldest_timestamp = chunk.timestamp
+                    oldest_user_id = user_id
+                    oldest_index = idx
+        if oldest_user_id is None or oldest_index is None:
+            return False
+        guild_users[oldest_user_id].pop(oldest_index)
+        self._prune_empty_user_unlocked(guild_id, oldest_user_id)
+        return True
+
+    def _remove_oldest_globally_unlocked(self) -> bool:
+        oldest_guild_id = None
+        oldest_user_id = None
+        oldest_index = None
+        oldest_timestamp = None
+
+        for guild_id, guild_users in self.audio_buffers.items():
+            for user_id, chunks in guild_users.items():
+                for idx, chunk in enumerate(chunks):
+                    if oldest_timestamp is None or chunk.timestamp < oldest_timestamp:
+                        oldest_timestamp = chunk.timestamp
+                        oldest_guild_id = guild_id
+                        oldest_user_id = user_id
+                        oldest_index = idx
+
+        if oldest_guild_id is None or oldest_user_id is None or oldest_index is None:
+            return False
+
+        self.audio_buffers[oldest_guild_id][oldest_user_id].pop(oldest_index)
+        self._prune_empty_user_unlocked(oldest_guild_id, oldest_user_id)
+        return True
+
+    def _enforce_memory_limits_unlocked(self, guild_id: int, user_id: int) -> None:
+        # ユーザー単位の上限
+        while (
+            self.max_user_buffer_bytes > 0
+            and self._user_buffer_bytes_unlocked(guild_id, user_id) > self.max_user_buffer_bytes
+        ):
+            if not self._remove_oldest_from_user_unlocked(guild_id, user_id):
+                break
+
+        # ギルド単位の上限
+        while (
+            self.max_guild_buffer_bytes > 0
+            and self._guild_buffer_bytes_unlocked(guild_id) > self.max_guild_buffer_bytes
+        ):
+            if not self._remove_oldest_from_guild_unlocked(guild_id):
+                break
+
+        # 全体上限
+        while (
+            self.max_total_buffer_bytes > 0
+            and self._total_buffer_bytes_unlocked() > self.max_total_buffer_bytes
+        ):
+            if not self._remove_oldest_globally_unlocked():
+                break
     
     async def initialize(self):
         """非同期初期化"""
@@ -161,6 +309,7 @@ class RecordingCallbackManager:
                 
                 # 新しいチャンクを追加
                 self.audio_buffers[guild_id][user_id].append(chunk)
+                self._enforce_memory_limits_unlocked(guild_id, user_id)
             
             logger.debug(f"RecordingCallbackManager: Added audio chunk for guild {guild_id}, user {user_id} ({duration:.1f}s)")
             
@@ -254,10 +403,15 @@ class RecordingCallbackManager:
                             # 空のユーザーバッファを削除
                             if not self.audio_buffers[guild_id][user_id]:
                                 del self.audio_buffers[guild_id][user_id]
+
+                        # 定期掃除時にもギルドごとの上限を再チェック
+                        for user_id in list(self.audio_buffers.get(guild_id, {}).keys()):
+                            self._enforce_memory_limits_unlocked(guild_id, user_id)
                         
                         # 空のGuildバッファを削除
-                        if not self.audio_buffers[guild_id]:
-                            del self.audio_buffers[guild_id]
+                        guild_buffers = self.audio_buffers.get(guild_id)
+                        if not guild_buffers:
+                            self.audio_buffers.pop(guild_id, None)
                             if guild_id in self.recording_callbacks:
                                 del self.recording_callbacks[guild_id]
                 
@@ -275,12 +429,17 @@ class RecordingCallbackManager:
                 sum(len(chunks) for chunks in users.values()) 
                 for users in self.audio_buffers.values()
             )
+            total_bytes = self._total_buffer_bytes_unlocked()
             
             return {
                 'total_guilds': total_guilds,
                 'total_users': total_users,  
                 'total_chunks': total_chunks,
+                'total_bytes': total_bytes,
                 'buffer_duration': self.max_buffer_duration,
+                'max_user_buffer_bytes': self.max_user_buffer_bytes,
+                'max_guild_buffer_bytes': self.max_guild_buffer_bytes,
+                'max_total_buffer_bytes': self.max_total_buffer_bytes,
                 'initialized': self.is_initialized
             }
             
