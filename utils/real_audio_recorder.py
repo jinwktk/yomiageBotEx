@@ -125,15 +125,6 @@ class RealTimeAudioRecorder:
             )
             return
 
-        soft_restart_count = self._soft_recovery_restart_counts.get(guild_id, 0) + 1
-        self._soft_recovery_restart_counts[guild_id] = soft_restart_count
-
-        if soft_restart_count >= self.HARD_RECOVERY_AFTER_SOFT_RESTARTS:
-            recovered = await self._attempt_hard_reconnect(guild_id, voice_client)
-            if recovered:
-                self._soft_recovery_restart_counts[guild_id] = 0
-                return
-
         logger.warning(
             "RealTimeRecorder: Empty callbacks reached threshold for guild %s. Restarting recording session.",
             guild_id,
@@ -177,9 +168,22 @@ class RealTimeAudioRecorder:
             self.connections[guild_id] = voice_client
             self.recording_status[guild_id] = True
             self.empty_callback_counts[guild_id] = 0
+            self._soft_recovery_restart_counts[guild_id] = 0
             logger.info("RealTimeRecorder: Recovery restart completed for guild %s", guild_id)
         except Exception as e:
             logger.error("RealTimeRecorder: Recovery restart failed for guild %s: %s", guild_id, e)
+            failure_count = self._soft_recovery_restart_counts.get(guild_id, 0) + 1
+            self._soft_recovery_restart_counts[guild_id] = failure_count
+            logger.warning(
+                "RealTimeRecorder: Soft recovery failed %s/%s for guild %s.",
+                failure_count,
+                self.HARD_RECOVERY_AFTER_SOFT_RESTARTS,
+                guild_id,
+            )
+            if failure_count >= self.HARD_RECOVERY_AFTER_SOFT_RESTARTS:
+                recovered = await self._attempt_hard_reconnect(guild_id, voice_client)
+                if recovered:
+                    self._soft_recovery_restart_counts[guild_id] = 0
 
     async def _attempt_hard_reconnect(self, guild_id: int, voice_client) -> bool:
         """軽い再開で復旧しない場合、VCを張り直して録音を再開"""

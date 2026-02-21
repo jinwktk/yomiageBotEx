@@ -243,6 +243,22 @@
 - OOM再発を抑えるため `config.yaml` の `recording.callback_buffer_max_*_mb` を運用寄りに引き下げ（`user: 32MB / guild: 128MB / total: 512MB`）。
 - `README.md` に新しいデフォルト上限値を追記。
 
+## 2026-02-22
+- 「勝手にDisconnectする」再発報告を受けて `logs/yomiage.log` を調査し、`2026-02-22 02:06:07` に `RealTimeRecorder: Escalating to hard reconnect...` の直後 `Disconnecting from voice normally` が発生していることを確認。空コールバック連続時の自動復旧がVC切断を誘発していた。
+- TDDとして `tests/test_real_audio_recorder_recovery.py` を更新:
+  - `test_recovery_does_not_hard_reconnect_when_soft_restart_succeeds` を追加し、`soft restart` が成功する限りハード再接続に昇格しないことを先に失敗で固定。
+  - `test_recovery_escalates_to_hard_reconnect_after_repeated_soft_restarts` は、`soft restart` が失敗し続けた場合にのみ昇格する期待へ更新。
+- `utils/real_audio_recorder.py` の `_attempt_recover_stuck_recording` を改修し、昇格カウンタを「試行回数」ではなく「連続失敗回数」として扱うよう変更。`soft restart` 成功時はカウンタをリセットし、失敗が閾値に達したときだけ `_attempt_hard_reconnect` を実行。
+- `README.md` に「`soft restart` 成功中はハード再接続を実行しない」仕様を追記。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_real_audio_recorder_recovery.py -q`（失敗→修正後成功）
+  - `python3 -m pytest`（71件すべて成功）
+- 変更ファイル:
+  - `utils/real_audio_recorder.py`
+  - `tests/test_real_audio_recorder_recovery.py`
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-02-21
 - `Decoder Process Killed` が連続出力される報告を受け、`/home/mlove/.local/lib/python3.12/site-packages/discord/opus.py` を調査。`DecodeManager.stop()` が待機ループ内で毎回 `print("Decoder Process Killed")` を実行していることを原因として特定。
 - TDDとして `tests/test_voice_receive_patch.py` に `test_voice_receive_patch_suppresses_decode_manager_killed_spam` を追加し、先に失敗（`Decoder Process Killed` が標準出力へ出る）を確認。

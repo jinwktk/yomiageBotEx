@@ -183,13 +183,15 @@ async def test_recovery_escalates_to_hard_reconnect_after_repeated_soft_restarts
     recorder._soft_recovery_restart_counts[guild_id] = 1
 
     start_calls = {"count": 0}
+    stop_calls = {"count": 0}
 
     async def fake_start(vc, _sink, _callback):
         start_calls["count"] += 1
         vc.recording = True
 
     async def fake_stop(_vc):
-        raise AssertionError("soft restart should not run when hard reconnect is used")
+        stop_calls["count"] += 1
+        raise RuntimeError("temporary stop failure")
 
     monkeypatch.setattr(recorder, "_start_recording_non_blocking", fake_start)
     monkeypatch.setattr(recorder, "_stop_recording_non_blocking", fake_stop)
@@ -199,8 +201,50 @@ async def test_recovery_escalates_to_hard_reconnect_after_repeated_soft_restarts
 
     assert connect_calls["count"] == 1
     assert start_calls["count"] == 1
+    assert stop_calls["count"] == 1
     assert recorder.connections[guild_id] is new_vc
     assert recorder.recording_status[guild_id] is True
+
+
+@pytest.mark.asyncio
+async def test_recovery_does_not_hard_reconnect_when_soft_restart_succeeds(monkeypatch):
+    recorder = RealTimeAudioRecorder(None)
+    guild_id = 1006
+
+    human = SimpleNamespace(bot=False)
+    vc = _DummyVoiceClient([human])
+    vc.recording = True
+
+    recorder.connections[guild_id] = vc
+    recorder.recording_status[guild_id] = True
+    recorder._last_non_empty_audio_at[guild_id] = time.time()
+    recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
+    recorder.HARD_RECOVERY_AFTER_SOFT_RESTARTS = 2
+    recorder._soft_recovery_restart_counts[guild_id] = 1
+
+    calls = {"stop": 0, "start": 0, "hard": 0}
+
+    async def fake_stop(_vc):
+        calls["stop"] += 1
+
+    async def fake_start(_vc, _sink, _callback):
+        calls["start"] += 1
+
+    async def fake_hard(_guild_id, _vc):
+        calls["hard"] += 1
+        return True
+
+    monkeypatch.setattr(recorder, "_stop_recording_non_blocking", fake_stop)
+    monkeypatch.setattr(recorder, "_start_recording_non_blocking", fake_start)
+    monkeypatch.setattr(recorder, "_attempt_hard_reconnect", fake_hard)
+    monkeypatch.setattr(recorder, "_create_wave_sink", lambda: object())
+
+    await recorder._attempt_recover_stuck_recording(guild_id)
+
+    assert calls["hard"] == 0
+    assert calls["stop"] == 1
+    assert calls["start"] == 1
+    assert recorder._soft_recovery_restart_counts[guild_id] == 0
 
 
 @pytest.mark.asyncio
