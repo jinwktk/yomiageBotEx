@@ -289,6 +289,22 @@
   - `README.md`
   - `AGENTS.md`
 
+## 2026-02-22（/replay 発話直後取りこぼし対策）
+- 「しゃべった直後に `/replay` を実行すると録音されないことがある」報告に対応。
+- 原因として、`cogs/recording.py` の `_process_replay_async` が ReplayBufferManager（新経路）を先に読むため、録音中チャンクが未確定のタイミングでは取りこぼす可能性を確認。
+- TDDとして `tests/test_replay_buffer_integration.py` の `ExplodingRecorder` に `force_recording_checkpoint` 呼び出し監視を追加し、`/replay` 処理開始時にチェックポイントが実行されることを先に失敗で固定。
+- `cogs/recording.py` に `_force_replay_checkpoint_if_recording` を追加し、`_process_replay_async` 冒頭で録音中なら強制チェックポイント（録音一時停止→即再開）を実行するよう変更。
+- 旧経路側に重複していたチェックポイント処理は削除し、実行タイミングを1箇所へ統一。
+- `README.md` に `/replay` 実行時のチェックポイント強制仕様を追記。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_replay_buffer_integration.py tests/test_replay_fallback_messaging.py -q`
+  - `python3 -m pytest`（73件すべて成功）
+- 変更ファイル:
+  - `cogs/recording.py`
+  - `tests/test_replay_buffer_integration.py`
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-02-21
 - `Decoder Process Killed` が連続出力される報告を受け、`/home/mlove/.local/lib/python3.12/site-packages/discord/opus.py` を調査。`DecodeManager.stop()` が待機ループ内で毎回 `print("Decoder Process Killed")` を実行していることを原因として特定。
 - TDDとして `tests/test_voice_receive_patch.py` に `test_voice_receive_patch_suppresses_decode_manager_killed_spam` を追加し、先に失敗（`Decoder Process Killed` が標準出力へ出る）を確認。

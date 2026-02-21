@@ -420,6 +420,10 @@ class RecordingCog(commands.Cog):
             import io
             import asyncio
             from datetime import datetime
+            guild_id = ctx.guild.id
+
+            # 録音中であれば先にチェックポイントを切り、直前までの音声を確定させる
+            await self._force_replay_checkpoint_if_recording(guild_id)
 
             # まずReplayBufferManager（新システム）が利用可能なら必ず試行
             if self.prefer_replay_buffer_manager:
@@ -434,18 +438,6 @@ class RecordingCog(commands.Cog):
                     return
 
             # リアルタイム録音データから直接バッファを取得（Guild別）
-            guild_id = ctx.guild.id
-            
-            # 録音中の場合は強制的にチェックポイントを作成
-            if guild_id in self.real_time_recorder.connections:
-                vc = self.real_time_recorder.connections[guild_id]
-                if hasattr(vc, 'recording') and vc.recording:
-                    self.logger.info(f"Recording is active, creating checkpoint before replay")
-                    checkpoint_success = await self.real_time_recorder.force_recording_checkpoint(guild_id)
-                    if checkpoint_success:
-                        self.logger.info(f"Checkpoint created successfully")
-                    else:
-                        self.logger.warning(f"Failed to create checkpoint, using existing buffers")
             
             # 新しい時間範囲ベースの音声データ取得を試行（タイムアウト付き）
             if hasattr(self.real_time_recorder, 'get_audio_for_time_range'):
@@ -700,6 +692,37 @@ class RecordingCog(commands.Cog):
             await ctx.followup.send(
                 f"⚠️ リプレイに失敗しました: {str(e)}", ephemeral=True
             )
+
+    async def _force_replay_checkpoint_if_recording(self, guild_id: int) -> bool:
+        """Replay実行前に録音中チャンクを確定させる"""
+        recorder = self.real_time_recorder
+        if not recorder:
+            return False
+
+        connections = getattr(recorder, "connections", {})
+        voice_client = connections.get(guild_id) if isinstance(connections, dict) else None
+        if not voice_client or not getattr(voice_client, "recording", False):
+            return False
+
+        checkpoint_func = getattr(recorder, "force_recording_checkpoint", None)
+        if not callable(checkpoint_func):
+            return False
+
+        self.logger.info("Replay: forcing checkpoint before processing (guild=%s)", guild_id)
+        try:
+            checkpoint_success = await checkpoint_func(guild_id)
+            if checkpoint_success:
+                self.logger.info("Replay: checkpoint complete before processing (guild=%s)", guild_id)
+            else:
+                self.logger.warning("Replay: checkpoint failed before processing (guild=%s)", guild_id)
+            return bool(checkpoint_success)
+        except Exception as e:
+            self.logger.warning(
+                "Replay: checkpoint raised exception but processing continues (guild=%s): %s",
+                guild_id,
+                e,
+            )
+            return False
 
     @discord.slash_command(name="replay_history", description="最近生成したリプレイ音声を表示します（管理者向け）")
     async def replay_history_command(

@@ -23,8 +23,11 @@ def make_wav(duration_seconds: float = 1.0, sample_rate: int = 48000) -> bytes:
 
 class ExplodingRecorder:
     def __init__(self):
-        self.connections = {}
+        self.connections = {
+            123: SimpleNamespace(recording=True),
+        }
         self.accessed = False
+        self.force_checkpoint_calls = []
 
     def get_audio_for_time_range(self, *args, **kwargs):
         self.accessed = True
@@ -32,6 +35,10 @@ class ExplodingRecorder:
 
     async def clean_old_buffers(self, guild_id):
         pass
+
+    async def force_recording_checkpoint(self, guild_id: int):
+        self.force_checkpoint_calls.append(guild_id)
+        return True
 
 
 class FakeFollowup:
@@ -112,4 +119,5 @@ async def test_replay_prefers_replay_buffer_manager(monkeypatch, tmp_path):
     assert sent_files, "Discord.File が作成されていません"
     assert ctx.followup.messages, "フォローアップ応答が送信されていません"
     assert ctx.followup.messages[-1].get("view") is not None, "公開送信用ボタンViewが付与されていません"
+    assert cog.real_time_recorder.force_checkpoint_calls == [123], "Replay開始時チェックポイントが実行されていません"
     assert not cog.real_time_recorder.accessed, "ReplayBufferManager 成功時に旧システムへフォールバックしています"
