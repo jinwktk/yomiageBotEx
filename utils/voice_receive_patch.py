@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gc
 import inspect
 import logging
+import time
 from typing import Any, Optional
 
 import discord
@@ -96,5 +98,31 @@ def apply_voice_receive_patch(logger: Optional[logging.Logger] = None) -> None:
         log.info("Applied AEAD rtpsize decrypt compatibility patch (8-byte prefix strip).")
 
     VoiceClient._yomiage_voice_receive_patch = True
+    _patch_decode_manager_stop(log)
     log.info("Applied voice receive pipeline patch for payload/decrypt compatibility.")
 
+
+def _patch_decode_manager_stop(log: logging.Logger) -> None:
+    decode_manager_cls = getattr(discord.opus, "DecodeManager", None)
+    if decode_manager_cls is None:
+        return
+    if getattr(decode_manager_cls, "_yomiage_stop_patch_applied", False):
+        return
+
+    def patched_stop(self):
+        deadline = time.monotonic() + 0.25
+        while getattr(self, "decoding", False) and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        if getattr(self, "decoding", False):
+            decode_queue = getattr(self, "decode_queue", None)
+            if hasattr(decode_queue, "clear"):
+                decode_queue.clear()
+
+        self.decoder = {}
+        gc.collect()
+        self._end_thread.set()
+
+    decode_manager_cls.stop = patched_stop
+    decode_manager_cls._yomiage_stop_patch_applied = True
+    log.info("Applied DecodeManager stop patch to suppress kill-message spam.")

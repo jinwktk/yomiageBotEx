@@ -150,6 +150,7 @@ scripts\start.bat
 - 直近に非空の音声取得実績がない場合は自動復旧を抑止し、無音時のVC再接続ループ（出入り繰り返し）を防止
 - `/replay` は新経路（ReplayBufferManager）で音声が見つからなくても即エラー返信せず、旧経路フォールバックの結果を優先して通知（`❌`→成功の二重メッセージを抑制）
 - `aead_xchacha20_poly1305_rtpsize` 利用時の受信互換性向上として、Voice受信パイプラインに互換パッチ（RTP判定と復号互換）を適用
+- py-cord の `DecodeManager.stop()` が終了時に `Decoder Process Killed` を大量出力する問題へ対策し、停止時にキューを安全に掃除してスパムログを抑止
 - `/replay_diag` コマンドで連続バッファと RecordingCallbackManager の双方にチャンクが存在するかを即時確認可能
 - `/replay_probe` コマンドで最新チャンクをWAVとして取得し、録音が実際に取れているか素早く確認可能
 - `/replay` のエフェメラル返信に「みんなに見えるメッセージで送信」ボタンを追加し、必要時だけ同じ音声ファイルを公開投稿できる

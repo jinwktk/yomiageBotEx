@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 from utils.voice_receive_patch import apply_voice_receive_patch
@@ -41,9 +42,29 @@ class _FakeRawData:
         self.decrypted_data = b"voice"
 
 
+class _FakeDecodeManager:
+    def __init__(self):
+        self.decode_queue = [object()]
+        self.decoder = {"ssrc": object()}
+        self._end_thread = threading.Event()
+
+    @property
+    def decoding(self):
+        return bool(self.decode_queue)
+
+    def stop(self):
+        while self.decoding:
+            self.decode_queue.pop(0)
+            self.decoder = {}
+            print("Decoder Process Killed")
+        self._end_thread.set()
+
+
 def test_voice_receive_patch_accepts_rtp_marker_payload(monkeypatch):
     monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
     monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
+    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
+        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
 
     apply_voice_receive_patch()
 
@@ -57,6 +78,8 @@ def test_voice_receive_patch_accepts_rtp_marker_payload(monkeypatch):
 def test_voice_receive_patch_ignores_non_audio_payload(monkeypatch):
     monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
     monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
+    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
+        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
 
     apply_voice_receive_patch()
 
@@ -69,6 +92,8 @@ def test_voice_receive_patch_ignores_non_audio_payload(monkeypatch):
 def test_voice_receive_patch_adds_rtpsize_prefix_strip_for_old_impl(monkeypatch):
     monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
     monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
+    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
+        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
 
     apply_voice_receive_patch()
 
@@ -76,3 +101,23 @@ def test_voice_receive_patch_adds_rtpsize_prefix_strip_for_old_impl(monkeypatch)
     out = vc._decrypt_aead_xchacha20_poly1305_rtpsize(b"h", b"12345678ABCDEFG")
 
     assert out == b"ABCDEFG"
+
+
+def test_voice_receive_patch_suppresses_decode_manager_killed_spam(monkeypatch, capsys):
+    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
+    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
+    monkeypatch.setattr("discord.opus.DecodeManager", _FakeDecodeManager)
+    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
+        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+    if hasattr(_FakeDecodeManager, "_yomiage_stop_patch_applied"):
+        delattr(_FakeDecodeManager, "_yomiage_stop_patch_applied")
+
+    apply_voice_receive_patch()
+
+    manager = _FakeDecodeManager()
+    manager.stop()
+
+    captured = capsys.readouterr()
+    assert "Decoder Process Killed" not in captured.out
+    assert manager._end_thread.is_set()
+    assert manager.decode_queue == []

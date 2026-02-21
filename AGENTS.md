@@ -242,3 +242,18 @@
 - `python3 -m pytest tests/test_recording_callback_manager_memory_limits.py` と `python3 -m pytest tests/test_recording_callback_manager_pcm_cache.py tests/test_replay_buffer_manager_audio.py` を実行し、8件すべて成功を確認。
 - OOM再発を抑えるため `config.yaml` の `recording.callback_buffer_max_*_mb` を運用寄りに引き下げ（`user: 32MB / guild: 128MB / total: 512MB`）。
 - `README.md` に新しいデフォルト上限値を追記。
+
+## 2026-02-21
+- `Decoder Process Killed` が連続出力される報告を受け、`/home/mlove/.local/lib/python3.12/site-packages/discord/opus.py` を調査。`DecodeManager.stop()` が待機ループ内で毎回 `print("Decoder Process Killed")` を実行していることを原因として特定。
+- TDDとして `tests/test_voice_receive_patch.py` に `test_voice_receive_patch_suppresses_decode_manager_killed_spam` を追加し、先に失敗（`Decoder Process Killed` が標準出力へ出る）を確認。
+- `utils/voice_receive_patch.py` に `DecodeManager.stop` の追加パッチ `_patch_decode_manager_stop` を実装。停止時は短時間だけ排出待ちし、未処理キューを `clear()` したうえで `self._end_thread.set()` へ進めるようにしてスパム出力を抑止。
+- 既存の `apply_voice_receive_patch` から上記パッチを適用するよう接続し、受信互換パッチと同時に有効化。
+- `README.md` の録音・リプレイ機能へ「`Decoder Process Killed` スパム抑止」仕様を追記。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_voice_receive_patch.py -q`（失敗→実装後成功）
+  - `python3 -m pytest`（70件すべて成功）
+- 変更ファイル:
+  - `utils/voice_receive_patch.py`
+  - `tests/test_voice_receive_patch.py`
+  - `README.md`
+  - `AGENTS.md`
