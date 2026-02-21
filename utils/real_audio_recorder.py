@@ -94,6 +94,34 @@ class RealTimeAudioRecorder:
         """録音再開に使うWaveSinkを生成"""
         return WaveSink()
 
+    def apply_recording_config(self, recording_config: Dict[str, Any]) -> None:
+        """recording設定を反映"""
+        if not isinstance(recording_config, dict):
+            return
+
+        def _coerce_seconds(value: Any, default_seconds: float) -> float:
+            try:
+                seconds = float(value)
+                if seconds <= 0:
+                    return default_seconds
+                return seconds
+            except (TypeError, ValueError):
+                return default_seconds
+
+        self.BUFFER_EXPIRATION = _coerce_seconds(
+            recording_config.get("buffer_expiration_seconds", self.BUFFER_EXPIRATION),
+            self.BUFFER_EXPIRATION,
+        )
+        self.CONTINUOUS_BUFFER_DURATION = _coerce_seconds(
+            recording_config.get("continuous_buffer_duration_seconds", self.CONTINUOUS_BUFFER_DURATION),
+            self.CONTINUOUS_BUFFER_DURATION,
+        )
+        logger.info(
+            "RealTimeRecorder: Applied config buffer_expiration=%ss continuous_buffer_duration=%ss",
+            int(self.BUFFER_EXPIRATION),
+            int(self.CONTINUOUS_BUFFER_DURATION),
+        )
+
     def _has_non_bot_members(self, voice_client) -> bool:
         """VCにBot以外のメンバーがいるか判定"""
         channel = getattr(voice_client, "channel", None)

@@ -259,6 +259,36 @@
   - `README.md`
   - `AGENTS.md`
 
+## 2026-02-22（メモリ削減）
+- 「メモリ使用量を削減したい」要望に対し、設定値・バッファ保持方式・保持時間の3点を同時に見直し。
+- TDDとして以下を先に更新して失敗を確認:
+  - `tests/test_recording_callback_manager_pcm_cache.py` に「`AudioChunk.data` は空で `pcm_data` を保持する」期待を追加。
+  - `tests/test_recording_callback_manager_memory_limits.py` のメモリ見積りをPCM主体へ更新し、`callback_buffer_duration_seconds` 反映テストを追加。
+  - `tests/test_real_audio_recorder_state.py` に `buffer_expiration_seconds` / `continuous_buffer_duration_seconds` 反映テストを追加。
+- `utils/recording_callback_manager.py` を修正し、WAV解析に成功したチャンクは `AudioChunk.data` へ生WAVを保持せず `pcm_data` 主体で保持するよう変更。加えて `callback_buffer_duration_seconds` を `apply_recording_config` で反映するよう実装。
+- `utils/real_audio_recorder.py` に `apply_recording_config` を追加し、`buffer_expiration_seconds` / `continuous_buffer_duration_seconds` を実行時に反映可能にした。
+- `cogs/recording.py` で `recording` 設定を `self.recording_manager` と `self.real_time_recorder` の両方へ適用するよう変更。
+- `config.yaml` のデフォルトをメモリ節約寄りへ調整:
+  - `callback_max_chunk_size_mb: 4`
+  - `callback_buffer_max_user_mb: 8`
+  - `callback_buffer_max_guild_mb: 32`
+  - `callback_buffer_max_total_mb: 128`
+  - 追加: `buffer_expiration_seconds: 120` / `continuous_buffer_duration_seconds: 120` / `callback_buffer_duration_seconds: 120`
+- `README.md` に新しいデフォルト上限値と保持秒数設定、PCM主体保持の仕様を追記。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_recording_callback_manager_pcm_cache.py tests/test_recording_callback_manager_memory_limits.py tests/test_real_audio_recorder_state.py -q`（失敗→修正後成功）
+  - `python3 -m pytest`（73件すべて成功）
+- 変更ファイル:
+  - `utils/recording_callback_manager.py`
+  - `utils/real_audio_recorder.py`
+  - `cogs/recording.py`
+  - `config.yaml`
+  - `tests/test_recording_callback_manager_pcm_cache.py`
+  - `tests/test_recording_callback_manager_memory_limits.py`
+  - `tests/test_real_audio_recorder_state.py`
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-02-21
 - `Decoder Process Killed` が連続出力される報告を受け、`/home/mlove/.local/lib/python3.12/site-packages/discord/opus.py` を調査。`DecodeManager.stop()` が待機ループ内で毎回 `print("Decoder Process Killed")` を実行していることを原因として特定。
 - TDDとして `tests/test_voice_receive_patch.py` に `test_voice_receive_patch_suppresses_decode_manager_killed_spam` を追加し、先に失敗（`Decoder Process Killed` が標準出力へ出る）を確認。

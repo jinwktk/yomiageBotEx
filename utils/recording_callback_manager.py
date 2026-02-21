@@ -64,6 +64,15 @@ class RecordingCallbackManager:
             except (TypeError, ValueError):
                 return default_bytes
 
+        def _coerce_seconds(value: Any, default_seconds: float) -> float:
+            try:
+                seconds = float(value)
+                if seconds <= 0:
+                    return default_seconds
+                return seconds
+            except (TypeError, ValueError):
+                return default_seconds
+
         current_chunk_mb = self.max_chunk_size / (1024 * 1024)
         self.max_chunk_size = _coerce_mb(
             recording_config.get("callback_max_chunk_size_mb", current_chunk_mb),
@@ -81,13 +90,18 @@ class RecordingCallbackManager:
             recording_config.get("callback_buffer_max_total_mb", self.max_total_buffer_bytes / (1024 * 1024)),
             self.max_total_buffer_bytes,
         )
+        self.max_buffer_duration = _coerce_seconds(
+            recording_config.get("callback_buffer_duration_seconds", self.max_buffer_duration),
+            self.max_buffer_duration,
+        )
 
         logger.info(
-            "RecordingCallbackManager: Applied config user=%sMB guild=%sMB total=%sMB chunk=%sMB",
+            "RecordingCallbackManager: Applied config user=%sMB guild=%sMB total=%sMB chunk=%sMB duration=%ss",
             self.max_user_buffer_bytes // (1024 * 1024),
             self.max_guild_buffer_bytes // (1024 * 1024),
             self.max_total_buffer_bytes // (1024 * 1024),
             self.max_chunk_size // (1024 * 1024),
+            int(self.max_buffer_duration),
         )
 
     def _chunk_memory_bytes(self, chunk: AudioChunk) -> int:
@@ -281,10 +295,11 @@ class RecordingCallbackManager:
                 duration = max(1.0, len(audio_data) / (sample_rate * channels * sample_width))
             
             # AudioChunk作成
+            chunk_data = b"" if pcm_data else audio_data
             chunk = AudioChunk(
                 user_id=user_id,
                 guild_id=guild_id,
-                data=audio_data,
+                data=chunk_data,
                 timestamp=time.time(),
                 duration=duration,
                 sample_rate=sample_rate,

@@ -26,12 +26,15 @@ recording:
   cleanup_hours: 1    # 録音ファイルの自動削除時間
   default_duration: 30 # デフォルト録音時間（秒）
   max_file_size_mb: 50 # 最大ファイルサイズ（MB）
+  buffer_expiration_seconds: 120 # RealTimeAudioRecorderの簡易バッファ保持秒数
+  continuous_buffer_duration_seconds: 120 # RealTimeAudioRecorderの連続バッファ保持秒数
   prefer_replay_buffer_manager: true # 新リプレイシステムを常に優先するかどうか
   chunk_gap_silence_seconds: 0.5 # 連結するチャンク間に挿入する無音秒数
-  callback_max_chunk_size_mb: 10 # RecordingCallbackManagerが受け付ける1チャンク上限
-  callback_buffer_max_user_mb: 32 # RecordingCallbackManagerのユーザー別メモリ上限
-  callback_buffer_max_guild_mb: 128 # RecordingCallbackManagerのギルド別メモリ上限
-  callback_buffer_max_total_mb: 512 # RecordingCallbackManager全体メモリ上限
+  callback_buffer_duration_seconds: 120 # RecordingCallbackManagerのチャンク保持秒数
+  callback_max_chunk_size_mb: 4 # RecordingCallbackManagerが受け付ける1チャンク上限
+  callback_buffer_max_user_mb: 8 # RecordingCallbackManagerのユーザー別メモリ上限
+  callback_buffer_max_guild_mb: 32 # RecordingCallbackManagerのギルド別メモリ上限
+  callback_buffer_max_total_mb: 128 # RecordingCallbackManager全体メモリ上限
 
 message_reading:
   enabled: true                           # チャット読み上げ機能の有効/無効

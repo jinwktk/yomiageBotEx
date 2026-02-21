@@ -33,6 +33,7 @@ async def test_process_audio_data_caches_pcm_in_audio_chunk():
     assert added is True
     chunk = manager.audio_buffers[1][42][0]
     assert chunk.pcm_data == pcm_bytes(wav_data)
+    assert chunk.data == b""
     assert chunk.sample_rate == 48000
     assert chunk.channels == 2
     assert chunk.sample_width == 2

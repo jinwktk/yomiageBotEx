@@ -88,7 +88,7 @@ scripts\start.bat
 - ロギング設定
 - レート制限設定
 - 辞書設定
-- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能、`callback_buffer_max_*_mb` で録音チャンク保持メモリ上限を制御。デフォルトは `user=32MB / guild=128MB / total=512MB`）
+- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能、`callback_buffer_max_*_mb` で録音チャンク保持メモリ上限を制御。デフォルトは `user=8MB / guild=32MB / total=128MB`。`buffer_expiration_seconds` / `continuous_buffer_duration_seconds` / `callback_buffer_duration_seconds` で保持秒数も制御可能）
 
 詳細は`config.yaml`のコメントを参照してください。
 
@@ -142,6 +142,7 @@ scripts\start.bat
 - `/replay` 新経路の最終出力は既存の音声処理パイプライン（`_process_audio_buffer`）へ統一し、`adeclip + loudnorm` を適用して歪みを緩和
 - `/replay` の正規化処理で `silenceremove` を適用し、2秒以上の無音区間を自動除去（`audio_processing.trim_silence` で切替可能）
 - RecordingCallbackManager が WAV解析済みPCMを `AudioChunk` に保持し、ReplayBufferManager が再利用することで `/replay` 時のチャンク再パース負荷を軽減
+- RecordingCallbackManager のチャンク保持はPCM主体（生WAVは必要時のみ保持）にして、同一チャンクの二重保持によるメモリ使用量を抑制
 - ReplayBufferManager の末尾トリム処理は必要フレームのみ読み込む方式にして、大きなWAVのメモリ負荷を抑制
 - WaveSink が空データ（`sink.audio_data keys: []`）を連続で返した場合、録音セッションを自動で再起動して復旧を試みる保護を追加
 - 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善

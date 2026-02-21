@@ -99,6 +99,7 @@ class RecordingCog(commands.Cog):
         # 一時的にNoneを渡す（後で適切に修正が必要）
         self.recording_manager = RealTimeAudioRecorder(None)
         recording_config = config.get("recording", {})
+        self.recording_manager.apply_recording_config(recording_config)
         self.recording_enabled = recording_config.get("enabled", False)
         self.prefer_replay_buffer_manager = recording_config.get("prefer_replay_buffer_manager", True)
         self._replay_buffer_manager_override = None
@@ -112,6 +113,7 @@ class RecordingCog(commands.Cog):
         
         # リアルタイム音声録音管理
         self.real_time_recorder = RealTimeAudioRecorder(self.recording_manager)
+        self.real_time_recorder.apply_recording_config(recording_config)
         
         # 録音開始のロック機構（Guild別）
         self.recording_locks: Dict[int, asyncio.Lock] = {}

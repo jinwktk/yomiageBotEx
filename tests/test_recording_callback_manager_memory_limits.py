@@ -20,8 +20,7 @@ def make_wav(sample_value: int, duration_seconds: float = 0.2, sample_rate: int 
 
 
 def estimate_chunk_bytes(wav_data: bytes) -> int:
-    pcm_size = max(len(wav_data) - 44, 0)
-    return len(wav_data) + pcm_size
+    return max(len(wav_data) - 44, 0)
 
 
 @pytest.mark.asyncio
@@ -42,7 +41,8 @@ async def test_process_audio_data_evicts_oldest_chunk_when_user_limit_exceeded()
 
     user_chunks = manager.audio_buffers[1][10]
     assert len(user_chunks) == 1
-    assert user_chunks[0].data == second
+    assert user_chunks[0].data == b""
+    assert user_chunks[0].pcm_data == second[44:]
 
 
 @pytest.mark.asyncio
@@ -65,3 +65,12 @@ async def test_process_audio_data_evicts_oldest_chunk_when_total_limit_exceeded(
 
     assert 1 not in manager.audio_buffers
     assert set(manager.audio_buffers[2].keys()) == {20, 21}
+
+
+def test_apply_recording_config_updates_callback_buffer_duration():
+    manager = RecordingCallbackManager()
+    manager.max_buffer_duration = 300
+
+    manager.apply_recording_config({"callback_buffer_duration_seconds": 120})
+
+    assert manager.max_buffer_duration == 120
