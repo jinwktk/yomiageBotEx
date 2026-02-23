@@ -76,6 +76,28 @@ class FakeReplayBufferManager:
         )
 
 
+class FakeReplayBufferManagerRetry:
+    def __init__(self, final_audio_bytes: bytes):
+        self.final_audio_bytes = final_audio_bytes
+        self.calls = []
+        self._call_count = 0
+
+    async def get_replay_audio(self, **kwargs):
+        self.calls.append(kwargs)
+        self._call_count += 1
+        if self._call_count == 1:
+            return None
+        return ReplayResult(
+            audio_data=self.final_audio_bytes,
+            total_duration=kwargs.get("duration_seconds", 0.0),
+            user_count=1,
+            file_size=len(self.final_audio_bytes),
+            sample_rate=48000,
+            channels=1,
+            generation_time=time.time(),
+        )
+
+
 class FakeUser:
     def __init__(self, user_id: int, display_name: str):
         self.id = user_id
@@ -121,3 +143,44 @@ async def test_replay_prefers_replay_buffer_manager(monkeypatch, tmp_path):
     assert ctx.followup.messages[-1].get("view") is not None, "公開送信用ボタンViewが付与されていません"
     assert cog.real_time_recorder.force_checkpoint_calls == [123], "Replay開始時チェックポイントが実行されていません"
     assert not cog.real_time_recorder.accessed, "ReplayBufferManager 成功時に旧システムへフォールバックしています"
+
+
+@pytest.mark.asyncio
+async def test_replay_retries_new_system_once_before_fallback(monkeypatch, tmp_path):
+    config = {
+        "recording": {"enabled": True},
+        "bot": {"rate_limit_delay": [0, 0]},
+        "audio_processing": {"normalize": True},
+    }
+    bot = SimpleNamespace()
+    cog = RecordingCog(bot, config)
+    cog.replay_dir_base = tmp_path / "replay"
+    cog.replay_dir_base.mkdir(parents=True, exist_ok=True)
+    cog.real_time_recorder = ExplodingRecorder()
+
+    audio_bytes = make_wav()
+    fake_manager = FakeReplayBufferManagerRetry(audio_bytes)
+    cog._replay_buffer_manager_override = fake_manager
+
+    sent_files = []
+
+    class DummyFile:
+        def __init__(self, fp, filename):
+            sent_files.append(filename)
+            self.fp = fp
+            self.filename = filename
+
+    async def fast_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("cogs.recording.discord.File", DummyFile)
+    monkeypatch.setattr("cogs.recording.asyncio.sleep", fast_sleep)
+
+    ctx = FakeContext(guild_id=123)
+    user = FakeUser(42, "ソルト・ライオモッチ")
+
+    await cog._process_replay_async(ctx, duration=30.0, user=user, normalize=True)
+
+    assert len(fake_manager.calls) == 2, "新経路の空結果時に再試行されていません"
+    assert sent_files, "再試行後の成功結果が送信されていません"
+    assert not cog.real_time_recorder.accessed, "再試行成功時に旧システムへフォールバックしています"

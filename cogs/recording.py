@@ -1133,7 +1133,22 @@ class RecordingCog(commands.Cog):
                 normalize=False,
                 mix_users=True
             )
-            
+
+            if not result and suppress_no_data_message:
+                # チェックポイント直後はコールバック反映がわずかに遅れることがあるため1回だけ再試行
+                self.logger.info(
+                    "Replay: new system returned no data, retrying once after short wait (guild=%s)",
+                    ctx.guild.id,
+                )
+                await asyncio.sleep(0.35)
+                result = await manager.get_replay_audio(
+                    guild_id=ctx.guild.id,
+                    duration_seconds=duration,
+                    user_id=user.id if user else None,
+                    normalize=False,
+                    mix_users=True,
+                )
+
             if not result:
                 if not suppress_no_data_message:
                     user_mention = f"@{user.display_name}" if user else "全ユーザー"

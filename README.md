@@ -133,6 +133,7 @@ scripts\start.bat
 - 録音の定期チェックポイントはイベントループをブロックしないよう非同期化し、VC心拍ブロックを防止
 - `/replay` は RecordingCallbackManager からの ReplayBufferManager を常に優先し、取得できた場合は旧バッファ経路へフォールバックしない仕組み
 - `/replay` 実行時に録音中であれば先にチェックポイント（録音一時停止→即再開）を強制し、発話直後・発話中でもコマンド実行時点までの音声を優先して取り込むよう改善
+- `/replay` 新経路でチェックポイント直後に音声データが0件だった場合、短時間待機して1回だけ再取得するリトライを追加し、発話直後の取りこぼしを軽減
 - RealTimeAudioRecorder で取得したチャンクを RecordingCallbackManager に直接転送し、リレー機能なしでも `/replay` 新経路の取得精度を維持
 - ReplayBufferManager のユーザー音声結合は WAV ヘッダ長を固定値で扱わず `wave` 解析でPCM抽出する方式に修正し、可変ヘッダ混在時の機械音化を防止
 - `/replay`（ユーザー指定）の結合時に16bit PCMピークを抑制するクリップ保護を追加

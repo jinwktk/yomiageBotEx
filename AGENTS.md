@@ -305,6 +305,22 @@
   - `README.md`
   - `AGENTS.md`
 
+## 2026-02-24（/replay 30秒データなしの再発対策）
+- 「`過去30.0秒間の音声データが見つかりません` が頻発する」報告に対応。
+- 原因候補として、`/replay` でチェックポイント直後に ReplayBufferManager（新経路）を即参照した際、コールバック反映タイミングの競合で1回目が空になるケースを想定。
+- TDDとして `tests/test_replay_buffer_integration.py` に `test_replay_retries_new_system_once_before_fallback` を追加し、1回目 `None`・2回目成功のマネージャーで再試行されることを先に失敗で固定。
+- `cogs/recording.py` の `_process_new_replay_async` を修正し、`suppress_no_data_message=True`（フォールバック前提呼び出し）時に新経路が空結果なら `0.35s` 待機して1回だけ `get_replay_audio` を再実行するリトライを追加。
+- `README.md` に新経路リトライ仕様を追記。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_replay_buffer_integration.py -q`（失敗→修正後成功）
+  - `python3 -m pytest tests/test_replay_fallback_messaging.py tests/test_replay_buffer_integration.py -q`
+  - `python3 -m pytest`（74件すべて成功）
+- 変更ファイル:
+  - `cogs/recording.py`
+  - `tests/test_replay_buffer_integration.py`
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-02-21
 - `Decoder Process Killed` が連続出力される報告を受け、`/home/mlove/.local/lib/python3.12/site-packages/discord/opus.py` を調査。`DecodeManager.stop()` が待機ループ内で毎回 `print("Decoder Process Killed")` を実行していることを原因として特定。
 - TDDとして `tests/test_voice_receive_patch.py` に `test_voice_receive_patch_suppresses_decode_manager_killed_spam` を追加し、先に失敗（`Decoder Process Killed` が標準出力へ出る）を確認。
