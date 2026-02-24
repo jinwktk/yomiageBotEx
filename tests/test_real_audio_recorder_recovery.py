@@ -280,3 +280,38 @@ async def test_recovery_skips_when_no_recent_non_empty_audio(monkeypatch):
 
     assert calls["stop"] == 0
     assert calls["start"] == 0
+
+
+@pytest.mark.asyncio
+async def test_recovery_periodically_retries_even_when_last_audio_is_stale(monkeypatch):
+    recorder = RealTimeAudioRecorder(None)
+    guild_id = 1007
+
+    human = SimpleNamespace(bot=False)
+    vc = _DummyVoiceClient([human])
+    vc.recording = True
+
+    recorder.connections[guild_id] = vc
+    recorder.recording_status[guild_id] = True
+    recorder.EMPTY_CALLBACK_RECOVERY_COOLDOWN = 0
+    recorder.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS = 60.0
+    recorder.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS = 120.0
+    recorder._last_non_empty_audio_at[guild_id] = time.time() - 600.0
+    recorder._last_stale_recovery_attempt_at[guild_id] = time.time() - 180.0
+
+    calls = {"stop": 0, "start": 0}
+
+    async def fake_stop(_vc):
+        calls["stop"] += 1
+
+    async def fake_start(_vc, _sink, _callback):
+        calls["start"] += 1
+
+    monkeypatch.setattr(recorder, "_stop_recording_non_blocking", fake_stop)
+    monkeypatch.setattr(recorder, "_start_recording_non_blocking", fake_start)
+    monkeypatch.setattr(recorder, "_create_wave_sink", lambda: object())
+
+    await recorder._attempt_recover_stuck_recording(guild_id)
+
+    assert calls["stop"] == 1
+    assert calls["start"] == 1

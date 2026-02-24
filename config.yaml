@@ -31,6 +31,7 @@ recording:
   prefer_replay_buffer_manager: true # 新リプレイシステムを常に優先するかどうか
   chunk_gap_silence_seconds: 0.5 # 連結するチャンク間に挿入する無音秒数
   callback_buffer_duration_seconds: 120 # RecordingCallbackManagerのチャンク保持秒数
+  no_recent_audio_recovery_retry_seconds: 300 # 非空音声が古い場合でも自動復旧を再試行する間隔（秒）
   callback_max_chunk_size_mb: 4 # RecordingCallbackManagerが受け付ける1チャンク上限
   callback_buffer_max_user_mb: 8 # RecordingCallbackManagerのユーザー別メモリ上限
   callback_buffer_max_guild_mb: 32 # RecordingCallbackManagerのギルド別メモリ上限

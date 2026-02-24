@@ -38,8 +38,10 @@ def test_apply_recording_config_updates_buffer_retention():
         {
             "buffer_expiration_seconds": 120,
             "continuous_buffer_duration_seconds": 120,
+            "no_recent_audio_recovery_retry_seconds": 240,
         }
     )
 
     assert recorder.BUFFER_EXPIRATION == 120
     assert recorder.CONTINUOUS_BUFFER_DURATION == 120
+    assert recorder.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS == 240

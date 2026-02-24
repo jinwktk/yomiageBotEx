@@ -335,3 +335,27 @@
   - `tests/test_voice_receive_patch.py`
   - `README.md`
   - `AGENTS.md`
+
+## 2026-02-25（/replay 長時間無音後の自己復旧改善）
+- 報告ログ（`@The Arukkadion の過去30.0秒間の音声データが見つかりません（最後の記録は 4216.1 秒前）`）を前提に、`RealTimeAudioRecorder` の自動復旧条件を再調整。
+- 従来は「直近の非空音声が古い」状態だと復旧を完全スキップしていたため、長時間 `sink.audio_data keys: []` が続くと復旧機会がなくなる問題があった。
+- TDDとして `tests/test_real_audio_recorder_recovery.py` に `test_recovery_periodically_retries_even_when_last_audio_is_stale` を追加し、非空音声が古くても一定間隔を空ければ復旧再試行する期待を先に失敗で固定。
+- `utils/real_audio_recorder.py` を修正:
+  - `NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS`（デフォルト300秒）と `_last_stale_recovery_attempt_at` を追加。
+  - `last_non_empty_audio_at` が存在し、かつ古い場合でも、上記間隔ごとに低頻度で復旧（stop/start）を許可。
+  - 非空音声を受信したら stale 復旧タイマーをリセット。
+  - `apply_recording_config` から `no_recent_audio_recovery_retry_seconds` を反映できるよう拡張。
+- `tests/test_real_audio_recorder_state.py` を更新し、`apply_recording_config` で新設定値が反映されることを確認。
+- `config.yaml` の `recording` に `no_recent_audio_recovery_retry_seconds: 300` を追加。
+- `README.md` を更新し、長時間無音時の低頻度自己復旧と設定項目を追記。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_real_audio_recorder_recovery.py -q`（追加テスト失敗→修正後成功）
+  - `python3 -m pytest tests/test_real_audio_recorder_recovery.py tests/test_real_audio_recorder_state.py -q`
+  - `python3 -m pytest -q`（75件すべて成功）
+- 変更ファイル:
+  - `utils/real_audio_recorder.py`
+  - `tests/test_real_audio_recorder_recovery.py`
+  - `tests/test_real_audio_recorder_state.py`
+  - `config.yaml`
+  - `README.md`
+  - `AGENTS.md`

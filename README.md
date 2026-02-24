@@ -88,7 +88,7 @@ scripts\start.bat
 - ロギング設定
 - レート制限設定
 - 辞書設定
-- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能、`callback_buffer_max_*_mb` で録音チャンク保持メモリ上限を制御。デフォルトは `user=8MB / guild=32MB / total=128MB`。`buffer_expiration_seconds` / `continuous_buffer_duration_seconds` / `callback_buffer_duration_seconds` で保持秒数も制御可能）
+- 録音設定（`prefer_replay_buffer_manager` で ReplayBufferManager を優先利用、`chunk_gap_silence_seconds` でチャンク連結時の無音秒数を制御可能、`callback_buffer_max_*_mb` で録音チャンク保持メモリ上限を制御。デフォルトは `user=8MB / guild=32MB / total=128MB`。`buffer_expiration_seconds` / `continuous_buffer_duration_seconds` / `callback_buffer_duration_seconds` で保持秒数を制御でき、`no_recent_audio_recovery_retry_seconds` で長時間無音時の自己復旧再試行間隔も調整可能）
 
 詳細は`config.yaml`のコメントを参照してください。
 
@@ -150,7 +150,7 @@ scripts\start.bat
 - 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善
 - 自動復旧の再開処理で `Already recording.` 競合が出た場合は、1回だけ停止→再開を再試行して復旧成功率を上げるよう改善
 - 空コールバックが連続し軽い再開で復旧しない場合は、同一チャンネルへVCを張り直すハードリカバリを実行して録音の自己復旧を強化
-- 直近に非空の音声取得実績がない場合は自動復旧を抑止し、無音時のVC再接続ループ（出入り繰り返し）を防止
+- 直近の非空音声が古い場合は復旧試行を間引き、`no_recent_audio_recovery_retry_seconds` ごとに低頻度で自己復旧を再試行（無音時のVC再接続ループを抑えつつ、長時間詰まりも解消）
 - 空コールバック時のハードリカバリ昇格条件を調整し、`soft restart` が成功している間はVC切断を伴うハード再接続を実行しないよう改善（失敗が連続した場合のみ昇格）
 - `/replay` は新経路（ReplayBufferManager）で音声が見つからなくても即エラー返信せず、旧経路フォールバックの結果を優先して通知（`❌`→成功の二重メッセージを抑制）
 - `aead_xchacha20_poly1305_rtpsize` 利用時の受信互換性向上として、Voice受信パイプラインに互換パッチ（RTP判定と復号互換）を適用
@@ -266,7 +266,7 @@ Could not find Opus library. Make sure it is installed.
 - サービスを別ディレクトリから起動している場合でも、上記ディレクトリを確認してください。
 - パス解決が正しく機能しているかは `pytest tests/test_replay_file_storage.py` で回帰テストできます。
 - 1回目の `/replay` 実行後に「データが見つからない」応答が続く場合、2025-10-23 修正以降では定期チェックポイントでチャンクが継続的に蓄積されるようになっています。`pytest tests/test_real_audio_recorder_buffers.py` で時間管理ロジックを確認できます。
-- `logs/yomiage.log` に `WaveSink callback returned no audio data` が連続する場合は録音入力が詰まっている可能性があります。最新版では一定回数連続時に録音セッションを自動再起動します。
+- `logs/yomiage.log` に `WaveSink callback returned no audio data` が連続する場合は録音入力が詰まっている可能性があります。最新版では一定回数連続時に録音セッションを自動再起動し、直近音声が古い場合でも一定間隔で再試行します（`recording.no_recent_audio_recovery_retry_seconds`）。
 - Discord側で `aead_xchacha20_poly1305_rtpsize` が選択される環境では、古い py-cord 実装との差分で受信品質が落ちる場合があります。最新版では受信互換パッチを適用してパケット判定と復号処理を補正しています。
 
 ## 📄 ライセンス

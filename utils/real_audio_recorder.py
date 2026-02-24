@@ -55,6 +55,8 @@ class RealTimeAudioRecorder:
         self.HARD_RECOVERY_AFTER_SOFT_RESTARTS = 3
         self._soft_recovery_restart_counts: Dict[int, int] = {}
         self.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS = 180.0
+        self.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS = 300.0
+        self._last_stale_recovery_attempt_at: Dict[int, float] = {}
         self._last_non_empty_audio_at: Dict[int, float] = {}
         # 録音開始時刻記録（Guild別）
         self.recording_start_times: Dict[int, float] = {}
@@ -116,10 +118,18 @@ class RealTimeAudioRecorder:
             recording_config.get("continuous_buffer_duration_seconds", self.CONTINUOUS_BUFFER_DURATION),
             self.CONTINUOUS_BUFFER_DURATION,
         )
+        self.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS = _coerce_seconds(
+            recording_config.get(
+                "no_recent_audio_recovery_retry_seconds",
+                self.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS,
+            ),
+            self.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS,
+        )
         logger.info(
-            "RealTimeRecorder: Applied config buffer_expiration=%ss continuous_buffer_duration=%ss",
+            "RealTimeRecorder: Applied config buffer_expiration=%ss continuous_buffer_duration=%ss no_recent_audio_recovery_retry=%ss",
             int(self.BUFFER_EXPIRATION),
             int(self.CONTINUOUS_BUFFER_DURATION),
+            int(self.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS),
         )
 
     def _has_non_bot_members(self, voice_client) -> bool:
@@ -145,13 +155,29 @@ class RealTimeAudioRecorder:
         self._last_recovery_attempt_at[guild_id] = now
 
         last_audio_at = self._last_non_empty_audio_at.get(guild_id)
-        if not last_audio_at or (now - last_audio_at) > self.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS:
+        if not last_audio_at:
             logger.info(
-                "RealTimeRecorder: Skip auto-recovery for guild %s (no recent non-empty audio in %.1fs)",
+                "RealTimeRecorder: Skip auto-recovery for guild %s (no non-empty audio observed yet).",
                 guild_id,
-                self.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS,
             )
             return
+        stale_seconds = now - last_audio_at
+        if stale_seconds > self.RECOVERY_REQUIRES_RECENT_AUDIO_SECONDS:
+            last_stale_attempt = self._last_stale_recovery_attempt_at.get(guild_id, 0.0)
+            if (now - last_stale_attempt) < self.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS:
+                logger.info(
+                    "RealTimeRecorder: Skip auto-recovery for guild %s (last non-empty audio %.1fs ago, retry interval %.1fs)",
+                    guild_id,
+                    stale_seconds,
+                    self.NO_RECENT_AUDIO_RECOVERY_RETRY_SECONDS,
+                )
+                return
+            self._last_stale_recovery_attempt_at[guild_id] = now
+            logger.warning(
+                "RealTimeRecorder: Proceeding with periodic recovery for guild %s despite stale audio (%.1fs ago).",
+                guild_id,
+                stale_seconds,
+            )
 
         logger.warning(
             "RealTimeRecorder: Empty callbacks reached threshold for guild %s. Restarting recording session.",
@@ -197,6 +223,7 @@ class RealTimeAudioRecorder:
             self.recording_status[guild_id] = True
             self.empty_callback_counts[guild_id] = 0
             self._soft_recovery_restart_counts[guild_id] = 0
+            self._last_stale_recovery_attempt_at.pop(guild_id, None)
             logger.info("RealTimeRecorder: Recovery restart completed for guild %s", guild_id)
         except Exception as e:
             logger.error("RealTimeRecorder: Recovery restart failed for guild %s: %s", guild_id, e)
@@ -601,6 +628,7 @@ class RealTimeAudioRecorder:
                 self.empty_callback_counts[guild_id] = 0
                 self._soft_recovery_restart_counts[guild_id] = 0
                 self._last_non_empty_audio_at[guild_id] = time.time()
+                self._last_stale_recovery_attempt_at.pop(guild_id, None)
             
             # リレーコールバック呼び出し（音声リレー機能）
             if guild_id in self.relay_callbacks and audio_count > 0:
