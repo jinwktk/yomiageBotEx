@@ -138,6 +138,87 @@ class RealTimeAudioRecorder:
         members = getattr(channel, "members", []) if channel else []
         return any(not getattr(member, "bot", False) for member in members)
 
+    def get_voice_diagnostics(self, guild_id: int, target_user_id: Optional[int] = None) -> Dict[str, Any]:
+        """録音受信まわりの診断情報を取得"""
+        now = time.time()
+        vc = self.connections.get(guild_id)
+        last_non_empty = self._last_non_empty_audio_at.get(guild_id)
+        snapshot: Dict[str, Any] = {
+            "guild_id": guild_id,
+            "voice_client_present": vc is not None,
+            "recording_status_flag": bool(self.recording_status.get(guild_id, False)),
+            "empty_callback_count": self.empty_callback_counts.get(guild_id, 0),
+            "last_non_empty_audio_seconds_ago": (now - last_non_empty) if last_non_empty else None,
+            "target_user_id": target_user_id,
+            "target_user": None,
+        }
+        if vc is None:
+            return snapshot
+
+        channel = getattr(vc, "channel", None)
+        ws = getattr(vc, "ws", None)
+        ssrc_map = getattr(ws, "ssrc_map", None)
+
+        snapshot.update(
+            {
+                "voice_client_connected": bool(getattr(vc, "is_connected", lambda: False)()),
+                "voice_client_recording": bool(getattr(vc, "recording", False)),
+                "voice_mode": getattr(vc, "mode", None),
+                "channel_id": getattr(channel, "id", None),
+                "channel_name": getattr(channel, "name", None),
+                "member_count": len(getattr(channel, "members", []) or []),
+                "ssrc_map_size": len(ssrc_map) if isinstance(ssrc_map, dict) else None,
+            }
+        )
+
+        members_summary = []
+        for member in getattr(channel, "members", []) or []:
+            voice_state = getattr(member, "voice", None)
+            member_item = {
+                "id": getattr(member, "id", None),
+                "display_name": getattr(member, "display_name", getattr(member, "name", None)),
+                "bot": bool(getattr(member, "bot", False)),
+                "voice": {
+                    "self_mute": bool(getattr(voice_state, "self_mute", False)) if voice_state else None,
+                    "self_deaf": bool(getattr(voice_state, "self_deaf", False)) if voice_state else None,
+                    "mute": bool(getattr(voice_state, "mute", False)) if voice_state else None,
+                    "deaf": bool(getattr(voice_state, "deaf", False)) if voice_state else None,
+                    "suppress": bool(getattr(voice_state, "suppress", False)) if voice_state else None,
+                    "channel_id": getattr(getattr(voice_state, "channel", None), "id", None),
+                },
+            }
+            members_summary.append(member_item)
+            if target_user_id is not None and member_item["id"] == target_user_id:
+                snapshot["target_user"] = member_item
+
+        snapshot["members"] = members_summary
+        return snapshot
+
+    def _log_voice_diagnostics(
+        self,
+        *,
+        reason: str,
+        guild_id: int,
+        target_user_id: Optional[int] = None,
+        level: int = logging.WARNING,
+    ) -> None:
+        """診断情報をログ出力"""
+        try:
+            snapshot = self.get_voice_diagnostics(guild_id, target_user_id=target_user_id)
+            logger.log(
+                level,
+                "RealTimeRecorder: Voice diagnostics (%s): %s",
+                reason,
+                json.dumps(snapshot, ensure_ascii=False, default=str),
+            )
+        except Exception as e:
+            logger.warning(
+                "RealTimeRecorder: Failed to build voice diagnostics for guild %s (%s): %s",
+                guild_id,
+                reason,
+                e,
+            )
+
     async def _attempt_recover_stuck_recording(self, guild_id: int):
         """空コールバック連続時に録音セッションを再起動"""
         voice_client = self.connections.get(guild_id)
@@ -178,6 +259,7 @@ class RealTimeAudioRecorder:
                 guild_id,
                 stale_seconds,
             )
+        self._log_voice_diagnostics(reason="pre_recovery", guild_id=guild_id)
 
         logger.warning(
             "RealTimeRecorder: Empty callbacks reached threshold for guild %s. Restarting recording session.",
@@ -225,8 +307,10 @@ class RealTimeAudioRecorder:
             self._soft_recovery_restart_counts[guild_id] = 0
             self._last_stale_recovery_attempt_at.pop(guild_id, None)
             logger.info("RealTimeRecorder: Recovery restart completed for guild %s", guild_id)
+            self._log_voice_diagnostics(reason="post_recovery_success", guild_id=guild_id, level=logging.INFO)
         except Exception as e:
             logger.error("RealTimeRecorder: Recovery restart failed for guild %s: %s", guild_id, e)
+            self._log_voice_diagnostics(reason="post_recovery_failure", guild_id=guild_id)
             failure_count = self._soft_recovery_restart_counts.get(guild_id, 0) + 1
             self._soft_recovery_restart_counts[guild_id] = failure_count
             logger.warning(
@@ -622,6 +706,12 @@ class RealTimeAudioRecorder:
                     "RealTimeRecorder: WaveSink callback returned no audio data for guild %s. Recording may be silent or stuck.",
                     guild_id,
                 )
+                if (
+                    empty_count == 1
+                    or empty_count == self.EMPTY_CALLBACK_RECOVERY_THRESHOLD
+                    or (empty_count % max(self.EMPTY_CALLBACK_RECOVERY_THRESHOLD, 1) == 0)
+                ):
+                    self._log_voice_diagnostics(reason=f"empty_callback_{empty_count}", guild_id=guild_id)
                 if empty_count >= self.EMPTY_CALLBACK_RECOVERY_THRESHOLD:
                     await self._attempt_recover_stuck_recording(guild_id)
             else:
@@ -888,6 +978,11 @@ class RealTimeAudioRecorder:
                 )
             else:
                 logger.warning("RealTimeRecorder: No matching chunks and no entries for requested user %s", user_id)
+            self._log_voice_diagnostics(
+                reason="replay_no_matching_chunks",
+                guild_id=guild_id,
+                target_user_id=user_id,
+            )
         
         logger.info(f"RealTimeRecorder: Extracted {duration_seconds}s audio for guild {guild_id}, {len(result)} users with data")
         return result

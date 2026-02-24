@@ -152,6 +152,7 @@ scripts\start.bat
 - 空コールバックが連続し軽い再開で復旧しない場合は、同一チャンネルへVCを張り直すハードリカバリを実行して録音の自己復旧を強化
 - 直近の非空音声が古い場合は復旧試行を間引き、`no_recent_audio_recovery_retry_seconds` ごとに低頻度で自己復旧を再試行（無音時のVC再接続ループを抑えつつ、長時間詰まりも解消）
 - 空コールバック時のハードリカバリ昇格条件を調整し、`soft restart` が成功している間はVC切断を伴うハード再接続を実行しないよう改善（失敗が連続した場合のみ昇格）
+- 受信ゼロ時の切り分け強化として、空コールバック閾値到達時・復旧前後・`/replay` でチャンク不一致時に、VC接続状態・録音状態・参加者のミュート/デフ状態・SSRCマップ件数を診断ログへ出力
 - `/replay` は新経路（ReplayBufferManager）で音声が見つからなくても即エラー返信せず、旧経路フォールバックの結果を優先して通知（`❌`→成功の二重メッセージを抑制）
 - `aead_xchacha20_poly1305_rtpsize` 利用時の受信互換性向上として、Voice受信パイプラインに互換パッチ（RTP判定と復号互換）を適用
 - py-cord の `DecodeManager.stop()` が終了時に `Decoder Process Killed` を大量出力する問題へ対策し、停止時にキューを安全に掃除してスパムログを抑止
@@ -267,6 +268,7 @@ Could not find Opus library. Make sure it is installed.
 - パス解決が正しく機能しているかは `pytest tests/test_replay_file_storage.py` で回帰テストできます。
 - 1回目の `/replay` 実行後に「データが見つからない」応答が続く場合、2025-10-23 修正以降では定期チェックポイントでチャンクが継続的に蓄積されるようになっています。`pytest tests/test_real_audio_recorder_buffers.py` で時間管理ロジックを確認できます。
 - `logs/yomiage.log` に `WaveSink callback returned no audio data` が連続する場合は録音入力が詰まっている可能性があります。最新版では一定回数連続時に録音セッションを自動再起動し、直近音声が古い場合でも一定間隔で再試行します（`recording.no_recent_audio_recovery_retry_seconds`）。
+- さらに同条件で `RealTimeRecorder: Voice diagnostics (...)` が出力されるため、`voice_client_recording`、`voice_mode`、`members[].voice.self_mute/self_deaf`、`ssrc_map_size` を確認すると原因切り分けがしやすくなります。
 - Discord側で `aead_xchacha20_poly1305_rtpsize` が選択される環境では、古い py-cord 実装との差分で受信品質が落ちる場合があります。最新版では受信互換パッチを適用してパケット判定と復号処理を補正しています。
 
 ## 📄 ライセンス

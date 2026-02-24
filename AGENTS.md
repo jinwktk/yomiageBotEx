@@ -353,6 +353,32 @@
   - `README.md`
   - `AGENTS.md`
 
+## 2026-02-25（/replay 30秒データなし再発のログ分析強化）
+- 05:50台の再発ログ（`@The Arukkadion の過去30.0秒間の音声データが見つかりません`）を分析。
+- `logs/yomiage.log` から、`/replay` 実行時点（05:50:18〜05:50:19）は ReplayBufferManager/旧バッファ双方で該当チャンク0件、最終チャンクが約1230秒前であることを確認。
+- 同時刻の前後（05:29:54〜05:51:44）は `WaveSink callback returned no audio data` と `sink.audio_data keys: []` が連続し、復旧再起動 (`Recovery restart completed`) 後も空データが継続していたことを確認。
+- 05:51:49 に同ユーザーのチャンク取得が再開しており、受信断が継続したあと自然復帰しているが、既存ログだけでは「ユーザー状態（ミュート/デフ）」「SSRCマップ状態」「VC録音フラグ」の相関が不足し断定困難と判断。
+- TDDとして `tests/test_real_audio_recorder_diagnostics.py` を新規追加し、`RealTimeAudioRecorder.get_voice_diagnostics` が以下を返すことを先に失敗で固定:
+  - VC接続/録音フラグ
+  - 音声モード
+  - SSRCマップ件数
+  - 参加者ごとの voice state（self_mute/self_deaf など）
+  - 指定ユーザーの抽出情報
+- `utils/real_audio_recorder.py` に診断機能を実装:
+  - `get_voice_diagnostics(...)` を追加。
+  - `_log_voice_diagnostics(...)` を追加し JSON 形式でログ出力。
+  - 空コールバック連続時（初回/閾値到達時）、復旧前後、`/replay` 時間窓不一致時に診断ログを自動出力。
+- `README.md` に新しい診断ログ（`RealTimeRecorder: Voice diagnostics (...)`）の確認ポイントを追記。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_real_audio_recorder_diagnostics.py -q`（失敗→修正後成功）
+  - `python3 -m pytest tests/test_real_audio_recorder_recovery.py tests/test_real_audio_recorder_state.py -q`
+  - `python3 -m pytest -q`（79件すべて成功）
+- 変更ファイル:
+  - `utils/real_audio_recorder.py`
+  - `tests/test_real_audio_recorder_diagnostics.py`（新規）
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-02-25（/replay 長時間無音後の自己復旧改善）
 - 報告ログ（`@The Arukkadion の過去30.0秒間の音声データが見つかりません（最後の記録は 4216.1 秒前）`）を前提に、`RealTimeAudioRecorder` の自動復旧条件を再調整。
 - 従来は「直近の非空音声が古い」状態だと復旧を完全スキップしていたため、長時間 `sink.audio_data keys: []` が続くと復旧機会がなくなる問題があった。
