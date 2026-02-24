@@ -48,7 +48,7 @@ DISCORD_TOKEN=your_discord_bot_token_here
 
 #### 手動起動
 ```bash
-uv run --no-project python bot.py
+uv run python bot.py
 ```
 
 #### スクリプトを使用（推奨）

@@ -25,4 +25,4 @@ uv sync --no-install-project
 
 # ボットの起動
 echo "🚀 ボットを起動します..."
-uv run --no-project python bot.py
+uv run python bot.py

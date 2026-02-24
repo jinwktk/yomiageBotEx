@@ -36,6 +36,6 @@ rem Start bot with protection against external termination
 echo Starting bot in protected mode...
 title "YomiageBotEx-Protected"
 set PYTHONIOENCODING=utf-8
-uv run --no-project python bot.py
+uv run python bot.py
 
 pause

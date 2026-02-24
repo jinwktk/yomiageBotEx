@@ -336,6 +336,23 @@
   - `README.md`
   - `AGENTS.md`
 
+## 2026-02-25（py-cord実行環境ずれ修正）
+- `/replay` で「過去30秒データなし（最後の記録が数千秒前）」が再発した報告を受け、依存解決経路を再調査。
+- `pyproject.toml` は `py-cord[voice]==2.7.1` だが、実行環境は `2.6.1.dev299+g59d48606` になっていることを確認。
+- 環境上のライブラリを `python3 -m pip install --upgrade --break-system-packages "py-cord[voice]==2.7.1"` で更新し、`py-cord 2.7.1` / `PyNaCl 1.6.2` へ反映。
+- 根本原因として、起動コマンドが `uv run --no-project python bot.py` になっており、プロジェクト固定依存を無視していた点を特定。
+- TDDとして `tests/test_start_scripts_runtime_env.py` を新規追加し、`start.sh`/`start.bat` が `uv run python bot.py` を使うことを先に失敗で固定。
+- `scripts/start.sh` / `scripts/start.bat` / `README.md` の起動コマンドを `uv run python bot.py` へ修正。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_start_scripts_runtime_env.py -q`（失敗→修正後成功）
+  - `python3 -m pytest -q`（77件すべて成功）
+- 変更ファイル:
+  - `tests/test_start_scripts_runtime_env.py`（新規）
+  - `scripts/start.sh`
+  - `scripts/start.bat`
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-02-25（/replay 長時間無音後の自己復旧改善）
 - 報告ログ（`@The Arukkadion の過去30.0秒間の音声データが見つかりません（最後の記録は 4216.1 秒前）`）を前提に、`RealTimeAudioRecorder` の自動復旧条件を再調整。
 - 従来は「直近の非空音声が古い」状態だと復旧を完全スキップしていたため、長時間 `sink.audio_data keys: []` が続くと復旧機会がなくなる問題があった。
