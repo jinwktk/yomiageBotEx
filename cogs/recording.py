@@ -441,43 +441,72 @@ class RecordingCog(commands.Cog):
             
             # 新しい時間範囲ベースの音声データ取得を試行（タイムアウト付き）
             if hasattr(self.real_time_recorder, 'get_audio_for_time_range'):
-                # まず現在のGuildから音声データを取得（10秒タイムアウト）
-                try:
-                    time_range_audio = await asyncio.wait_for(
-                        asyncio.to_thread(self.real_time_recorder.get_audio_for_time_range, guild_id, duration, user.id if user else None),
-                        timeout=10.0
-                    )
-                except asyncio.TimeoutError:
-                    self.logger.error(f"Recording: Timeout getting audio for guild {guild_id}")
-                    await ctx.followup.send("⚠️ 音声データの取得がタイムアウトしました。", ephemeral=True)
-                    return
-                
-                # 音声リレー機能が有効な場合、全Guildから音声データを検索
-                if not time_range_audio or (user and user.id not in time_range_audio):
-                    self.logger.info(f"Recording: No audio found in current guild {guild_id}, searching all guilds...")
-                    # 安全にキーのリストを取得（辞書が変更されても問題ない）
+                async def _fetch_time_range_audio() -> Optional[Dict[int, bytes]]:
+                    # まず現在のGuildから音声データを取得（10秒タイムアウト）
                     try:
-                        guild_ids = list(self.real_time_recorder.continuous_buffers.keys())
-                        for search_guild_id in guild_ids:
-                            if search_guild_id != guild_id:
-                                try:
-                                    # 各Guild検索も5秒タイムアウト
-                                    search_audio = await asyncio.wait_for(
-                                        asyncio.to_thread(self.real_time_recorder.get_audio_for_time_range, search_guild_id, duration, user.id if user else None),
-                                        timeout=5.0
-                                    )
-                                    if search_audio:
-                                        self.logger.info(f"Recording: Found audio data in guild {search_guild_id}")
-                                        time_range_audio = search_audio
-                                        break
-                                except asyncio.TimeoutError:
-                                    self.logger.warning(f"Recording: Timeout searching guild {search_guild_id}, skipping")
-                                    continue
-                    except Exception as e:
-                        self.logger.error(f"Recording: Error searching all guilds for audio: {e}")
+                        time_range_audio = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                self.real_time_recorder.get_audio_for_time_range,
+                                guild_id,
+                                duration,
+                                user.id if user else None,
+                            ),
+                            timeout=10.0,
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.error(f"Recording: Timeout getting audio for guild {guild_id}")
+                        await ctx.followup.send("⚠️ 音声データの取得がタイムアウトしました。", ephemeral=True)
+                        return None
+
+                    # 音声リレー機能が有効な場合、全Guildから音声データを検索
+                    if not time_range_audio or (user and user.id not in time_range_audio):
+                        self.logger.info(f"Recording: No audio found in current guild {guild_id}, searching all guilds...")
+                        # 安全にキーのリストを取得（辞書が変更されても問題ない）
+                        try:
+                            guild_ids = list(self.real_time_recorder.continuous_buffers.keys())
+                            for search_guild_id in guild_ids:
+                                if search_guild_id != guild_id:
+                                    try:
+                                        # 各Guild検索も5秒タイムアウト
+                                        search_audio = await asyncio.wait_for(
+                                            asyncio.to_thread(
+                                                self.real_time_recorder.get_audio_for_time_range,
+                                                search_guild_id,
+                                                duration,
+                                                user.id if user else None,
+                                            ),
+                                            timeout=5.0,
+                                        )
+                                        if search_audio:
+                                            self.logger.info(f"Recording: Found audio data in guild {search_guild_id}")
+                                            time_range_audio = search_audio
+                                            break
+                                    except asyncio.TimeoutError:
+                                        self.logger.warning(f"Recording: Timeout searching guild {search_guild_id}, skipping")
+                                        continue
+                        except Exception as e:
+                            self.logger.error(f"Recording: Error searching all guilds for audio: {e}")
+                    return time_range_audio
+
+                time_range_audio = await _fetch_time_range_audio()
+                if time_range_audio is None:
+                    return
                 
                 if user:
                     # 特定ユーザーの音声
+                    if user.id not in time_range_audio or not time_range_audio[user.id]:
+                        # 発話直後の取りこぼし対策で、短時間待って1回だけ再試行
+                        self.logger.info(
+                            "Replay: no recent chunk for user %s in first attempt, retrying once after checkpoint",
+                            user.id,
+                        )
+                        await asyncio.sleep(0.35)
+                        await self._force_replay_checkpoint_if_recording(guild_id)
+                        retry_audio = await _fetch_time_range_audio()
+                        if retry_audio is None:
+                            return
+                        time_range_audio = retry_audio
+
                     if user.id not in time_range_audio or not time_range_audio[user.id]:
                         hint = ""
                         health = self.real_time_recorder.get_buffer_health_summary(guild_id, user.id)

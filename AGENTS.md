@@ -379,6 +379,34 @@
   - `README.md`
   - `AGENTS.md`
 
+## 2026-02-28（Nymeia の /replay 30秒データなし頻発対応）
+- 報告ログ `⚠️ @Nymeia の過去30.0秒間の音声データが見つかりません。（最後の記録は 5270.1 秒前）` を分析し、以下を確認:
+  - 失敗時点でも `Voice diagnostics (replay_no_matching_chunks)` の `last_non_empty_audio_seconds_ago` は十数秒で、ギルド全体の受信はある。
+  - ただし対象ユーザー `372768430149074954` の連続バッファには直近チャンクがなく、ユーザー指定 `/replay` だけ失敗するタイミングがある。
+  - 「5270.1秒前」は古い連続バッファが残存していた表示で、実際の直近状態を誤認しやすかった。
+- TDDとして新規テストを追加:
+  - `tests/test_real_audio_recorder_continuous_prune.py`  
+    `get_audio_for_time_range` 実行時に期限切れ連続チャンクが全ユーザー分で掃除されることを固定。
+  - `tests/test_replay_user_retry.py`  
+    ユーザー指定 `/replay` が初回0件でも、短時間待機＋再チェックポイントで1回再試行し成功できることを固定。
+- 実装変更:
+  - `utils/real_audio_recorder.py`
+    - `_prune_continuous_buffers` を追加し、`get_audio_for_time_range` / `get_buffer_health_summary` で期限切れ連続チャンクを先に掃除。
+    - `get_voice_diagnostics` に `ssrc_user_ids` / `target_user_in_ssrc_map` を追加し、対象ユーザーの受信マッピング有無をログで確認可能に。
+  - `cogs/recording.py`
+    - ユーザー指定 `/replay` で初回0件時、`0.35s` 待機＋再チェックポイント後に旧経路を1回だけ再取得するリトライを追加。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_replay_user_retry.py tests/test_real_audio_recorder_continuous_prune.py tests/test_real_audio_recorder_diagnostics.py -q`
+  - `python3 -m pytest tests/test_replay_buffer_integration.py tests/test_replay_fallback_messaging.py -q`
+  - `python3 -m pytest -q`（81件すべて成功）
+- 変更ファイル:
+  - `utils/real_audio_recorder.py`
+  - `cogs/recording.py`
+  - `tests/test_replay_user_retry.py`（新規）
+  - `tests/test_real_audio_recorder_continuous_prune.py`（新規）
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-02-25（/replay 長時間無音後の自己復旧改善）
 - 報告ログ（`@The Arukkadion の過去30.0秒間の音声データが見つかりません（最後の記録は 4216.1 秒前）`）を前提に、`RealTimeAudioRecorder` の自動復旧条件を再調整。
 - 従来は「直近の非空音声が古い」状態だと復旧を完全スキップしていたため、長時間 `sink.audio_data keys: []` が続くと復旧機会がなくなる問題があった。

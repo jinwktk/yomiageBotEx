@@ -170,6 +170,26 @@ class RealTimeAudioRecorder:
                 "ssrc_map_size": len(ssrc_map) if isinstance(ssrc_map, dict) else None,
             }
         )
+        if isinstance(ssrc_map, dict):
+            mapped_user_ids = set()
+            for item in ssrc_map.values():
+                if isinstance(item, int):
+                    mapped_user_ids.add(item)
+                    continue
+                if isinstance(item, dict):
+                    maybe_user_id = item.get("user_id") or item.get("id")
+                    if isinstance(maybe_user_id, int):
+                        mapped_user_ids.add(maybe_user_id)
+                    continue
+                for attr in ("user_id", "id"):
+                    maybe_user_id = getattr(item, attr, None)
+                    if isinstance(maybe_user_id, int):
+                        mapped_user_ids.add(maybe_user_id)
+                        break
+            snapshot["ssrc_user_ids"] = sorted(mapped_user_ids)
+            snapshot["target_user_in_ssrc_map"] = (
+                target_user_id in mapped_user_ids if target_user_id is not None else None
+            )
 
         members_summary = []
         for member in getattr(channel, "members", []) or []:
@@ -792,6 +812,7 @@ class RealTimeAudioRecorder:
     def get_buffer_health_summary(self, guild_id: int, user_id: Optional[int] = None, max_entries: int = 5) -> Dict[str, Any]:
         """連続バッファの健全性を簡易集計"""
         now = time.time()
+        self._prune_continuous_buffers(guild_id, current_time=now)
         buffers = self.continuous_buffers.get(guild_id, {})
         target_user_ids = [user_id] if user_id else list(buffers.keys())
         entries = []
@@ -822,6 +843,38 @@ class RealTimeAudioRecorder:
             "entries": entries,
             "has_data": bool(entries),
         }
+
+    def _prune_continuous_buffers(self, guild_id: int, current_time: Optional[float] = None) -> None:
+        """連続バッファから期限切れチャンクを全ユーザー分掃除"""
+        guild_buffers = self.continuous_buffers.get(guild_id)
+        if not guild_buffers:
+            return
+
+        now = current_time if current_time is not None else time.time()
+        cutoff = now - self.CONTINUOUS_BUFFER_DURATION
+
+        removed_count = 0
+        removed_users = 0
+        for uid in list(guild_buffers.keys()):
+            chunks = guild_buffers.get(uid, [])
+            filtered_chunks = [chunk for chunk in chunks if chunk[2] >= cutoff]
+            removed_count += max(0, len(chunks) - len(filtered_chunks))
+            if filtered_chunks:
+                guild_buffers[uid] = filtered_chunks
+            else:
+                del guild_buffers[uid]
+                removed_users += 1
+
+        if not guild_buffers:
+            del self.continuous_buffers[guild_id]
+
+        if removed_count > 0:
+            logger.debug(
+                "RealTimeRecorder: Pruned %s expired continuous chunks (%s users) for guild %s",
+                removed_count,
+                removed_users,
+                guild_id,
+            )
     
     def _add_to_continuous_buffer(self, guild_id: int, user_id: int, audio_data: bytes, timestamp: float) -> bool:
         """連続音声バッファに音声データを追加"""
@@ -932,6 +985,7 @@ class RealTimeAudioRecorder:
     def get_audio_for_time_range(self, guild_id: int, duration_seconds: float, user_id: Optional[int] = None) -> Dict[int, bytes]:
         """指定した時間範囲の音声データを取得（現在時刻から過去N秒分）"""
         current_time = time.time()
+        self._prune_continuous_buffers(guild_id, current_time=current_time)
         start_time = current_time - duration_seconds
         
         logger.info(f"RealTimeRecorder: Extracting audio for guild {guild_id}")

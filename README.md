@@ -134,6 +134,7 @@ scripts\start.bat
 - `/replay` は RecordingCallbackManager からの ReplayBufferManager を常に優先し、取得できた場合は旧バッファ経路へフォールバックしない仕組み
 - `/replay` 実行時に録音中であれば先にチェックポイント（録音一時停止→即再開）を強制し、発話直後・発話中でもコマンド実行時点までの音声を優先して取り込むよう改善
 - `/replay` 新経路でチェックポイント直後に音声データが0件だった場合、短時間待機して1回だけ再取得するリトライを追加し、発話直後の取りこぼしを軽減
+- `/replay` のユーザー指定で初回0件だった場合、短時間待機して再チェックポイント後に旧経路を1回だけ再試行し、発話直後の「データなし」を減らす改善を追加
 - RealTimeAudioRecorder で取得したチャンクを RecordingCallbackManager に直接転送し、リレー機能なしでも `/replay` 新経路の取得精度を維持
 - ReplayBufferManager のユーザー音声結合は WAV ヘッダ長を固定値で扱わず `wave` 解析でPCM抽出する方式に修正し、可変ヘッダ混在時の機械音化を防止
 - `/replay`（ユーザー指定）の結合時に16bit PCMピークを抑制するクリップ保護を追加
@@ -146,6 +147,7 @@ scripts\start.bat
 - RecordingCallbackManager が WAV解析済みPCMを `AudioChunk` に保持し、ReplayBufferManager が再利用することで `/replay` 時のチャンク再パース負荷を軽減
 - RecordingCallbackManager のチャンク保持はPCM主体（生WAVは必要時のみ保持）にして、同一チャンクの二重保持によるメモリ使用量を抑制
 - ReplayBufferManager の末尾トリム処理は必要フレームのみ読み込む方式にして、大きなWAVのメモリ負荷を抑制
+- RealTimeAudioRecorder の連続バッファは取得時に全ユーザー分の期限切れチャンクを掃除し、古すぎる履歴が残って「最後の記録が数千秒前」と誤解しやすい表示になる問題を軽減
 - WaveSink が空データ（`sink.audio_data keys: []`）を連続で返した場合、録音セッションを自動で再起動して復旧を試みる保護を追加
 - 自動復旧時に `Not currently recording audio` が返るレース条件でも、停止済みとして扱って再開処理を継続するよう改善
 - 自動復旧の再開処理で `Already recording.` 競合が出た場合は、1回だけ停止→再開を再試行して復旧成功率を上げるよう改善
@@ -269,6 +271,7 @@ Could not find Opus library. Make sure it is installed.
 - 1回目の `/replay` 実行後に「データが見つからない」応答が続く場合、2025-10-23 修正以降では定期チェックポイントでチャンクが継続的に蓄積されるようになっています。`pytest tests/test_real_audio_recorder_buffers.py` で時間管理ロジックを確認できます。
 - `logs/yomiage.log` に `WaveSink callback returned no audio data` が連続する場合は録音入力が詰まっている可能性があります。最新版では一定回数連続時に録音セッションを自動再起動し、直近音声が古い場合でも一定間隔で再試行します（`recording.no_recent_audio_recovery_retry_seconds`）。
 - さらに同条件で `RealTimeRecorder: Voice diagnostics (...)` が出力されるため、`voice_client_recording`、`voice_mode`、`members[].voice.self_mute/self_deaf`、`ssrc_map_size` を確認すると原因切り分けがしやすくなります。
+- 上記診断には `ssrc_user_ids` と `target_user_in_ssrc_map` も含まれるため、特定ユーザーの受信マッピング有無も確認できます。
 - Discord側で `aead_xchacha20_poly1305_rtpsize` が選択される環境では、古い py-cord 実装との差分で受信品質が落ちる場合があります。最新版では受信互換パッチを適用してパケット判定と復号処理を補正しています。
 
 ## 📄 ライセンス
