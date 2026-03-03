@@ -238,6 +238,9 @@ uv run pytest
 - `config.yaml` の `development.hot_reload.enabled` を `true` にすると、Cog ファイル（`cogs/*.py`）の更新をポーリングで検知して自動的に `reload_extension` が走ります。
 - 間隔は `development.hot_reload.poll_interval`（秒）で調整できます。デフォルトは 1.0 秒です。
 
+### 実行時生成ファイル
+- 起動中の排他制御に使う `bot.lock` は実行時に自動生成/自動削除されるため、リポジトリには含めません。
+
 ### 2026-02-14 メンテナンスメモ
 - 読み上げ機能を中心に運用する方針に合わせ、機能整理前の状態を一度コミットする運用に変更。
 - 今後の削除対象は `relay` 系と `admin` 系に限定し、`recording`・`tts`・`user_settings`・`dictionary` は維持する。

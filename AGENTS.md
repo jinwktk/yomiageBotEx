@@ -537,3 +537,13 @@
   - `tests/test_message_reader_reconnect.py`
   - `README.md`
   - `AGENTS.md`
+
+## 2026-03-03（不要生成物の整理）
+- ユーザー依頼「削除できるものは削除」に合わせ、実行時生成ファイルの整理を実施。
+- 追跡されていた `bot.lock` をリポジトリから削除し、再生成時に差分汚染しないよう `.gitignore` に `bot.lock` を追加。
+- `README.md` に `bot.lock` が実行時生成物であり、リポジトリに含めない運用を明記。
+- 変更ファイル:
+  - `.gitignore`
+  - `README.md`
+  - `AGENTS.md`
+  - `bot.lock`（削除）

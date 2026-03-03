@@ -17,6 +17,7 @@ tmpwav/
 *.log
 
 # セッション・データファイル（自動生成）
+bot.lock
 sessions.json
 recordings_buffer.pkl
 data/audio_buffers.json
