@@ -280,6 +280,12 @@ Could not find Opus library. Make sure it is installed.
 - 2026-03-02 以降、Discord 公式ステータスで「非Stageボイスチャンネルは DAVE 対応必須」のアナウンスが出ています。
 - 本Botは 4017 を検知すると、`logs/yomiage.log` に「DAVE 必須の可能性」を明示し、同一ギルドの再接続を一定時間クールダウンして無限リトライを防ぎます。
 - 現行は `py-cord` の GitHub版（`git+https://github.com/Pycord-Development/pycord`）を利用していますが、4017 が継続する場合は upstream 側の DAVE 対応進捗依存です（Stage チャンネルでは発生しない場合があります）。
+- `MessageReader` 側もクールダウン状態を参照し、クールダウン中は再接続を試みないため、メッセージ受信のたびに接続処理が連打される挙動を抑制しています。
+- `voice` 設定の `enhanced_voice_fallback_enabled` はデフォルト `false` です。`connect_voice_safely` 失敗時に `EnhancedVoiceClient` へ多重フォールバックして状態が悪化するケースを防ぐため、必要時のみ有効化してください。
+
+### `'_MissingSentinel' object has no attribute 'close/poll_event'` が出る
+- 一部の `py-cord` 開発版で、接続失敗後の `VoiceClient` 内部状態が sentinel のまま参照されるケースがあります。
+- 本Botは起動時パッチで `on_voice_server_update` / `poll_voice_ws` の sentinel 参照をガードし、イベントループで未処理例外が増殖するのを抑制しています。
 
 ## 📄 ライセンス
 

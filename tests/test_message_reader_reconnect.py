@@ -193,3 +193,36 @@ async def test_attempt_auto_reconnect_uses_last_known_channel(tmp_path, monkeypa
     assert guild.voice_client is not None
     assert guild.voice_client.channel == fallback_channel
     assert cog._is_auto_paused(guild.id) is False
+
+
+@pytest.mark.asyncio
+async def test_attempt_auto_reconnect_skips_when_bot_reports_voice_cooldown(tmp_path, monkeypatch):
+    config = {
+        "message_reading": {
+            "enabled": True,
+            "max_length": 100,
+        }
+    }
+    monkeypatch.setattr("utils.tts.Path", lambda p: tmp_path / p)
+
+    target_channel = DummyChannel("busy", [DummyMember(bot=False)], channel_id=99)
+    connect_calls = {"count": 0}
+
+    async def fake_connect(_channel):
+        connect_calls["count"] += 1
+        return DummyVoiceClient(_channel, connected=True)
+
+    bot = SimpleNamespace(
+        connect_voice_safely=fake_connect,
+        config=config,
+        get_voice_connect_block_status=lambda _gid: (True, 120.0, "voice gateway blocked"),
+    )
+    guild = DummyGuild(voice_client=None, channels=[target_channel], guild_id=1000)
+    bot.get_guild = lambda gid, g=guild: g
+
+    cog = MessageReaderCog(bot, config)
+
+    result = await cog._attempt_auto_reconnect(guild)
+
+    assert result is False
+    assert connect_calls["count"] == 0

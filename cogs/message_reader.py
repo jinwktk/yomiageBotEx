@@ -258,6 +258,18 @@ class MessageReaderCog(commands.Cog):
     async def _attempt_auto_reconnect(self, guild: discord.Guild) -> bool:
         """ボイスチャンネルへの自動再接続を試行"""
         try:
+            block_status_getter = getattr(self.bot, "get_voice_connect_block_status", None)
+            if callable(block_status_getter):
+                blocked, remaining, reason = block_status_getter(guild.id)
+                if blocked:
+                    self.logger.info(
+                        "MessageReader: Skip auto-reconnect for %s due to voice cooldown (%.1fs): %s",
+                        guild.name,
+                        remaining,
+                        reason,
+                    )
+                    return False
+
             self.logger.info(f"MessageReader: Attempting auto-reconnect in {guild.name}")
 
             existing_client = guild.voice_client
@@ -350,6 +362,13 @@ class MessageReaderCog(commands.Cog):
                     self.logger.error(f"MessageReader: Retry connect failed: {retry_error}")
                 return False
             except Exception as connect_error:
+                if "Voice connect cooldown active" in str(connect_error):
+                    self.logger.info(
+                        "MessageReader: Voice cooldown active while reconnecting in %s: %s",
+                        guild.name,
+                        connect_error,
+                    )
+                    return False
                 self.logger.error(f"MessageReader: Direct connect failed: {connect_error}")
                 return False
                 

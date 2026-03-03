@@ -1,6 +1,8 @@
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from utils.voice_receive_patch import apply_voice_receive_patch
 
 
@@ -33,6 +35,19 @@ class _FakeVoiceClient:
     @staticmethod
     def strip_header_ext(data):
         return data
+
+    async def on_voice_server_update(self, _data):
+        if not self._handshaking:
+            await self.ws.close(4000)
+            return
+        self._voice_server_complete = True
+
+    async def poll_voice_ws(self, _reconnect):
+        await self.ws.poll_event()
+
+
+class _MissingSentinel:
+    pass
 
 
 class _FakeRawData:
@@ -121,3 +136,34 @@ def test_voice_receive_patch_suppresses_decode_manager_killed_spam(monkeypatch, 
     assert "Decoder Process Killed" not in captured.out
     assert manager._end_thread.is_set()
     assert manager.decode_queue == []
+
+
+@pytest.mark.asyncio
+async def test_voice_receive_patch_ignores_missing_ws_close_in_server_update(monkeypatch):
+    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
+    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
+    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
+        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+
+    apply_voice_receive_patch()
+
+    vc = _FakeVoiceClient()
+    vc._handshaking = False
+    vc.ws = _MissingSentinel()
+
+    await vc.on_voice_server_update({"guild_id": "1"})
+
+
+@pytest.mark.asyncio
+async def test_voice_receive_patch_ignores_missing_ws_poll_event(monkeypatch):
+    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
+    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
+    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
+        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+
+    apply_voice_receive_patch()
+
+    vc = _FakeVoiceClient()
+    vc.ws = _MissingSentinel()
+
+    await vc.poll_voice_ws(True)

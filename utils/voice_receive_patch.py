@@ -45,6 +45,8 @@ def apply_voice_receive_patch(logger: Optional[logging.Logger] = None) -> None:
 
     original_unpack_audio = VoiceClient.unpack_audio
     raw_data_cls = discord.voice_client.RawData
+    original_voice_server_update = VoiceClient.on_voice_server_update
+    original_poll_voice_ws = VoiceClient.poll_voice_ws
 
     def patched_unpack_audio(self, data):
         if not data or len(data) < 2:
@@ -79,6 +81,38 @@ def apply_voice_receive_patch(logger: Optional[logging.Logger] = None) -> None:
         self.decoder.decode(packet)
 
     VoiceClient.unpack_audio = patched_unpack_audio
+
+    async def patched_on_voice_server_update(self, data):
+        try:
+            return await original_voice_server_update(self, data)
+        except AttributeError as err:
+            ws = getattr(self, "ws", None)
+            if "close" in str(err) and _is_missing_ws_sentinel(ws):
+                log.warning(
+                    "Voice server update ignored missing websocket sentinel (guild=%s channel=%s handshaking=%s)",
+                    getattr(getattr(self, "guild", None), "id", "unknown"),
+                    getattr(getattr(self, "channel", None), "id", "unknown"),
+                    getattr(self, "_handshaking", False),
+                )
+                return
+            raise
+
+    async def patched_poll_voice_ws(self, reconnect):
+        try:
+            return await original_poll_voice_ws(self, reconnect)
+        except AttributeError as err:
+            ws = getattr(self, "ws", None)
+            if "poll_event" in str(err) and _is_missing_ws_sentinel(ws):
+                log.warning(
+                    "Voice poll loop stopped because websocket sentinel is missing (guild=%s channel=%s).",
+                    getattr(getattr(self, "guild", None), "id", "unknown"),
+                    getattr(getattr(self, "channel", None), "id", "unknown"),
+                )
+                return
+            raise
+
+    VoiceClient.on_voice_server_update = patched_on_voice_server_update
+    VoiceClient.poll_voice_ws = patched_poll_voice_ws
 
     original_decrypt = getattr(
         VoiceClient,
@@ -126,3 +160,12 @@ def _patch_decode_manager_stop(log: logging.Logger) -> None:
     decode_manager_cls.stop = patched_stop
     decode_manager_cls._yomiage_stop_patch_applied = True
     log.info("Applied DecodeManager stop patch to suppress kill-message spam.")
+
+
+def _is_missing_ws_sentinel(ws_obj: Any) -> bool:
+    missing = getattr(discord.utils, "MISSING", None)
+    if ws_obj is None:
+        return False
+    if ws_obj is missing:
+        return True
+    return ws_obj.__class__.__name__ == "_MissingSentinel"

@@ -497,3 +497,43 @@
   - `pyproject.toml`
   - `README.md`
   - `AGENTS.md`
+
+## 2026-03-03（4017連発時の安定化とMissingSentinel例外対策）
+- 最新ログを再分析し、`4017` 連発に加えて以下の未処理例外が発生していることを確認:
+  - `AttributeError: '_MissingSentinel' object has no attribute 'close'`（`on_voice_server_update`）
+  - `AttributeError: '_MissingSentinel' object has no attribute 'poll_event'`（`poll_voice_ws`）
+- TDDとしてテストを先に追加:
+  - `tests/test_voice_receive_patch.py`
+    - sentinel状態で `on_voice_server_update` が落ちないこと
+    - sentinel状態で `poll_voice_ws` が落ちないこと
+  - `tests/test_message_reader_reconnect.py`
+    - Bot側がVC接続クールダウン中の場合、`MessageReader` が再接続を試みないこと
+- 実装修正:
+  - `utils/voice_receive_patch.py`
+    - `VoiceClient.on_voice_server_update` の `ws.close` 呼び出しを sentinel ガード。
+    - `VoiceClient.poll_voice_ws` の `ws.poll_event` 呼び出しを sentinel ガード。
+    - `_is_missing_ws_sentinel` ヘルパーを追加。
+  - `bot.py`
+    - `connect_voice_safely` の失敗ログを `type / close_code / repr / exc_info` 付きに強化。
+    - 失敗時の `channel.connect()` 追加フォールバックを廃止し、最後は明示例外で終了。
+    - 外部Cog参照用 `get_voice_connect_block_status` を追加。
+    - `connect_to_voice` でクールダウン中は `EnhancedVoiceClient` フォールバックを実行しない。
+    - `voice.enhanced_voice_fallback_enabled`（デフォルトfalse）でフォールバック有効化を制御。
+  - `cogs/message_reader.py`
+    - `_attempt_auto_reconnect` 冒頭で Bot の VC接続クールダウン状態を確認し、クールダウン中は再接続をスキップ。
+    - クールダウン例外を検知した場合も接続連打せず終了。
+  - `README.md`
+    - 4017時の連打抑止挙動とフォールバック設定、MissingSentinel対策を追記。
+- 実行コマンド:
+  - `python3 -m pytest -q tests/test_voice_receive_patch.py`（失敗→修正後成功）
+  - `python3 -m pytest -q tests/test_message_reader_reconnect.py`（失敗→修正後成功）
+  - `python3 -m pytest -q tests/test_voice_receive_patch.py tests/test_message_reader_reconnect.py`
+  - `python3 -m pytest -q`（90件すべて成功）
+- 変更ファイル:
+  - `utils/voice_receive_patch.py`
+  - `bot.py`
+  - `cogs/message_reader.py`
+  - `tests/test_voice_receive_patch.py`
+  - `tests/test_message_reader_reconnect.py`
+  - `README.md`
+  - `AGENTS.md`

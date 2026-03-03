@@ -352,6 +352,10 @@ class YomiageBot(discord.Bot):
         reason = self._voice_gateway_block_reasons.get(guild_id, "")
         return True, remaining, reason
 
+    def get_voice_connect_block_status(self, guild_id: int) -> tuple[bool, float, str]:
+        """外部Cog向け: VC接続クールダウン状態を返す"""
+        return self._get_voice_gateway_block_status(guild_id)
+
     async def _refresh_resources(self):
         """長時間稼働によるリソース劣化をリフレッシュ"""
         logger.info("Scheduled refresh: starting resource refresh cycle")
@@ -424,6 +428,7 @@ class YomiageBot(discord.Bot):
     async def connect_voice_safely(self, channel):
         """安全な音声接続（WebSocketエラー対応強化版）"""
         max_retries = 3
+        last_error = None
         blocked, remaining, reason = self._get_voice_gateway_block_status(channel.guild.id)
         if blocked:
             raise RuntimeError(
@@ -462,8 +467,19 @@ class YomiageBot(discord.Bot):
                 raise
                     
             except Exception as e:
-                logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
+                last_error = e
                 close_code = extract_voice_close_code(e)
+                logger.error(
+                    "Voice connection attempt %s/%s failed for guild=%s channel=%s type=%s close_code=%s error=%r",
+                    attempt + 1,
+                    max_retries,
+                    channel.guild.id,
+                    channel.name,
+                    type(e).__name__,
+                    close_code,
+                    e,
+                    exc_info=True,
+                )
                 if is_dave_required_close_code(close_code):
                     self._mark_voice_gateway_blocked(channel.guild.id, close_code)
                     try:
@@ -487,13 +503,9 @@ class YomiageBot(discord.Bot):
                     retry_delay = 3.0 * (attempt + 1)
                     logger.info(f"Retrying connection after {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
-                else:
-                    logger.error("All connection attempts failed, trying basic connect")
-                    try:
-                        return await channel.connect()
-                    except Exception as e2:
-                        logger.error(f"Fallback connection also failed: {e2}")
-                        raise
+        raise RuntimeError(
+            f"All voice connection attempts failed for guild={channel.guild.id} channel={channel.name}"
+        ) from last_error
 
     async def _cleanup_existing_connection(self, channel):
         """既存の音声接続をクリーンアップ"""
@@ -879,6 +891,17 @@ class YomiageBot(discord.Bot):
                 logger.error(
                     "Safe voice connection failed with gateway close code=%s. Skip fallback connect.",
                     close_code,
+                )
+                raise
+            if "Voice connect cooldown active" in str(e):
+                logger.info("Safe voice connection is under cooldown. Skip fallback connect.")
+                raise
+            fallback_enabled = bool(
+                self.config.get("voice", {}).get("enhanced_voice_fallback_enabled", False)
+            )
+            if not fallback_enabled:
+                logger.info(
+                    "EnhancedVoiceClient fallback is disabled by config, propagating connection error."
                 )
                 raise
             logger.error(f"Safe connection failed, trying EnhancedVoiceClient: {e}")
