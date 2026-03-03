@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from utils.voice_receive_patch import apply_voice_receive_patch
+import utils.voice_receive_patch as voice_receive_patch
 
 
 class _DummyDecoder:
@@ -14,36 +14,39 @@ class _DummyDecoder:
         self.calls.append(packet)
 
 
-class _FakeVoiceClient:
-    paused = False
+def _build_fake_voice_client():
+    class _FakeVoiceClient:
+        paused = False
 
-    def __init__(self):
-        self.decoder = _DummyDecoder()
-        self.mode = "aead_xchacha20_poly1305_rtpsize"
-        self.guild = SimpleNamespace(name="g")
-        self.channel = SimpleNamespace(name="c")
+        def __init__(self):
+            self.decoder = _DummyDecoder()
+            self.mode = "aead_xchacha20_poly1305_rtpsize"
+            self.guild = SimpleNamespace(name="g")
+            self.channel = SimpleNamespace(name="c")
 
-    def unpack_audio(self, data):
-        # old behavior (strict payload type match)
-        if data[1] != 0x78:
-            return
-        self.decoder.decode(data)
+        def unpack_audio(self, data):
+            # old behavior (strict payload type match)
+            if data[1] != 0x78:
+                return
+            self.decoder.decode(data)
 
-    def _decrypt_aead_xchacha20_poly1305_rtpsize(self, header, data):
-        return self.strip_header_ext(data)
+        def _decrypt_aead_xchacha20_poly1305_rtpsize(self, header, data):
+            return self.strip_header_ext(data)
 
-    @staticmethod
-    def strip_header_ext(data):
-        return data
+        @staticmethod
+        def strip_header_ext(data):
+            return data
 
-    async def on_voice_server_update(self, _data):
-        if not self._handshaking:
-            await self.ws.close(4000)
-            return
-        self._voice_server_complete = True
+        async def on_voice_server_update(self, _data):
+            if not self._handshaking:
+                await self.ws.close(4000)
+                return
+            self._voice_server_complete = True
 
-    async def poll_voice_ws(self, _reconnect):
-        await self.ws.poll_event()
+        async def poll_voice_ws(self, _reconnect):
+            await self.ws.poll_event()
+
+    return _FakeVoiceClient
 
 
 class _MissingSentinel:
@@ -76,14 +79,12 @@ class _FakeDecodeManager:
 
 
 def test_voice_receive_patch_accepts_rtp_marker_payload(monkeypatch):
-    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
-    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
-    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
-        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+    fake_voice_client = _build_fake_voice_client()
+    monkeypatch.setattr(voice_receive_patch, "_resolve_voice_client_class", lambda: fake_voice_client)
+    monkeypatch.setattr(voice_receive_patch, "_resolve_raw_data_class", lambda: _FakeRawData)
+    voice_receive_patch.apply_voice_receive_patch()
 
-    apply_voice_receive_patch()
-
-    vc = _FakeVoiceClient()
+    vc = fake_voice_client()
     # second byte 0xF8 should pass bitmask check (&0x78 == 0x78)
     vc.unpack_audio(bytes([0x80, 0xF8, 0x00, 0x00]))
 
@@ -91,43 +92,38 @@ def test_voice_receive_patch_accepts_rtp_marker_payload(monkeypatch):
 
 
 def test_voice_receive_patch_ignores_non_audio_payload(monkeypatch):
-    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
-    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
-    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
-        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+    fake_voice_client = _build_fake_voice_client()
+    monkeypatch.setattr(voice_receive_patch, "_resolve_voice_client_class", lambda: fake_voice_client)
+    monkeypatch.setattr(voice_receive_patch, "_resolve_raw_data_class", lambda: _FakeRawData)
+    voice_receive_patch.apply_voice_receive_patch()
 
-    apply_voice_receive_patch()
-
-    vc = _FakeVoiceClient()
+    vc = fake_voice_client()
     vc.unpack_audio(bytes([0x80, 0x60, 0x00, 0x00]))
 
     assert len(vc.decoder.calls) == 0
 
 
 def test_voice_receive_patch_adds_rtpsize_prefix_strip_for_old_impl(monkeypatch):
-    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
-    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
-    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
-        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+    fake_voice_client = _build_fake_voice_client()
+    monkeypatch.setattr(voice_receive_patch, "_resolve_voice_client_class", lambda: fake_voice_client)
+    monkeypatch.setattr(voice_receive_patch, "_resolve_raw_data_class", lambda: _FakeRawData)
+    voice_receive_patch.apply_voice_receive_patch()
 
-    apply_voice_receive_patch()
-
-    vc = _FakeVoiceClient()
+    vc = fake_voice_client()
     out = vc._decrypt_aead_xchacha20_poly1305_rtpsize(b"h", b"12345678ABCDEFG")
 
     assert out == b"ABCDEFG"
 
 
 def test_voice_receive_patch_suppresses_decode_manager_killed_spam(monkeypatch, capsys):
-    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
-    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
-    monkeypatch.setattr("discord.opus.DecodeManager", _FakeDecodeManager)
-    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
-        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+    fake_voice_client = _build_fake_voice_client()
+    monkeypatch.setattr(voice_receive_patch, "_resolve_voice_client_class", lambda: fake_voice_client)
+    monkeypatch.setattr(voice_receive_patch, "_resolve_raw_data_class", lambda: _FakeRawData)
+    monkeypatch.setattr(voice_receive_patch.discord.opus, "DecodeManager", _FakeDecodeManager, raising=False)
     if hasattr(_FakeDecodeManager, "_yomiage_stop_patch_applied"):
         delattr(_FakeDecodeManager, "_yomiage_stop_patch_applied")
 
-    apply_voice_receive_patch()
+    voice_receive_patch.apply_voice_receive_patch()
 
     manager = _FakeDecodeManager()
     manager.stop()
@@ -140,14 +136,12 @@ def test_voice_receive_patch_suppresses_decode_manager_killed_spam(monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_voice_receive_patch_ignores_missing_ws_close_in_server_update(monkeypatch):
-    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
-    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
-    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
-        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+    fake_voice_client = _build_fake_voice_client()
+    monkeypatch.setattr(voice_receive_patch, "_resolve_voice_client_class", lambda: fake_voice_client)
+    monkeypatch.setattr(voice_receive_patch, "_resolve_raw_data_class", lambda: _FakeRawData)
+    voice_receive_patch.apply_voice_receive_patch()
 
-    apply_voice_receive_patch()
-
-    vc = _FakeVoiceClient()
+    vc = fake_voice_client()
     vc._handshaking = False
     vc.ws = _MissingSentinel()
 
@@ -156,14 +150,12 @@ async def test_voice_receive_patch_ignores_missing_ws_close_in_server_update(mon
 
 @pytest.mark.asyncio
 async def test_voice_receive_patch_ignores_missing_ws_poll_event(monkeypatch):
-    monkeypatch.setattr("discord.voice_client.VoiceClient", _FakeVoiceClient)
-    monkeypatch.setattr("discord.voice_client.RawData", _FakeRawData)
-    if hasattr(_FakeVoiceClient, "_yomiage_voice_receive_patch"):
-        delattr(_FakeVoiceClient, "_yomiage_voice_receive_patch")
+    fake_voice_client = _build_fake_voice_client()
+    monkeypatch.setattr(voice_receive_patch, "_resolve_voice_client_class", lambda: fake_voice_client)
+    monkeypatch.setattr(voice_receive_patch, "_resolve_raw_data_class", lambda: _FakeRawData)
+    voice_receive_patch.apply_voice_receive_patch()
 
-    apply_voice_receive_patch()
-
-    vc = _FakeVoiceClient()
+    vc = fake_voice_client()
     vc.ws = _MissingSentinel()
 
     await vc.poll_voice_ws(True)

@@ -109,7 +109,14 @@ except Exception as e:
 
 def patch_opus_decode_manager():
     """Opusデコーダーのエラーハンドリングを強化."""
-    if getattr(discord_opus.DecodeManager, "_yomiage_patch_applied", False):
+    decode_manager_cls = getattr(discord_opus, "DecodeManager", None)
+    if decode_manager_cls is None:
+        logging.getLogger(__name__).info(
+            "DecodeManager patch skipped: discord.opus.DecodeManager is unavailable in this py-cord build."
+        )
+        return
+
+    if getattr(decode_manager_cls, "_yomiage_patch_applied", False):
         return
 
     def _describe_ssrc_context(voice_client, ssrc):
@@ -197,8 +204,8 @@ def patch_opus_decode_manager():
 
             self.client.recv_decoded_audio(data)
 
-    discord_opus.DecodeManager.run = patched_run
-    discord_opus.DecodeManager._yomiage_patch_applied = True
+    decode_manager_cls.run = patched_run
+    decode_manager_cls._yomiage_patch_applied = True
     logging.getLogger(__name__).info("Applied YomiageBot Opus decoder patch for improved stability.")
     opus_logger = logging.getLogger("discord.opus")
     opus_logger.setLevel(logging.WARNING)

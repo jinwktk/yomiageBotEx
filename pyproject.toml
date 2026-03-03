@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "Discord読み上げボット（Python版）"
 requires-python = ">=3.10"
 dependencies = [
-    "py-cord[voice] @ git+https://github.com/Pycord-Development/pycord",
+    "py-cord[voice] @ git+https://github.com/Pycord-Development/pycord@refs/pull/2873/head",
     "python-dotenv>=1.0.0",
     "PyYAML>=6.0",
     "aiofiles>=23.0.0",

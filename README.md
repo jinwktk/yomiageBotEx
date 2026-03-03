@@ -33,6 +33,8 @@ uv sync --no-install-project
 # または、pipを使用する場合:
 # pip install -r requirements.txt           # 開発ツール込み
 # pip install -r requirements-minimal.txt   # 最小限のみ
+# DAVE検証用に py-cord を PR #2873 へ固定する場合:
+# python3 -m pip install --break-system-packages --upgrade "py-cord[voice] @ git+https://github.com/Pycord-Development/pycord@refs/pull/2873/head"
 ```
 
 ### 4. 設定
@@ -282,7 +284,8 @@ Could not find Opus library. Make sure it is installed.
 ### ボイス接続で `ConnectionClosed ... 4017` が出る
 - 2026-03-02 以降、Discord 公式ステータスで「非Stageボイスチャンネルは DAVE 対応必須」のアナウンスが出ています。
 - 本Botは 4017 を検知すると、`logs/yomiage.log` に「DAVE 必須の可能性」を明示し、同一ギルドの再接続を一定時間クールダウンして無限リトライを防ぎます。
-- 現行は `py-cord` の GitHub版（`git+https://github.com/Pycord-Development/pycord`）を利用していますが、4017 が継続する場合は upstream 側の DAVE 対応進捗依存です（Stage チャンネルでは発生しない場合があります）。
+- 現行依存は `py-cord` PR #2873（`git+https://github.com/Pycord-Development/pycord@refs/pull/2873/head`）を利用しています。
+- このPR時点では「DAVEの送信」は対応していますが、「DAVEの受信（録音）」は未対応です。DAVE必須サーバーでは接続できても `/replay` が安定しない可能性があります。
 - `MessageReader` 側もクールダウン状態を参照し、クールダウン中は再接続を試みないため、メッセージ受信のたびに接続処理が連打される挙動を抑制しています。
 - `voice` 設定の `enhanced_voice_fallback_enabled` はデフォルト `false` です。`connect_voice_safely` 失敗時に `EnhancedVoiceClient` へ多重フォールバックして状態が悪化するケースを防ぐため、必要時のみ有効化してください。
 - `channel.connect()` は `reconnect=False` で実行し、ライブラリ内部の多重ハンドシェイクリトライ（出入り増幅）を抑止しています。

@@ -566,3 +566,24 @@
   - `cogs/message_reader.py`
   - `README.md`
   - `AGENTS.md`
+
+## 2026-03-03（DAVE対応PR #2873 再導入とpy-cord新API互換化）
+- ユーザー提示情報（DiscordのDAVE必須化と `py-cord` PR #2873）に合わせ、実機で `python3 -m pip install --break-system-packages --upgrade "py-cord[voice] @ git+https://github.com/Pycord-Development/pycord.git@refs/pull/2873/head"` を実行し、`py-cord 2.7.1.dev145+g8ee5aec2e` / `davey 0.1.4` を確認。
+- 新APIでは `discord.voice_client` が存在しないため、既存テスト `tests/test_voice_receive_patch.py` が全落ちすることを確認（6件失敗）。
+- `utils/voice_receive_patch.py` の新旧互換ロジック（`_resolve_voice_client_class` / `_resolve_raw_data_class`）を前提に、テストを `discord.voice_client` 固定モックから「内部解決関数のモック」方式へ変更し、旧/新どちらのpy-cordでも成立するよう修正。
+- `utils/real_audio_recorder.py` の `RealEnhancedVoiceClient` 基底クラス解決を `VOICE_CLIENT_BASE` 経由にして、`discord.VoiceClient` が関数化された新APIでもimport時クラッシュしないよう維持。
+- `bot.py` の `patch_opus_decode_manager` で `discord.opus.DecodeManager` 不在時はスキップするガードを維持し、新API環境での起動互換性を確保。
+- 依存固定として `pyproject.toml` の `py-cord[voice]` を `@refs/pull/2873/head` へ更新。
+- `README.md` を更新し、4017/DAVE節に「PR #2873利用中」「送信対応・受信未対応（録音不安定の可能性）」を明記。
+- 実行コマンド:
+  - `python3 -m pytest -q tests/test_voice_receive_patch.py`（修正前6件失敗→修正後6件成功）
+  - `python3 -m pytest -q`（90件すべて成功）
+  - `timeout 25s python3 bot.py`（実起動スモーク、ログインとコグ初期化成功を確認）
+- 変更ファイル:
+  - `bot.py`
+  - `utils/real_audio_recorder.py`
+  - `utils/voice_receive_patch.py`
+  - `tests/test_voice_receive_patch.py`
+  - `pyproject.toml`
+  - `README.md`
+  - `AGENTS.md`

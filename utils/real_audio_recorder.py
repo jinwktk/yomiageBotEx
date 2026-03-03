@@ -31,6 +31,32 @@ except Exception:  # pragma: no cover - optional integration
 logger = logging.getLogger(__name__)
 
 
+def _resolve_voice_client_base():
+    """py-cord のバージョン差分を吸収して VoiceClient 基底クラスを解決"""
+    if not PYCORD_AVAILABLE:
+        return object
+
+    candidate = getattr(discord, "VoiceClient", None)
+    if isinstance(candidate, type):
+        return candidate
+
+    voice_module = getattr(discord, "voice", None)
+    module_candidate = getattr(voice_module, "VoiceClient", None) if voice_module else None
+    if isinstance(module_candidate, type):
+        return module_candidate
+
+    try:
+        from discord.voice.client import VoiceClient as imported_voice_client  # type: ignore
+
+        return imported_voice_client
+    except Exception:
+        logger.warning("RealTimeRecorder: Could not resolve VoiceClient base class, falling back to object")
+        return object
+
+
+VOICE_CLIENT_BASE = _resolve_voice_client_base()
+
+
 class RealTimeAudioRecorder:
     """リアルタイム音声録音管理クラス（bot_simple.py統合版）"""
     
@@ -1451,7 +1477,7 @@ class RealTimeAudioRecorder:
         self.guild_user_buffers.clear()
 
 
-class RealEnhancedVoiceClient(discord.VoiceClient):
+class RealEnhancedVoiceClient(VOICE_CLIENT_BASE):
     """py-cord の WaveSink を使用したリアル音声録音クライアント"""
     
     def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
