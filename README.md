@@ -279,7 +279,7 @@ Could not find Opus library. Make sure it is installed.
 ### ボイス接続で `ConnectionClosed ... 4017` が出る
 - 2026-03-02 以降、Discord 公式ステータスで「非Stageボイスチャンネルは DAVE 対応必須」のアナウンスが出ています。
 - 本Botは 4017 を検知すると、`logs/yomiage.log` に「DAVE 必須の可能性」を明示し、同一ギルドの再接続を一定時間クールダウンして無限リトライを防ぎます。
-- 現行 `py-cord==2.7.1` は DAVE を完備していないため、根本的には DAVE 対応版ライブラリ待ちです（Stage チャンネルでは発生しない場合があります）。
+- 現行は `py-cord` の GitHub版（`git+https://github.com/Pycord-Development/pycord`）を利用していますが、4017 が継続する場合は upstream 側の DAVE 対応進捗依存です（Stage チャンネルでは発生しない場合があります）。
 
 ## 📄 ライセンス
 

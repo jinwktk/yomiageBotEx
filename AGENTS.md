@@ -484,3 +484,16 @@
   - `bot.py`
   - `README.md`
   - `AGENTS.md`
+
+## 2026-03-03（py-cord を GitHub 版へ切り替え）
+- ユーザー要望 `py -3 -m pip install git+https://github.com/Pycord-Development/pycord` に合わせ、実機で `python3 -m pip install --break-system-packages --upgrade "py-cord[voice] @ git+https://github.com/Pycord-Development/pycord"` を実行。
+- インストール結果として `py-cord 2.7.1.dev71+g25a1aeed0` へ切り替わったことを確認。
+- 環境依存を固定するため、`pyproject.toml` の依存を `py-cord[voice] @ git+https://github.com/Pycord-Development/pycord` に更新。
+- README の 4017 トラブルシュート表記を、`2.7.1` 固定記述から GitHub版利用前提へ更新。
+- 実行コマンド:
+  - `python3 -m pip install --break-system-packages --upgrade "py-cord[voice] @ git+https://github.com/Pycord-Development/pycord"`
+  - `python3 - <<'PY' ... import discord; print(discord.__version__) ... PY`（`2.7.1.dev71+g25a1aeed0`）
+- 変更ファイル:
+  - `pyproject.toml`
+  - `README.md`
+  - `AGENTS.md`
