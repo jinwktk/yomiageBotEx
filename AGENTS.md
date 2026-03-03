@@ -457,3 +457,30 @@
   - `config.yaml`
   - `README.md`
   - `AGENTS.md`
+
+## 2026-03-03（4017切断でBOTがVC参加できない問題の深掘りと防御実装）
+- ユーザー提示ログ（`discord.errors.ConnectionClosed ... 4017`）を起点に `logs/yomiage.log` を再分析し、`Voice handshake complete` 直後にWSが4017で閉じるパターンを確認。
+- 外部一次情報を確認し、2026-03-02付のDiscord公式ステータス告知と整合する「非Stage VCでDAVE未対応クライアントが拒否される」事象の可能性が高いと判断。
+- ライブラリ更新検証として `py-cord` の DAVE 対応PRブランチ（`refs/pull/2873/head`）を実機導入して試験したが、配布物にマージコンフリクト痕（`discord/utils.py`）が残っており即クラッシュするため採用不可と判断。`py-cord==2.7.1` へロールバック。
+- TDDとして `tests/test_voice_gateway_errors.py` を新規作成し、Voice close code 抽出ロジックと4017判定ロジックを先に失敗で固定してから実装。
+- `utils/voice_gateway_errors.py` を新規追加し、例外チェーン/メッセージ/WS属性から close code を抽出する `extract_voice_close_code` と 4017判定 `is_dave_required_close_code` を実装。
+- `bot.py` を修正:
+  - `VoiceGatewayRejectedError` を追加。
+  - 4017検知時に「DAVE必須の可能性」をログへ明示。
+  - ギルド単位クールダウン（既定180秒）で接続ループを抑止。
+  - `connect_voice_safely` / `connect_to_voice` で4017時は無意味なフォールバック接続を避けて早期終了。
+  - 安定性検証時に `vc.ws` の close code / reason を追加ログ出力。
+  - 起動時に `py-cord` バージョンと `davey` 導入有無をログ出力。
+- `README.md` に4017のトラブルシュート項目を追加し、DAVE要件・クールダウン挙動・現行ライブラリ制約を明記。
+- 実行コマンド:
+  - `python3 -m pip install --break-system-packages --upgrade "py-cord[voice] @ git+https://github.com/Pycord-Development/pycord.git@refs/pull/2873/head"`（検証、採用不可）
+  - `python3 -m pip install --break-system-packages --upgrade "py-cord[voice]==2.7.1"`（ロールバック）
+  - `python3 -m pytest -q tests/test_voice_gateway_errors.py`
+  - `python3 -m pytest -q tests/test_voice_gateway_errors.py tests/test_voice_auto_join.py tests/test_voice_receive_patch.py`
+  - `python3 -m pytest -q`（87件すべて成功）
+- 変更ファイル:
+  - `utils/voice_gateway_errors.py`（新規）
+  - `tests/test_voice_gateway_errors.py`（新規）
+  - `bot.py`
+  - `README.md`
+  - `AGENTS.md`

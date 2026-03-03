@@ -7,6 +7,7 @@ import os
 import sys
 import asyncio
 import logging
+import importlib.util
 from pathlib import Path
 import signal
 import time
@@ -27,6 +28,10 @@ from utils.logger import setup_logging, start_log_cleanup_task
 from utils.hot_reload import HotReloadManager
 from utils.dictionary import DictionaryManager
 from utils.voice_receive_patch import apply_voice_receive_patch
+from utils.voice_gateway_errors import (
+    extract_voice_close_code,
+    is_dave_required_close_code,
+)
     
 # プロセス重複防止機能（CLAUDE.mdルール遵守）
 LOCK_FILE = "bot.lock"
@@ -271,6 +276,14 @@ def load_config():
 config = load_config()
 logger = setup_logging(config)
 
+
+class VoiceGatewayRejectedError(RuntimeError):
+    """Voice gateway rejected the connection with a non-recoverable close code."""
+
+    def __init__(self, close_code: int | None, message: str):
+        super().__init__(message)
+        self.close_code = close_code
+
 class YomiageBot(discord.Bot):
     """読み上げボットのメインクラス"""
     
@@ -294,8 +307,50 @@ class YomiageBot(discord.Bot):
         self._hot_reload_interval = float(hot_reload_config.get("poll_interval", 1.0))
         self.hot_reload_manager: Optional[HotReloadManager] = HotReloadManager() if self._hot_reload_enabled else None
         self._hot_reload_task: Optional[asyncio.Task] = None
+        voice_config = self.config.get("voice", {})
+        if not isinstance(voice_config, dict):
+            voice_config = {}
+        self._voice_gateway_block_seconds = float(
+            voice_config.get("gateway_close_code_4017_cooldown_seconds", 180.0)
+        )
+        self._voice_gateway_blocked_until: dict[int, float] = {}
+        self._voice_gateway_block_reasons: dict[int, str] = {}
+
+        davey_available = importlib.util.find_spec("davey") is not None
+        logger.info(
+            "Voice stack info: py-cord=%s davey_installed=%s",
+            discord.__version__,
+            davey_available,
+        )
 
         self.setup_cogs()
+
+    def _mark_voice_gateway_blocked(self, guild_id: int, close_code: int | None) -> None:
+        blocked_until = time.monotonic() + self._voice_gateway_block_seconds
+        self._voice_gateway_blocked_until[guild_id] = blocked_until
+        reason = (
+            "Discord voice gateway close code 4017 detected. "
+            "Non-Stage voice channels may require DAVE support."
+        )
+        if close_code is not None:
+            reason = f"{reason} close_code={close_code}"
+        self._voice_gateway_block_reasons[guild_id] = reason
+        logger.error(
+            "Voice connect blocked temporarily for guild=%s for %.0fs: %s",
+            guild_id,
+            self._voice_gateway_block_seconds,
+            reason,
+        )
+
+    def _get_voice_gateway_block_status(self, guild_id: int) -> tuple[bool, float, str]:
+        blocked_until = self._voice_gateway_blocked_until.get(guild_id, 0.0)
+        remaining = blocked_until - time.monotonic()
+        if remaining <= 0:
+            self._voice_gateway_blocked_until.pop(guild_id, None)
+            self._voice_gateway_block_reasons.pop(guild_id, None)
+            return False, 0.0, ""
+        reason = self._voice_gateway_block_reasons.get(guild_id, "")
+        return True, remaining, reason
 
     async def _refresh_resources(self):
         """長時間稼働によるリソース劣化をリフレッシュ"""
@@ -369,6 +424,12 @@ class YomiageBot(discord.Bot):
     async def connect_voice_safely(self, channel):
         """安全な音声接続（WebSocketエラー対応強化版）"""
         max_retries = 3
+        blocked, remaining, reason = self._get_voice_gateway_block_status(channel.guild.id)
+        if blocked:
+            raise RuntimeError(
+                f"Voice connect cooldown active for guild={channel.guild.id} "
+                f"({remaining:.1f}s remaining). {reason}"
+            )
         
         if await self._cleanup_existing_connection(channel):
             await asyncio.sleep(2.0)
@@ -385,9 +446,37 @@ class YomiageBot(discord.Bot):
                     if vc:
                         await self._disconnect_safely(vc)
                     raise Exception("Connection not stable")
+            except VoiceGatewayRejectedError as blocked_error:
+                logger.error(
+                    "Voice connection rejected by gateway for guild=%s channel=%s close_code=%s: %s",
+                    channel.guild.id,
+                    channel.name,
+                    blocked_error.close_code,
+                    blocked_error,
+                )
+                self._mark_voice_gateway_blocked(channel.guild.id, blocked_error.close_code)
+                try:
+                    await self._cleanup_existing_connection(channel)
+                except Exception as cleanup_error:
+                    logger.debug(f"Post-rejection cleanup failed: {cleanup_error}")
+                raise
                     
             except Exception as e:
                 logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
+                close_code = extract_voice_close_code(e)
+                if is_dave_required_close_code(close_code):
+                    self._mark_voice_gateway_blocked(channel.guild.id, close_code)
+                    try:
+                        await self._cleanup_existing_connection(channel)
+                    except Exception as cleanup_error:
+                        logger.debug(f"Post-rejection cleanup failed: {cleanup_error}")
+                    raise VoiceGatewayRejectedError(
+                        close_code,
+                        (
+                            "Voice gateway returned close code 4017. "
+                            "Discord voice now requires DAVE support for non-Stage channels."
+                        ),
+                    ) from e
                 # 失敗した接続ハンドルが残ると次回試行が "Already connected" で潰れるため毎回掃除
                 try:
                     await self._cleanup_existing_connection(channel)
@@ -438,11 +527,37 @@ class YomiageBot(discord.Bot):
             
         if hasattr(vc, 'ws') and vc.ws and hasattr(vc.ws, 'open'):
             if not vc.ws.open:
+                close_code, close_reason = self._get_voice_ws_close_details(vc)
+                logger.warning(
+                    "Voice websocket not open during stability check: guild=%s channel=%s close_code=%s reason=%s",
+                    channel.guild.id,
+                    channel.name,
+                    close_code,
+                    close_reason,
+                )
+                if is_dave_required_close_code(close_code):
+                    raise VoiceGatewayRejectedError(
+                        close_code,
+                        "Voice gateway closed with 4017 before session setup completed",
+                    )
                 logger.warning("WebSocket not open")
                 await asyncio.sleep(1.0)
                 if not (hasattr(vc.ws, 'open') and vc.ws.open):
                     return False
         return vc.is_connected()
+
+    @staticmethod
+    def _get_voice_ws_close_details(vc):
+        ws = getattr(vc, "ws", None)
+        if ws is None:
+            return None, None
+        close_code = getattr(ws, "_close_code", None)
+        close_reason = None
+        raw_ws = getattr(ws, "ws", None)
+        if raw_ws is not None:
+            close_code = getattr(raw_ws, "close_code", close_code)
+            close_reason = getattr(raw_ws, "close_reason", None)
+        return close_code, close_reason
 
     def _should_listen_to_channel_audio(self) -> bool:
         """録音機能のためにチャンネル音声を受信する必要があるか"""
@@ -750,7 +865,22 @@ class YomiageBot(discord.Bot):
         # 安全な接続を試行
         try:
             return await self.connect_voice_safely(channel)
+        except VoiceGatewayRejectedError as e:
+            logger.error(
+                "Safe voice connection aborted for channel=%s due to gateway close code=%s: %s",
+                channel.name,
+                e.close_code,
+                e,
+            )
+            raise
         except Exception as e:
+            close_code = extract_voice_close_code(e)
+            if is_dave_required_close_code(close_code):
+                logger.error(
+                    "Safe voice connection failed with gateway close code=%s. Skip fallback connect.",
+                    close_code,
+                )
+                raise
             logger.error(f"Safe connection failed, trying EnhancedVoiceClient: {e}")
             # フォールバック：EnhancedVoiceClientを使用
             try:

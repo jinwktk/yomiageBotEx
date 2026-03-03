@@ -106,6 +106,7 @@ scripts\start.bat
 - Botが既にVC接続中の場合、別VCへのユーザー参加イベントでは自動移動せず現在の接続先を維持
 - ユーザーの参加・退出時の挨拶音声再生
 - 音声接続が不安定（ハンドシェイク失敗・重複接続エラー）な場合は stale VC を掃除して再試行し、未接続クライアントを「参加成功」と誤判定しない
+- Voice Gateway close code `4017` を検知した場合は DAVE 必須環境の可能性をログに明示し、一定時間の再試行クールダウンで接続ループを抑制
 
 ### チャット読み上げ機能
 - リアルタイムでチャットメッセージを音声で読み上げ
@@ -274,6 +275,11 @@ Could not find Opus library. Make sure it is installed.
 - さらに同条件で `RealTimeRecorder: Voice diagnostics (...)` が出力されるため、`voice_client_recording`、`voice_mode`、`members[].voice.self_mute/self_deaf`、`ssrc_map_size` を確認すると原因切り分けがしやすくなります。
 - 上記診断には `ssrc_user_ids` と `target_user_in_ssrc_map` も含まれるため、特定ユーザーの受信マッピング有無も確認できます。
 - Discord側で `aead_xchacha20_poly1305_rtpsize` が選択される環境では、古い py-cord 実装との差分で受信品質が落ちる場合があります。最新版では受信互換パッチを適用してパケット判定と復号処理を補正しています。
+
+### ボイス接続で `ConnectionClosed ... 4017` が出る
+- 2026-03-02 以降、Discord 公式ステータスで「非Stageボイスチャンネルは DAVE 対応必須」のアナウンスが出ています。
+- 本Botは 4017 を検知すると、`logs/yomiage.log` に「DAVE 必須の可能性」を明示し、同一ギルドの再接続を一定時間クールダウンして無限リトライを防ぎます。
+- 現行 `py-cord==2.7.1` は DAVE を完備していないため、根本的には DAVE 対応版ライブラリ待ちです（Stage チャンネルでは発生しない場合があります）。
 
 ## 📄 ライセンス
 
