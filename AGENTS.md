@@ -407,6 +407,33 @@
   - `README.md`
   - `AGENTS.md`
 
+## 2026-03-03（BOTがVC参加できない問題の修正）
+- ユーザー報告「BOTが参加しなくなった」を調査。`logs/yomiage.log` にて起動時自動参加で以下を確認:
+  - `discord.voice_client` がハンドシェイク後に `ConnectionClosed ... code 4017` で連続失敗。
+  - その後 `Already connected to a voice channel.` が発生し、未接続の stale クライアントが残留。
+  - 最終的に `Successfully auto-joined` ログが出るが、直後に `Voice connection not stable after 3s` で実参加できていない状態。
+- TDDとして `tests/test_voice_auto_join.py` を拡張:
+  - 不安定接続（`is_connected=False`）時は `notify_bot_joined_channel` を呼ばない。
+  - 起動時自動参加でも接続検証に失敗した場合は成功扱いしない。
+- 実装修正:
+  - `cogs/voice.py`
+    - `connect_to_voice` 後に `guild.voice_client` の接続状態と接続先チャンネルを再検証。
+    - 不安定なら成功ログ/通知を行わず再試行継続（または中断）。
+  - `bot.py`
+    - `connect_voice_safely` で各失敗後に毎回 `_cleanup_existing_connection` を実行し、`Already connected` ループを抑止。
+    - `_disconnect_safely` で `guild._voice_client` も明示リセット。
+    - `connect_to_voice` 最終フォールバックの「重複接続時に既存クライアント返却」を厳格化し、`is_connected` かつ実チャンネル参加確認できる場合のみ再利用。未安定なら stale を掃除して例外を返す。
+- 実行コマンド:
+  - `python3 -m pytest tests/test_voice_auto_join.py -q`
+  - `python3 -m pytest tests/test_voice_auto_join.py tests/test_replay_user_retry.py tests/test_real_audio_recorder_continuous_prune.py -q`
+  - `python3 -m pytest -q`（83件すべて成功）
+- 変更ファイル:
+  - `cogs/voice.py`
+  - `bot.py`
+  - `tests/test_voice_auto_join.py`
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-02-25（/replay 長時間無音後の自己復旧改善）
 - 報告ログ（`@The Arukkadion の過去30.0秒間の音声データが見つかりません（最後の記録は 4216.1 秒前）`）を前提に、`RealTimeAudioRecorder` の自動復旧条件を再調整。
 - 従来は「直近の非空音声が古い」状態だと復旧を完全スキップしていたため、長時間 `sink.audio_data keys: []` が続くと復旧機会がなくなる問題があった。

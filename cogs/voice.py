@@ -244,6 +244,20 @@ class VoiceCog(commands.Cog):
                         
                         # カスタムVoiceClientで接続
                         await self.bot.connect_to_voice(channel)
+                        connected_client = guild.voice_client
+                        if (
+                            not connected_client
+                            or not connected_client.is_connected()
+                            or connected_client.channel != channel
+                        ):
+                            self.logger.warning(
+                                "Auto-join verification failed for %s in %s (connected=%s, channel=%s)",
+                                channel.name,
+                                guild.name,
+                                bool(connected_client and connected_client.is_connected()),
+                                getattr(getattr(connected_client, "channel", None), "name", None),
+                            )
+                            continue
                         self.logger.info(f"Successfully auto-joined on startup: {channel.name} in {guild.name}")
                         
                         # 他のCogに参加を通知（起動時フラグを設定）
@@ -340,6 +354,20 @@ class VoiceCog(commands.Cog):
             
             try:
                 await self.bot.connect_to_voice(channel)
+                connected_client = guild.voice_client
+                if (
+                    not connected_client
+                    or not connected_client.is_connected()
+                    or connected_client.channel != channel
+                ):
+                    self.logger.warning(
+                        "Auto-join verification failed for %s in %s (connected=%s, channel=%s)",
+                        channel.name,
+                        guild.name,
+                        bool(connected_client and connected_client.is_connected()),
+                        getattr(getattr(connected_client, "channel", None), "name", None),
+                    )
+                    return
                 self.logger.info(f"Auto-joined voice channel: {channel.name} in {guild.name}")
                 self.save_sessions()
                 # 接続後に他のCogに通知

@@ -388,6 +388,11 @@ class YomiageBot(discord.Bot):
                     
             except Exception as e:
                 logger.error(f"Voice connection attempt {attempt + 1} failed: {e}")
+                # 失敗した接続ハンドルが残ると次回試行が "Already connected" で潰れるため毎回掃除
+                try:
+                    await self._cleanup_existing_connection(channel)
+                except Exception as cleanup_error:
+                    logger.debug(f"Post-failure cleanup failed: {cleanup_error}")
                 
                 if attempt < max_retries - 1:
                     retry_delay = 3.0 * (attempt + 1)
@@ -462,6 +467,13 @@ class YomiageBot(discord.Bot):
             await vc.disconnect()
         except Exception:
             pass
+        finally:
+            try:
+                guild = getattr(vc, "guild", None)
+                if guild is not None:
+                    guild._voice_client = None
+            except Exception:
+                pass
         
     def load_extension(self, name: str, *, package: Optional[str] = None):
         super().load_extension(name, package=package)
@@ -745,10 +757,31 @@ class YomiageBot(discord.Bot):
                 return await channel.connect(cls=EnhancedVoiceClient)
             except discord.errors.ClientException as client_error:
                 if "Already connected" in str(client_error):
-                    # 最終的に重複接続エラーが発生した場合は既存の接続を返す
-                    logger.warning("Final connection attempt failed due to duplicate connection, returning existing client")
-                    if channel.guild.voice_client:
-                        return channel.guild.voice_client
+                    # 重複接続エラー時でも、実接続が安定している場合のみ再利用する
+                    existing = channel.guild.voice_client
+                    if (
+                        existing
+                        and existing.is_connected()
+                        and getattr(existing, "channel", None) == channel
+                        and any(member.id == channel.guild.me.id for member in channel.members)
+                    ):
+                        logger.warning(
+                            "Final connection attempt failed due to duplicate connection, reusing stable existing client"
+                        )
+                        return existing
+                    logger.error(
+                        "Duplicate connection error but no stable client in target channel. Cleaning up stale voice client."
+                    )
+                    try:
+                        if existing:
+                            await existing.disconnect(force=True)
+                    except Exception as cleanup_error:
+                        logger.warning(f"Failed to cleanup stale voice client after duplicate error: {cleanup_error}")
+                    finally:
+                        try:
+                            channel.guild._voice_client = None
+                        except Exception:
+                            pass
                 raise client_error
     
 bot = YomiageBot()

@@ -22,14 +22,19 @@ class DummyVoiceClient:
 async def test_handle_user_join_reconnects_when_voice_client_is_disconnected(monkeypatch):
     cog = VoiceCog.__new__(VoiceCog)
     cog.config = {"bot": {"auto_join": True}}
-    connect_mock = AsyncMock()
-    cog.bot = SimpleNamespace(connect_to_voice=connect_mock, get_cog=lambda name: None)
     cog.logger = logging.getLogger("test.voice")
     cog.notify_bot_joined_channel = AsyncMock()
     cog.save_sessions = lambda: None
 
     channel = SimpleNamespace(name="おもちだいすきクラブ", members=[])
     guild = SimpleNamespace(name="Valworld", id=111, voice_client=DummyVoiceClient(channel, connected=False))
+
+    async def fake_connect_to_voice(_channel):
+        guild.voice_client = DummyVoiceClient(channel, connected=True)
+        return guild.voice_client
+
+    connect_mock = AsyncMock(side_effect=fake_connect_to_voice)
+    cog.bot = SimpleNamespace(connect_to_voice=connect_mock, get_cog=lambda name: None)
 
     await VoiceCog.handle_user_join(cog, guild, channel)
 
@@ -56,4 +61,50 @@ async def test_handle_user_join_does_not_move_when_already_connected_to_other_ch
 
     voice_client.move_to.assert_not_awaited()
     connect_mock.assert_not_awaited()
+    cog.notify_bot_joined_channel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handle_user_join_skips_notify_when_connection_is_unstable():
+    cog = VoiceCog.__new__(VoiceCog)
+    cog.config = {"bot": {"auto_join": True}}
+    cog.logger = logging.getLogger("test.voice")
+    cog.notify_bot_joined_channel = AsyncMock()
+    cog.save_sessions = lambda: None
+
+    channel = SimpleNamespace(name="おもちだいすきクラブ", members=[])
+    guild = SimpleNamespace(name="Valworld", id=111, voice_client=DummyVoiceClient(channel, connected=False))
+
+    async def fake_connect_to_voice(_channel):
+        guild.voice_client = DummyVoiceClient(channel, connected=False)
+        return guild.voice_client
+
+    cog.bot = SimpleNamespace(connect_to_voice=AsyncMock(side_effect=fake_connect_to_voice), get_cog=lambda name: None)
+
+    await VoiceCog.handle_user_join(cog, guild, channel)
+
+    cog.notify_bot_joined_channel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_startup_auto_join_does_not_report_success_when_connection_is_unstable():
+    cog = VoiceCog.__new__(VoiceCog)
+    cog.config = {"bot": {"auto_join": True}}
+    cog.logger = logging.getLogger("test.voice")
+    cog.notify_bot_joined_channel = AsyncMock()
+    cog.save_sessions = lambda: None
+
+    member = SimpleNamespace(display_name="Nymeia", bot=False)
+    channel = SimpleNamespace(name="おもちだいすきクラブ", members=[member], id=10)
+    guild = SimpleNamespace(name="Valworld", id=111, voice_client=None, voice_channels=[channel], members=[member])
+    channel.guild = guild
+
+    async def fake_connect_to_voice(_channel):
+        guild.voice_client = DummyVoiceClient(channel, connected=False)
+        return guild.voice_client
+
+    cog.bot = SimpleNamespace(connect_to_voice=AsyncMock(side_effect=fake_connect_to_voice))
+
+    await VoiceCog._check_guild_for_auto_join(cog, guild)
+
     cog.notify_bot_joined_channel.assert_not_awaited()
