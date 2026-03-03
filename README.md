@@ -285,6 +285,7 @@ Could not find Opus library. Make sure it is installed.
 - 現行は `py-cord` の GitHub版（`git+https://github.com/Pycord-Development/pycord`）を利用していますが、4017 が継続する場合は upstream 側の DAVE 対応進捗依存です（Stage チャンネルでは発生しない場合があります）。
 - `MessageReader` 側もクールダウン状態を参照し、クールダウン中は再接続を試みないため、メッセージ受信のたびに接続処理が連打される挙動を抑制しています。
 - `voice` 設定の `enhanced_voice_fallback_enabled` はデフォルト `false` です。`connect_voice_safely` 失敗時に `EnhancedVoiceClient` へ多重フォールバックして状態が悪化するケースを防ぐため、必要時のみ有効化してください。
+- `channel.connect()` は `reconnect=False` で実行し、ライブラリ内部の多重ハンドシェイクリトライ（出入り増幅）を抑止しています。
 
 ### `'_MissingSentinel' object has no attribute 'close/poll_event'` が出る
 - 一部の `py-cord` 開発版で、接続失敗後の `VoiceClient` 内部状態が sentinel のまま参照されるケースがあります。

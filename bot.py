@@ -8,6 +8,7 @@ import sys
 import asyncio
 import logging
 import importlib.util
+import subprocess
 from pathlib import Path
 import signal
 import time
@@ -50,7 +51,6 @@ def is_process_running(pid):
     try:
         # Windows
         if sys.platform == "win32":
-            import subprocess
             result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], 
                                   capture_output=True, text=True)
             return str(pid) in result.stdout
@@ -514,7 +514,10 @@ class YomiageBot(discord.Bot):
             
         try:
             logger.info(f"Disconnecting existing voice client from {channel.guild.voice_client.channel.name if channel.guild.voice_client.channel else 'unknown'}")
-            await channel.guild.voice_client.disconnect()
+            try:
+                await channel.guild.voice_client.disconnect(force=True)
+            except TypeError:
+                await channel.guild.voice_client.disconnect()
             logger.info("Existing voice client disconnected successfully")
         except Exception as e:
             logger.warning(f"Failed to disconnect existing voice client: {e}")
@@ -528,7 +531,8 @@ class YomiageBot(discord.Bot):
 
     async def _attempt_voice_connection(self, channel):
         """音声接続を試行"""
-        vc = await channel.connect(timeout=30.0, reconnect=True)
+        # reconnect=True だとライブラリ内部で多重再試行し、4017環境で出入りループが増幅するため無効化
+        vc = await channel.connect(timeout=30.0, reconnect=False)
         await asyncio.sleep(2.0)
         return vc
 

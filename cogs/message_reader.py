@@ -331,7 +331,7 @@ class MessageReaderCog(commands.Cog):
                 if connect_callable:
                     voice_client = await connect_callable(target_channel)
                 else:
-                    voice_client = await target_channel.connect(reconnect=True, timeout=15.0)
+                    voice_client = await target_channel.connect(reconnect=False, timeout=15.0)
 
                 await asyncio.sleep(1)  # 接続安定化待機
                 
@@ -350,7 +350,7 @@ class MessageReaderCog(commands.Cog):
                     if connect_callable:
                         voice_client = await connect_callable(target_channel)
                     else:
-                        voice_client = await target_channel.connect(reconnect=True, timeout=15.0)
+                        voice_client = await target_channel.connect(reconnect=False, timeout=15.0)
                     await asyncio.sleep(1)
                     if voice_client and voice_client.is_connected():
                         self.logger.info(f"MessageReader: Auto-reconnect successful to {target_channel.name} after retry")

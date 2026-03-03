@@ -547,3 +547,22 @@
   - `README.md`
   - `AGENTS.md`
   - `bot.lock`（削除）
+
+## 2026-03-03（実起動テストで出入り再発を再現し、接続リトライを抑制）
+- ユーザー要望に合わせて `timeout` 付きで `python3 bot.py` を実際に起動し、ログベースではなく実ランタイムで挙動を確認。
+- 再発時ログで、`connect_voice_safely` 以前に `discord.voice_client` 内部リトライ（`connection attempt 1..5`）が走り、4017時の出入りが増幅していることを確認。
+- `bot.py` の `_attempt_voice_connection` を `channel.connect(..., reconnect=False)` に変更し、内部多重再試行を無効化。
+- `cogs/message_reader.py` のフォールバック直結接続も `reconnect=False` へ揃えて連打リスクを低減。
+- `bot.py` の `is_process_running` で `subprocess` を関数内 import していたため例外節で `subprocess.SubprocessError` 参照時に不整合が起きる問題を修正（モジュール先頭で import）。
+- `_cleanup_existing_connection` は `disconnect(force=True)` を優先し、古い接続ハンドルの残留を減らすよう修正（未対応実装向けにTypeErrorフォールバックあり）。
+- 実起動再テストで、4017発生時に「1回失敗でclose_code=4017検出→クールダウン」へ遷移し、従来の5連続ハンドシェイクが抑制されることを確認。
+- 実行コマンド:
+  - `python3 -m pytest -q tests/test_message_reader_reconnect.py tests/test_voice_auto_join.py tests/test_voice_receive_patch.py`
+  - `python3 -m pytest -q`（90件成功）
+  - `timeout 90s python3 bot.py`（修正前の実起動再現）
+  - `timeout 55s python3 bot.py`（修正後の実起動確認）
+- 変更ファイル:
+  - `bot.py`
+  - `cogs/message_reader.py`
+  - `README.md`
+  - `AGENTS.md`
