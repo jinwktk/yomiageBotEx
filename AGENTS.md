@@ -567,6 +567,27 @@
   - `README.md`
   - `AGENTS.md`
 
+## 2026-03-05（読み上げ不調調査と WaveSink 受信互換修正）
+- 「読み上げされなくなっている」報告を受け、`logs/yomiage.log` を確認。
+- ログ上では `MessageReader: Played queued message` と `ffmpeg process ... return code 0` があり、読み上げ処理そのものは一部成功している一方、同時に録音開始で以下の例外が連発していることを確認:
+  - `AttributeError: 'WaveSink' object has no attribute '__sink_listeners__'`
+  - 発生箇所: `discord.voice.receive.router.SinkEventRouter._register_listeners`
+- 原因として、`py-cord` PR #2873 系の受信ルーターが `sink.__sink_listeners__` と `sink.walk_children()` を前提にする一方、既存 `discord.sinks.WaveSink` がその属性を持たないAPI差分を特定。
+- TDDとして `tests/test_real_audio_recorder_wave_sink_compat.py` を追加し、`RealTimeAudioRecorder._create_wave_sink()` が不足属性を補完する挙動を先に失敗で固定。
+- `utils/real_audio_recorder.py` を修正:
+  - `_ensure_sink_receive_compat` を追加し、Sinkに `__sink_listeners__`（空配列）と `walk_children`（空リスト返却）を補完。
+  - `start_recording` / 定期チェックポイント再開で `WaveSink()` を直接生成せず、必ず `_create_wave_sink()` を使うよう統一。
+- READMEに `WaveSink.__sink_listeners__` 例外の互換対応済みである旨を追記。
+- 実行コマンド:
+  - `python3 -m pytest -q tests/test_real_audio_recorder_wave_sink_compat.py`（修正前1件失敗→修正後2件成功）
+  - `python3 -m pytest -q tests/test_real_audio_recorder_wave_sink_compat.py tests/test_real_audio_recorder_recovery.py tests/test_real_audio_recorder_async.py`（12件成功）
+  - `python3 -m pytest -q`（92件成功）
+- 変更ファイル:
+  - `utils/real_audio_recorder.py`
+  - `tests/test_real_audio_recorder_wave_sink_compat.py`（新規）
+  - `README.md`
+  - `AGENTS.md`
+
 ## 2026-03-03（DAVE対応PR #2873 再導入とpy-cord新API互換化）
 - ユーザー提示情報（DiscordのDAVE必須化と `py-cord` PR #2873）に合わせ、実機で `python3 -m pip install --break-system-packages --upgrade "py-cord[voice] @ git+https://github.com/Pycord-Development/pycord.git@refs/pull/2873/head"` を実行し、`py-cord 2.7.1.dev145+g8ee5aec2e` / `davey 0.1.4` を確認。
 - 新APIでは `discord.voice_client` が存在しないため、既存テスト `tests/test_voice_receive_patch.py` が全落ちすることを確認（6件失敗）。

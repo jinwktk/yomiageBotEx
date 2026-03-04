@@ -118,9 +118,19 @@ class RealTimeAudioRecorder:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, voice_client.start_recording, sink, callback)
 
+    @staticmethod
+    def _ensure_sink_receive_compat(sink):
+        """py-cord 受信API差分を吸収するため、Sinkに不足属性を補う"""
+        if not hasattr(sink, "__sink_listeners__"):
+            setattr(sink, "__sink_listeners__", [])
+        if not callable(getattr(sink, "walk_children", None)):
+            setattr(sink, "walk_children", lambda: [])
+        return sink
+
     def _create_wave_sink(self):
         """録音再開に使うWaveSinkを生成"""
-        return WaveSink()
+        sink = WaveSink()
+        return self._ensure_sink_receive_compat(sink)
 
     def apply_recording_config(self, recording_config: Dict[str, Any]) -> None:
         """recording設定を反映"""
@@ -497,7 +507,7 @@ class RealTimeAudioRecorder:
                 await asyncio.sleep(0.1)  # 短時間待機
             
             # WaveSinkを使用した録音開始
-            sink = WaveSink()
+            sink = self._create_wave_sink()
             self.connections[guild_id] = voice_client
             
             # コールバック関数をラムダで包む（guild_idを渡すため、asyncで包む）
@@ -581,7 +591,7 @@ class RealTimeAudioRecorder:
                             await self._process_checkpoint_data(guild_id, old_sink.audio_data)
                         
                         # 新しいSinkで録音を再開
-                        new_sink = WaveSink()
+                        new_sink = self._create_wave_sink()
                         async def new_callback(sink_obj):
                             await self._finished_callback(sink_obj, guild_id)
                         
