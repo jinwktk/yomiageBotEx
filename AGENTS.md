@@ -608,3 +608,25 @@
   - `pyproject.toml`
   - `README.md`
   - `AGENTS.md`
+
+## 2026-03-06（録音エラー再修正: `is_recording` / `is_opus` 互換）
+- 「エラー修正してください」依頼に対し、`logs/yomiage.log` の最新障害を分析。主要な例外を確認:
+  - `AttributeError: 'VoiceClient' object has no attribute 'recording'`（`RealTimeRecorder.start_recording` ログ出力・状態判定）
+  - `AttributeError: 'WaveSink' object has no attribute 'is_opus'`（`discord.voice.receive.router` -> `PacketDecoder`）
+- 原因は `py-cord` PR #2873 系の受信API差分。`VoiceClient` の録音状態取得が `recording` 属性から `is_recording()` 系に寄っており、`WaveSink` 側も `is_opus()` が前提化されているケースを確認。
+- `utils/real_audio_recorder.py` を修正:
+  - `_is_voice_client_recording` を追加し、`is_recording()` 優先で録音状態を取得（旧 `recording` 属性へフォールバック）。
+  - `_ensure_sink_receive_compat` に `is_opus()` 補完を追加（未実装Sinkは `False` を返す）。
+  - `start_recording` / `stop_recording` / チェックポイント / 状態ログ / `finished_callback` の録音判定を上記ヘルパーへ統一。
+- `tests/test_real_audio_recorder_wave_sink_compat.py` を拡張:
+  - `is_opus()` 補完の検証を追加。
+  - 旧 `recording` 属性・新 `is_recording()` の両方で録音状態判定できるテストを追加。
+- READMEに `is_opus` 欠落エラーと `is_recording()` 互換対応を追記。
+- 実行コマンド:
+  - `python3 -m pytest -q tests/test_real_audio_recorder_wave_sink_compat.py tests/test_real_audio_recorder_async.py tests/test_real_audio_recorder_recovery.py tests/test_real_audio_recorder_state.py tests/test_real_audio_recorder_buffers.py`（20件成功）
+  - `python3 -m pytest -q`（93件成功）
+- 変更ファイル:
+  - `utils/real_audio_recorder.py`
+  - `tests/test_real_audio_recorder_wave_sink_compat.py`
+  - `README.md`
+  - `AGENTS.md`

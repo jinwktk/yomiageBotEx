@@ -281,6 +281,8 @@ Could not find Opus library. Make sure it is installed.
 - 上記診断には `ssrc_user_ids` と `target_user_in_ssrc_map` も含まれるため、特定ユーザーの受信マッピング有無も確認できます。
 - Discord側で `aead_xchacha20_poly1305_rtpsize` が選択される環境では、古い py-cord 実装との差分で受信品質が落ちる場合があります。最新版では受信互換パッチを適用してパケット判定と復号処理を補正しています。
 - `py-cord` PR #2873 系で `AttributeError: 'WaveSink' object has no attribute '__sink_listeners__'` が出る場合、Bot側で受信ルーター互換パッチを適用し、`WaveSink` に不足属性（`__sink_listeners__` / `walk_children`）を補完するよう対応済みです。
+- 同系統の `AttributeError: 'WaveSink' object has no attribute 'is_opus'` に対しても、`WaveSink` へ `is_opus()` を補完する互換処理を追加済みです。
+- `VoiceClient` の録音状態参照は `recording` 属性が無いビルドでも動作するよう、`is_recording()` 優先の互換判定へ変更しています（`'VoiceClient' object has no attribute 'recording'` 対策）。
 
 ### ボイス接続で `ConnectionClosed ... 4017` が出る
 - 2026-03-02 以降、Discord 公式ステータスで「非Stageボイスチャンネルは DAVE 対応必須」のアナウンスが出ています。

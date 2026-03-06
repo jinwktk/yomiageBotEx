@@ -119,12 +119,31 @@ class RealTimeAudioRecorder:
         await loop.run_in_executor(None, voice_client.start_recording, sink, callback)
 
     @staticmethod
+    def _is_voice_client_recording(voice_client) -> bool:
+        """py-cord 版差分を吸収して録音状態を取得"""
+        if not voice_client:
+            return False
+
+        is_recording_method = getattr(voice_client, "is_recording", None)
+        if callable(is_recording_method):
+            try:
+                return bool(is_recording_method())
+            except TypeError:
+                return bool(is_recording_method)
+            except Exception:
+                return False
+
+        return bool(getattr(voice_client, "recording", False))
+
+    @staticmethod
     def _ensure_sink_receive_compat(sink):
         """py-cord 受信API差分を吸収するため、Sinkに不足属性を補う"""
         if not hasattr(sink, "__sink_listeners__"):
             setattr(sink, "__sink_listeners__", [])
         if not callable(getattr(sink, "walk_children", None)):
             setattr(sink, "walk_children", lambda: [])
+        if not callable(getattr(sink, "is_opus", None)):
+            setattr(sink, "is_opus", lambda: False)
         return sink
 
     def _create_wave_sink(self):
@@ -198,7 +217,7 @@ class RealTimeAudioRecorder:
         snapshot.update(
             {
                 "voice_client_connected": bool(getattr(vc, "is_connected", lambda: False)()),
-                "voice_client_recording": bool(getattr(vc, "recording", False)),
+                "voice_client_recording": self._is_voice_client_recording(vc),
                 "voice_mode": getattr(vc, "mode", None),
                 "channel_id": getattr(channel, "id", None),
                 "channel_name": getattr(channel, "name", None),
@@ -486,18 +505,18 @@ class RealTimeAudioRecorder:
                 return
             
             # 既に録音中の場合は停止してから開始
-            if hasattr(voice_client, 'recording') and voice_client.recording:
+            if self._is_voice_client_recording(voice_client):
                 logger.info(f"RealTimeRecorder: Already recording for guild {guild_id}, stopping first")
                 await self._stop_recording_non_blocking(voice_client)
                 # 停止の完了を確実に待つ
                 for i in range(10):  # 最大1秒待機
                     await asyncio.sleep(0.1)
-                    if not (hasattr(voice_client, 'recording') and voice_client.recording):
+                    if not self._is_voice_client_recording(voice_client):
                         break
                     logger.debug(f"RealTimeRecorder: Waiting for recording to stop... ({i+1}/10)")
                 
                 # それでも録音中の場合はスキップ
-                if hasattr(voice_client, 'recording') and voice_client.recording:
+                if self._is_voice_client_recording(voice_client):
                     logger.warning(f"RealTimeRecorder: Could not stop existing recording for guild {guild_id}, skipping")
                     return
             
@@ -528,14 +547,17 @@ class RealTimeAudioRecorder:
             self.active_recordings[guild_id] = checkpoint_task
             logger.info(f"RealTimeRecorder: Started recording for guild {guild_id} with channel {voice_client.channel.name}")
             logger.info(f"RealTimeRecorder: Recording start time: {recording_start_time}")
-            logger.info(f"RealTimeRecorder: Voice client recording status: {voice_client.recording}")
+            logger.info(
+                "RealTimeRecorder: Voice client recording status: %s",
+                self._is_voice_client_recording(voice_client),
+            )
             
             # 録音開始のデバッグ情報
             logger.info(f"RealTimeRecorder: Recording setup complete:")
             logger.info(f"  - Guild ID: {guild_id}")
             logger.info(f"  - Channel: {voice_client.channel.name}")
             logger.info(f"  - Current members: {[m.display_name for m in voice_client.channel.members]}")
-            logger.info(f"  - Recording active: {getattr(voice_client, 'recording', False)}")
+            logger.info(f"  - Recording active: {self._is_voice_client_recording(voice_client)}")
             logger.info(f"  - Sink type: {type(sink).__name__}")
             
             # 現在のバッファ状況（簡略化）
@@ -552,7 +574,7 @@ class RealTimeAudioRecorder:
         try:
             if guild_id in self.connections:
                 vc = self.connections[guild_id]
-                if hasattr(vc, 'recording') and vc.recording:
+                if self._is_voice_client_recording(vc):
                     await self._stop_recording_non_blocking(vc)
                 del self.connections[guild_id]
                 
@@ -581,7 +603,7 @@ class RealTimeAudioRecorder:
                     break
                     
                 # チェックポイント作成（一時停止→再開）
-                if voice_client and voice_client.is_connected() and getattr(voice_client, 'recording', False):
+                if voice_client and voice_client.is_connected() and self._is_voice_client_recording(voice_client):
                     try:
                         logger.debug(f"RealTimeRecorder: Creating checkpoint for guild {guild_id}")
                         # 現在の録音を一時停止してデータを取得
@@ -796,12 +818,12 @@ class RealTimeAudioRecorder:
 
             # stop/start の競合で状態を誤って落とさないよう、実接続状態に同期
             vc = self.connections.get(guild_id)
-            self.recording_status[guild_id] = bool(vc and getattr(vc, "recording", False))
+            self.recording_status[guild_id] = self._is_voice_client_recording(vc)
                         
         except Exception as e:
             logger.error(f"RealTimeRecorder: Error in finished_callback: {e}", exc_info=True)
             vc = self.connections.get(guild_id)
-            self.recording_status[guild_id] = bool(vc and getattr(vc, "recording", False))
+            self.recording_status[guild_id] = self._is_voice_client_recording(vc)
 
 
     async def clean_old_buffers(self, guild_id: Optional[int] = None):
@@ -1169,7 +1191,7 @@ class RealTimeAudioRecorder:
         if guild_id in self.connections:
             vc = self.connections[guild_id]
             logger.info(f"  - Voice client connected: {vc.is_connected() if vc else False}")
-            logger.info(f"  - Currently recording: {getattr(vc, 'recording', False)}")
+            logger.info(f"  - Currently recording: {self._is_voice_client_recording(vc)}")
             logger.info(f"  - Channel: {vc.channel.name if vc and vc.channel else 'None'}")
         else:
             logger.info(f"  - No active connection for guild {guild_id}")
@@ -1184,7 +1206,7 @@ class RealTimeAudioRecorder:
             # 録音中にも関わらずバッファがない場合の警告
             if guild_id in self.connections:
                 vc = self.connections[guild_id]
-                if hasattr(vc, 'recording') and vc.recording:
+                if self._is_voice_client_recording(vc):
                     logger.warning(f"RealTimeRecorder: WARNING - Currently recording but no buffers exist!")
                     logger.warning(f"  - This suggests audio data is not being saved to buffers yet")
                     logger.warning(f"  - Buffers are created only when recording is stopped")
@@ -1209,7 +1231,7 @@ class RealTimeAudioRecorder:
         try:
             if guild_id in self.connections:
                 vc = self.connections[guild_id]
-                if hasattr(vc, 'recording') and vc.recording:
+                if self._is_voice_client_recording(vc):
                     logger.info(f"RealTimeRecorder: Forcing checkpoint for guild {guild_id}")
                     
                     # 現在の録音を一時停止してバッファに保存
@@ -1233,7 +1255,7 @@ class RealTimeAudioRecorder:
                 logger.info(f"RealTimeRecorder Debug: Guild {guild_id}")
                 logger.info(f"  - Voice client exists: {vc is not None}")
                 logger.info(f"  - Is connected: {vc.is_connected() if vc else False}")
-                logger.info(f"  - Is recording: {getattr(vc, 'recording', False)}")
+                logger.info(f"  - Is recording: {self._is_voice_client_recording(vc)}")
                 logger.info(f"  - Channel: {vc.channel.name if vc and vc.channel else 'None'}")
                 logger.info(f"  - Channel members: {[m.display_name for m in vc.channel.members] if vc and vc.channel else []}")
             else:
